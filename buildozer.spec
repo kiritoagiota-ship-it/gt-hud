@@ -8,7 +8,7 @@ source.exclude_dirs = .github,bin,.buildozer,__pycache__
 version = 0.1.0
 
 # sqlite3 precisa estar aqui, senao o modulo nao existe no Android
-requirements = python3,kivy,plyer,pyjnius,sqlite3
+requirements = python3,kivy,pyjnius,sqlite3
 
 orientation = portrait
 fullscreen = 0

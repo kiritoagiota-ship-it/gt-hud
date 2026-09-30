@@ -3,7 +3,7 @@
 Velocimetro GPS e registro de viagens para a Ouxi GT20.
 
 ## Testar no PC
-    pip install kivy plyer
+    pip install kivy
     python main.py
 No PC o app usa o simulador automaticamente (GPS falso rodando em Goiania).
 
@@ -18,6 +18,7 @@ No PC o app usa o simulador automaticamente (GPS falso rodando em Goiania).
 ## Estrutura
 - main.py: app, GPS e salvamento de viagens
 - gps_service.py / simulador.py: GPS real (Android) ou falso (PC)
+- gps_android.py: ouve so o satelite no Android (sem wi-fi/antena)
 - filtro.py: suavizacao da velocidade
 - viagem.py / banco.py: calculo e gravacao das viagens (SQLite)
 - ajustes.py: configuracoes (JSON)

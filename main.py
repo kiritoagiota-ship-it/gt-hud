@@ -93,7 +93,10 @@ class GTHudApp(App):
             self._avisar(None)
             return
         self.precisao = precisao
-        vel = self.filtro.atualizar(d.get("speed", 0))
+        if d.get("speed") is None:
+            vel = self.filtro.valor  # fix sem velocidade: mantém a última
+        else:
+            vel = self.filtro.atualizar(d["speed"])
         self.viagem.registrar(d["lat"], d["lon"], vel)
         self._avisar(vel)
 

@@ -1,8 +1,8 @@
 """Fonte de posição: GPS real no Android ou simulador no PC.
 
-ATENÇÃO: no Android o plyer entrega as leituras na thread de UI do Android,
-que NÃO é a thread do Kivy. Por isso tudo passa por @mainthread antes de
-chegar nas telas.
+ATENÇÃO: no Android as leituras chegam na thread de UI do Android, que NÃO
+é a thread do Kivy. Por isso tudo passa por @mainthread antes de chegar nas
+telas.
 """
 from kivy.clock import mainthread
 from kivy.utils import platform
@@ -26,10 +26,9 @@ class ServicoGPS:
             self._sim.iniciar()
             self.modo = "SIM"
         else:
-            from plyer import gps
-            self._gps = gps
-            gps.configure(on_location=self._on_location, on_status=self._on_status)
-            gps.start(minTime=1000, minDistance=0)
+            from gps_android import GPSAndroid
+            self._gps = GPSAndroid(self._on_location, self._on_status)
+            self._gps.iniciar(intervalo_ms=1000)
             self.modo = "GPS"
         self.ativo = True
 
@@ -39,7 +38,7 @@ class ServicoGPS:
             self._sim = None
         if self._gps:
             try:
-                self._gps.stop()
+                self._gps.parar()
             except Exception:
                 pass
             self._gps = None
