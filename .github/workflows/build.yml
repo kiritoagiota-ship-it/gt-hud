@@ -1,0 +1,58 @@
+name: Build APK
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Dependencias do sistema
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y git zip unzip openjdk-17-jdk autoconf automake libtool \
+            pkg-config zlib1g-dev libncurses5-dev libncursesw5-dev libtinfo5 cmake \
+            libffi-dev libssl-dev
+
+      - name: Instalar Buildozer
+        run: pip install --upgrade buildozer cython setuptools
+
+      - name: Apontar SDK e NDK 27 do runner
+        run: |
+          NDK_DIR=$(ls -d "$ANDROID_SDK_ROOT"/ndk/27.* | sort -V | tail -1)
+          echo "SDK: $ANDROID_SDK_ROOT"
+          echo "NDK: $NDK_DIR"
+          sed -i "s|^android.sdk_path.*|android.sdk_path = $ANDROID_SDK_ROOT|" buildozer.spec
+          sed -i "s|^android.ndk_path.*|android.ndk_path = $NDK_DIR|" buildozer.spec
+
+      # Mesma chave de assinatura em todo build: permite atualizar o app
+      # sem desinstalar (e sem perder as viagens salvas).
+      - name: Keystore de debug fixa
+        env:
+          KS: ${{ secrets.DEBUG_KEYSTORE_B64 }}
+        run: |
+          if [ -n "$KS" ]; then
+            mkdir -p ~/.android
+            echo "$KS" | base64 -d > ~/.android/debug.keystore
+            echo "Keystore fixa aplicada"
+          else
+            echo "Sem DEBUG_KEYSTORE_B64: usando keystore nova (vai exigir desinstalar para atualizar)"
+          fi
+
+      - name: Build
+        run: |
+          yes | buildozer -v android debug > build.log 2>&1 || (tail -n 300 build.log; exit 1)
+          tail -n 60 build.log
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: gt-hud-apk
+          path: bin/*.apk
