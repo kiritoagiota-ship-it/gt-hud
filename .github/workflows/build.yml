@@ -8,22 +8,32 @@ on:
 jobs:
   build:
     runs-on: ubuntu-22.04
+    timeout-minutes: 90
     steps:
       - uses: actions/checkout@v4
 
+      # O Gradle do python-for-android exige Java 17 (o padrao do runner e 11)
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      # Mesmas versoes do TraveteFocus, que ja geram APK sem erro
       - uses: actions/setup-python@v5
         with:
-          python-version: "3.11"
+          python-version: "3.10"
 
       - name: Dependencias do sistema
         run: |
-          sudo apt-get update
-          sudo apt-get install -y git zip unzip openjdk-17-jdk autoconf automake libtool \
+          sudo apt-get update -qq
+          sudo apt-get install -y --no-install-recommends git zip unzip autoconf automake libtool \
             pkg-config zlib1g-dev libncurses5-dev libncursesw5-dev libtinfo5 cmake \
-            libffi-dev libssl-dev
+            libffi-dev libssl-dev build-essential ccache
 
       - name: Instalar Buildozer
-        run: pip install --upgrade buildozer cython setuptools
+        run: |
+          pip install --upgrade pip wheel
+          pip install Cython==0.29.36 buildozer==1.5.0
 
       - name: Apontar SDK e NDK 27 do runner
         run: |
@@ -32,6 +42,17 @@ jobs:
           echo "NDK: $NDK_DIR"
           sed -i "s|^android.sdk_path.*|android.sdk_path = $ANDROID_SDK_ROOT|" buildozer.spec
           sed -i "s|^android.ndk_path.*|android.ndk_path = $NDK_DIR|" buildozer.spec
+          echo "ANDROID_HOME=$ANDROID_SDK_ROOT" >> $GITHUB_ENV
+          echo "ANDROID_NDK_HOME=$NDK_DIR" >> $GITHUB_ENV
+
+      # O buildozer procura o sdkmanager no caminho antigo (tools/bin);
+      # no runner ele fica em cmdline-tools/latest/bin.
+      - name: Atalho do sdkmanager e licencas do SDK
+        run: |
+          mkdir -p "$ANDROID_SDK_ROOT/tools/bin"
+          ln -sf "$ANDROID_SDK_ROOT/cmdline-tools/latest/bin/sdkmanager" "$ANDROID_SDK_ROOT/tools/bin/sdkmanager"
+          ln -sf "$ANDROID_SDK_ROOT/cmdline-tools/latest/bin/avdmanager" "$ANDROID_SDK_ROOT/tools/bin/avdmanager"
+          yes | "$ANDROID_SDK_ROOT/cmdline-tools/latest/bin/sdkmanager" --licenses > /dev/null 2>&1 || true
 
       # Mesma chave de assinatura em todo build: permite atualizar o app
       # sem desinstalar (e sem perder as viagens salvas).
@@ -52,7 +73,32 @@ jobs:
           yes | buildozer -v android debug > build.log 2>&1 || (tail -n 300 build.log; exit 1)
           tail -n 60 build.log
 
+      # Mostra a impressao digital da assinatura: com o secret certo, e a
+      # mesma do TraveteFocus.
+      - name: Conferir assinatura do APK
+        run: |
+          APK=$(ls bin/*.apk | head -n 1)
+          BT=$(ls -d "$ANDROID_SDK_ROOT"/build-tools/*/ | sort -V | tail -n 1)
+          DIG=$("${BT}apksigner" verify --print-certs "$APK" | grep -i "SHA-256 digest" | head -n 1 | awk '{print $NF}')
+          echo "APK: $APK"
+          echo "Impressao digital: $DIG"
+          if [ "$DIG" = "94ef9ec68ebd71c6ce1cc15936c440985a0fbd5900f04694009bb3bbd50709eb" ]; then
+            echo "::notice::APK assinado com a mesma chave do TraveteFocus."
+          else
+            echo "::warning::APK assinado com uma chave diferente da do TraveteFocus."
+          fi
+
       - uses: actions/upload-artifact@v4
         with:
           name: gt-hud-apk
           path: bin/*.apk
+
+      - name: Log completo do build
+        if: always()
+        continue-on-error: true
+        uses: actions/upload-artifact@v4
+        with:
+          name: build-log
+          path: build.log
+          retention-days: 3
+          if-no-files-found: ignore

@@ -16,6 +16,8 @@ fullscreen = 0
 android.permissions = ACCESS_FINE_LOCATION,ACCESS_COARSE_LOCATION,WAKE_LOCK
 android.api = 34
 android.minapi = 24
+# igual ao minapi, senao o p4a reclama de "minsdk mismatch"
+android.ndk_api = 24
 android.archs = arm64-v8a
 android.accept_sdk_license = True
 
@@ -23,7 +25,12 @@ android.accept_sdk_license = True
 android.sdk_path =
 android.ndk_path =
 
+# Usa o SDK/NDK que ja vem no runner, sem baixar nem atualizar nada
+android.skip_update = True
+
 p4a.hook = hooks.py
+# mesma versao do python-for-android que o TraveteFocus usa
+p4a.branch = v2026.05.09
 
 [buildozer]
 log_level = 2
