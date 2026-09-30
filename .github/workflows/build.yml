@@ -54,6 +54,28 @@ jobs:
           ln -sf "$ANDROID_SDK_ROOT/cmdline-tools/latest/bin/avdmanager" "$ANDROID_SDK_ROOT/tools/bin/avdmanager"
           yes | "$ANDROID_SDK_ROOT/cmdline-tools/latest/bin/sdkmanager" --licenses > /dev/null 2>&1 || true
 
+      # O p4a v2026.05.09 trata rodas compiladas para Android (ex.: o
+      # charset-normalizer 3.5.2, puxado por requests <- kivy) como Python
+      # puro e tenta instalar com o pip do runner, que recusa: "...android_24_
+      # arm64_v8a.whl is not a supported wheel on this platform". Aqui ele
+      # passa a ignorar essas rodas (o requests usa o chardet no lugar).
+      # Clonado fora do projeto para nao ir parar dentro do APK.
+      - name: Clonar e corrigir python-for-android
+        run: |
+          git clone -q --depth 1 -b v2026.05.09 https://github.com/kivy/python-for-android.git "$HOME/p4a-src"
+          python - <<'PY'
+          import os
+          p = os.path.join(os.environ["HOME"], "p4a-src", "pythonforandroid", "build.py")
+          s = open(p, encoding="utf-8").read()
+          old = 'filename.endswith(".whl") and not is_wheel_compatible(filename, arch, ctx)'
+          assert s.count(old) == 1, "trecho do filtro de rodas nao encontrado"
+          s = s.replace(old, 'filename.endswith(".whl") and not filename.endswith("-any.whl")')
+          open(p, "w", encoding="utf-8").write(s)
+          PY
+          sed -i '/^p4a.branch/d' buildozer.spec
+          sed -i "/^p4a.hook/a p4a.source_dir = $HOME/p4a-src" buildozer.spec
+          grep -n "^p4a" buildozer.spec
+
       # Mesma chave de assinatura em todo build: permite atualizar o app
       # sem desinstalar (e sem perder as viagens salvas).
       - name: Keystore de debug fixa
