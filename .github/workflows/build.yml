@@ -9,6 +9,8 @@ jobs:
   build:
     runs-on: ubuntu-22.04
     timeout-minutes: 90
+    permissions:
+      contents: write  # publicar o APK na pagina Releases
     steps:
       - uses: actions/checkout@v4
 
@@ -22,6 +24,21 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.10"
+
+      # Guarda o que o buildozer baixa e o Python/Kivy ja compilados para
+      # Android: do 2o build em diante cai de ~15 para poucos minutos. A
+      # chave muda sempre que o buildozer.spec muda (ai compila tudo de novo).
+      - name: Cache do buildozer (~/.buildozer)
+        uses: actions/cache@v4
+        with:
+          path: ~/.buildozer
+          key: ${{ runner.os }}-gthud-buildozer-v1-${{ hashFiles('buildozer.spec') }}
+
+      - name: Cache da compilacao (.buildozer/android)
+        uses: actions/cache@v4
+        with:
+          path: .buildozer/android
+          key: ${{ runner.os }}-gthud-p4a-v1-${{ hashFiles('buildozer.spec') }}
 
       - name: Dependencias do sistema
         run: |
@@ -76,6 +93,14 @@ jobs:
           sed -i "/^p4a.hook/a p4a.source_dir = $HOME/p4a-src" buildozer.spec
           grep -n "^p4a" buildozer.spec
 
+      # Cada build ganha uma versao maior que a anterior (1.0.<n>): o celular
+      # instala por cima como atualizacao, e o app mostra o numero nos Ajustes.
+      - name: Numero de versao automatico
+        run: |
+          sed -i "s/^version = .*/version = 1.0.${{ github.run_number }}/" buildozer.spec
+          grep -n "^version" buildozer.spec
+          echo '{"versao": "1.0.${{ github.run_number }}"}' > versao.json
+
       # Mesma chave de assinatura em todo build: permite atualizar o app
       # sem desinstalar (e sem perder as viagens salvas). A chave vai para um
       # arquivo proprio: o Gradle ignora o ~/.android/debug.keystore e assina
@@ -117,10 +142,20 @@ jobs:
             echo "::warning::APK assinado com uma chave diferente da do TraveteFocus."
           fi
 
-      - uses: actions/upload-artifact@v4
-        with:
-          name: gt-hud-apk
-          path: bin/*.apk
+      # O APK vai para a pagina "Releases" (tag apk-mais-recente): baixa o
+      # .apk direto (sem .zip), sempre no mesmo link, e so fica o mais novo.
+      - name: Publicar APK na pagina Releases
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          APK=$(ls bin/*.apk | head -n 1)
+          NOVO="bin/GT-HUD-1.0.${{ github.run_number }}.apk"
+          cp "$APK" "$NOVO"
+          gh release delete apk-mais-recente --yes --cleanup-tag || true
+          gh release create apk-mais-recente "$NOVO" --target "${{ github.sha }}" --latest \
+            --title "GT-HUD 1.0.${{ github.run_number }}" \
+            --notes "APK mais recente do GT-HUD. Baixe o arquivo .apk abaixo e instale por cima do app."
+          echo "::notice::APK publicado em Releases: GT-HUD 1.0.${{ github.run_number }}"
 
       - name: Log completo do build
         if: always()
