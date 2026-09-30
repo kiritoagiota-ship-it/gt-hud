@@ -1,8 +1,8 @@
 """Fonte de posição: GPS real no Android ou simulador no PC.
 
-ATENÇÃO: no Android as leituras chegam na thread de UI do Android, que NÃO
-é a thread do Kivy. Por isso tudo passa por @mainthread antes de chegar nas
-telas.
+No Android o GPS é lido pelo Clock do Kivy (ver gps_android.py), mas tudo
+continua passando por @mainthread antes de chegar nas telas: se um dia uma
+leitura vier de outra thread, ela não mexe na tela fora da thread do Kivy.
 """
 from kivy.clock import mainthread
 from kivy.utils import platform

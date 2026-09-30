@@ -106,7 +106,7 @@ class TelaBoot(Screen):
         if app.sinal_fraco():
             linha = "Sinal fraco (%d m), melhorando..." % (app.precisao_ultima or 0)
         elif sat and sat[0]:
-            linha = "Procurando satelites... %d vistos" % sat[0]
+            linha = "Procurando satelites... %d vistos, %d em uso" % sat
         else:
             linha = "Procurando satelites..."
         self.status.text = linha + "\nFique em area aberta."

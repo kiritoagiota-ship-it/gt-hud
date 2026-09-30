@@ -160,7 +160,9 @@ class TelaHUD(Screen):
             else:
                 cor, texto = tema.LARANJA, "Buscando GPS"
             if sat and sat[0]:
-                texto += "\n%d satelites vistos" % sat[0]
+                # "em uso" > 0 aqui = o GPS já calculou a posição e ela não
+                # chegou ao app (foi assim que se achou o bug do Android 12+)
+                texto += "\n%d vistos, %d em uso" % sat
             if app.segundos_sem_sinal() > DICA_APOS_S:
                 dica = DICA_FECHADO
         if not app.sinal_ok():
