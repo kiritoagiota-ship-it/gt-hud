@@ -4,8 +4,9 @@ package.name = gthud
 package.domain = org.kirito
 source.dir = .
 source.include_exts = py,png,jpg,kv,atlas,json,ttf
-# ferramentas/ e icone/ nao entram no APK (o icone vai pelas opcoes abaixo)
-source.exclude_dirs = .github,bin,.buildozer,__pycache__,ferramentas,icone
+# ferramentas/, icone/ e java/ nao entram como arquivos do app (o icone e o
+# Java vao pelas opcoes proprias abaixo)
+source.exclude_dirs = .github,bin,.buildozer,__pycache__,ferramentas,icone,java
 # o workflow troca por 1.0.<numero do build> (cada APK novo e uma atualizacao)
 version = 0.1.0
 
@@ -26,6 +27,9 @@ android.manifest.orientation = portrait
 fullscreen = 0
 
 android.permissions = ACCESS_FINE_LOCATION,ACCESS_COARSE_LOCATION,WAKE_LOCK,VIBRATE
+
+# Java proprio: java/org/kirito/gthud/Satelites.java conta os satelites do GPS
+android.add_src = %(source.dir)s/java
 android.api = 34
 android.minapi = 24
 # igual ao minapi, senao o p4a reclama de "minsdk mismatch"

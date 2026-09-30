@@ -23,6 +23,9 @@ from viagem import Viagem
 # sem parar andando em cima do limite)
 DESARME_KMH = 2.0
 INTERVALO_VIBRA_S = 15.0
+
+SEM_SINAL_APOS_S = 5  # sem leitura boa por mais que isso = sem sinal
+DISTANCIA_MINIMA_M = 20  # viagem mais curta que isso não é salva
 VIBRA_TEMPOS = [0, 250, 150, 250]  # dois pulsos fortes: dá para sentir no guidão
 VIBRA_FORCAS = [0, 255, 0, 255]
 
@@ -41,7 +44,12 @@ class GTHudApp(App):
         self.viagem = Viagem()
         self.gps = ServicoGPS(self._ao_receber_gps, self._ao_status_gps)
 
-        self.precisao = None
+        self.precisao = None         # da última leitura boa (m)
+        self.precisao_ultima = None  # da última leitura, boa ou não
+        self._t_leitura = 0.0        # time.monotonic() da última leitura
+        self._t_valida = 0.0         # ... e da última leitura boa
+        self._t_gps_inicio = time.monotonic()
+        self.ja_teve_sinal = False
         self.gps_desligado = False
         self.ultima_salva_m = 0
         self._ouvintes = []
@@ -81,6 +89,9 @@ class GTHudApp(App):
         boot = self.sm.get_screen("boot")
         if ok or self.ajustes["simulador"]:
             self.gps.iniciar(usar_simulador=self.ajustes["simulador"])
+            self._t_gps_inicio = time.monotonic()
+            self._t_leitura = self._t_valida = 0.0
+            self.ja_teve_sinal = False
             boot.aguardando_sinal()
         else:
             boot.permissao_negada()
@@ -100,12 +111,27 @@ class GTHudApp(App):
         for f in self._ouvintes:
             f(vel)
 
+    def sinal_ok(self):
+        return time.monotonic() - self._t_valida <= SEM_SINAL_APOS_S
+
+    def sinal_fraco(self):
+        """Chegam leituras, mas imprecisas demais para o velocímetro."""
+        return not self.sinal_ok() and time.monotonic() - self._t_leitura <= SEM_SINAL_APOS_S
+
+    def segundos_sem_sinal(self):
+        return time.monotonic() - max(self._t_valida, self._t_gps_inicio)
+
     def _ao_receber_gps(self, d):
         self.gps_desligado = False
+        agora = time.monotonic()
         precisao = d.get("accuracy")
+        self._t_leitura = agora
+        self.precisao_ultima = precisao
         if not self.filtro.leitura_valida(precisao):
             self._avisar(None)
             return
+        self._t_valida = agora
+        self.ja_teve_sinal = True
         self.precisao = precisao
         if d.get("speed") is None:
             vel = self.filtro.valor  # fix sem velocidade: mantém a última
@@ -142,8 +168,10 @@ class GTHudApp(App):
         if not resultado:
             return None
         resumo, pontos = resultado
-        if resumo["distancia_m"] < 20 and len(pontos) < 5:
-            return None  # não salva viagem vazia
+        if resumo["distancia_m"] < DISTANCIA_MINIMA_M:
+            # não salva viagem vazia (antes bastavam 5 leituras: ficar parado
+            # 5 s com sinal salvava uma viagem de "0 m")
+            return None
         self.ultima_salva_m = resumo["distancia_m"]
         return self.banco.salvar_viagem(resumo, pontos)
 

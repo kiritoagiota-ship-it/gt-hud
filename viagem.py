@@ -112,6 +112,9 @@ class Viagem:
         }
         pontos = list(self.pontos)
         self.estado = self.PARADA
+        # zera os números: antes o painel ficava com "Iniciar viagem" e o
+        # tempo/distância da viagem que acabou de terminar
+        self._zerar()
         return resumo, pontos
 
     # --- dados ----------------------------------------------------------

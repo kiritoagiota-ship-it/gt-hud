@@ -48,6 +48,15 @@ class ServicoGPS:
         self.parar()
         self.iniciar(usar_simulador)
 
+    def satelites(self):
+        """(vistos, em uso) do GPS real; None no simulador ou sem contador."""
+        if self._gps is None:
+            return None
+        try:
+            return self._gps.satelites()
+        except Exception:
+            return None
+
     @mainthread
     def _on_location(self, **dados):
         self.ao_receber(dados)

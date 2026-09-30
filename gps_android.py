@@ -47,15 +47,43 @@ class _Ouvinte(PythonJavaClass):
         pass
 
 
+def _classe_satelites():
+    """java/org/kirito/gthud/Satelites.java (conta satélites); None se faltar."""
+    try:
+        return autoclass("org.kirito.gthud.Satelites")
+    except Exception as e:
+        print("[gps] sem contador de satelites:", e)
+        return None
+
+
 class GPSAndroid:
     def __init__(self, ao_receber, ao_status):
-        self._lm = PythonActivity.mActivity.getSystemService(Context.LOCATION_SERVICE)
+        self._atividade = PythonActivity.mActivity
+        self._lm = self._atividade.getSystemService(Context.LOCATION_SERVICE)
         # a referência precisa ficar guardada, senão o Python recolhe o ouvinte
         self._ouvinte = _Ouvinte(ao_receber, ao_status)
+        self._sat = _classe_satelites()
 
     def iniciar(self, intervalo_ms=1000):
         self._lm.requestLocationUpdates(PROVEDOR, intervalo_ms, 0, self._ouvinte,
                                         Looper.getMainLooper())
+        # nem todo Android avisa na hora que a Localização já estava desligada
+        if not self._lm.isProviderEnabled(PROVEDOR):
+            self._ouvinte.ao_status("provider-disabled", PROVEDOR)
+        if self._sat is not None:
+            try:
+                self._sat.iniciar(self._atividade)
+            except Exception as e:  # contar satélites é extra: nunca derruba o GPS
+                print("[gps] contador de satelites falhou:", e)
+                self._sat = None
 
     def parar(self):
         self._lm.removeUpdates(self._ouvinte)
+        if self._sat is not None:
+            self._sat.parar(self._atividade)
+
+    def satelites(self):
+        """(vistos, em uso) agora, ou None se o contador não existir."""
+        if self._sat is None:
+            return None
+        return self._sat.vistos, self._sat.usados

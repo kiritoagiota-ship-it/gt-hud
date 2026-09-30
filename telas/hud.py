@@ -1,6 +1,4 @@
 """Tela principal: velocímetro, números da viagem e controles."""
-import time
-
 from kivy.app import App
 from kivy.clock import Clock
 from kivy.metrics import dp
@@ -15,13 +13,16 @@ from widgets.botao import BotaoHUD
 from widgets.comuns import Bloco, Ponto, Texto, soltar
 from widgets.velocimetro import Velocimetro
 
-SEM_SINAL_APOS_S = 5
+# sem sinal bom por esse tempo, aparece a dica de ir para um lugar aberto
+DICA_APOS_S = 30
+DICA_FECHADO = "GPS nao pega em lugar fechado. Va para uma area aberta."
+DICA_DESLIGADO = "Ligue a Localizacao do celular (no painel de cima)."
+DICAS = (DICA_FECHADO, DICA_DESLIGADO)
 
 
 class TelaHUD(Screen):
     def __init__(self, **kw):
         super().__init__(**kw)
-        self._t_ultima_valida = 0
         self._ev_relogio = None
         self._ev_msg = None
         self._deitada = None
@@ -33,7 +34,7 @@ class TelaHUD(Screen):
         self.topo = BoxLayout(size_hint_y=None, height=dp(44), spacing=dp(10))
         self.ponto = Ponto(pos_hint={"center_y": 0.5})
         self.topo.add_widget(self.ponto)
-        self.lbl_gps = Texto(text="Procurando sinal", font_size=tema.T_ROTULO + 1,
+        self.lbl_gps = Texto(text="Buscando GPS", font_size=tema.T_ROTULO + 1,
                              color=tema.CIANO_FRACO)
         self.topo.add_widget(self.lbl_gps)
         self.topo.add_widget(BotaoHUD(text="Viagens", size_hint_x=None, width=dp(92),
@@ -46,9 +47,10 @@ class TelaHUD(Screen):
         # velocímetro
         self.velo = Velocimetro()
 
-        # mensagem curta (ex.: "Viagem salva")
+        # mensagem curta (ex.: "Viagem salva") ou a dica de sem GPS; cabem
+        # 2 linhas, para a dica não vazar em celular estreito
         self.lbl_msg = Texto(text="", font_size=tema.T_ROTULO + 1, color=tema.VERDE,
-                             halign="center", size_hint_y=None, height=dp(20))
+                             halign="center", size_hint_y=None, height=dp(36))
 
         # números
         self.grade = GridLayout(cols=2, spacing=dp(8))
@@ -115,7 +117,6 @@ class TelaHUD(Screen):
         if vel is None:  # leitura descartada por baixa precisão
             self._status_gps()
             return
-        self._t_ultima_valida = time.time()
         self.velo.velocidade = vel
         self.velo.alerta = vel > app.ajustes["limite_kmh"]
         self._status_gps()
@@ -133,23 +134,51 @@ class TelaHUD(Screen):
         self._atualizar_numeros()
 
     def _status_gps(self):
+        """Bolinha + texto do GPS. Antes só existia "Sem sinal" (vermelho) até
+        o 1º sinal bom: parecia quebrado dentro de casa, onde o GPS de
+        satélite não pega. Agora diz se está buscando (e quantos satélites
+        vê), se o sinal está fraco ou se perdeu o sinal que tinha."""
         app = App.get_running_app()
-        sem_sinal = time.time() - self._t_ultima_valida > SEM_SINAL_APOS_S
+        sat = app.gps.satelites()  # (vistos, em uso) ou None
+        dica = None
         if app.gps_desligado:
-            self.ponto.cor = tema.VERMELHO
-            self.lbl_gps.text = "GPS do celular desligado"
+            cor, texto = tema.VERMELHO, "GPS do celular\ndesligado"
+            dica = DICA_DESLIGADO
         elif app.gps.modo == "SIM":
-            self.ponto.cor = tema.LARANJA
-            self.lbl_gps.text = "Simulador  %d m" % (app.precisao or 0)
-        elif sem_sinal:
-            self.ponto.cor = tema.VERMELHO
-            self.lbl_gps.text = "Sem sinal"
+            cor, texto = tema.LARANJA, "Simulador  %d m" % (app.precisao or 0)
+        elif app.sinal_ok():
+            prec = app.precisao or 0
+            cor = tema.VERDE if prec <= 10 else tema.LARANJA
+            texto = "GPS  %d m" % prec
+            if sat and sat[1]:
+                texto += "\n%d satelites" % sat[1]
+        else:
+            if app.sinal_fraco():
+                cor, texto = tema.LARANJA, "Sinal fraco: %d m" % (app.precisao_ultima or 0)
+            elif app.ja_teve_sinal:
+                cor, texto = tema.VERMELHO, "Sem sinal do GPS"
+            else:
+                cor, texto = tema.LARANJA, "Buscando GPS"
+            if sat and sat[0]:
+                texto += "\n%d satelites vistos" % sat[0]
+            if app.segundos_sem_sinal() > DICA_APOS_S:
+                dica = DICA_FECHADO
+        if not app.sinal_ok():
             self.velo.velocidade = 0
             self.velo.alerta = False
-        else:
-            prec = app.precisao or 0
-            self.ponto.cor = tema.VERDE if prec <= 10 else tema.LARANJA
-            self.lbl_gps.text = "GPS  %d m" % prec
+        self.ponto.cor = cor
+        self.lbl_gps.text = texto
+        self._mostrar_dica(dica)
+
+    def _mostrar_dica(self, dica):
+        # a dica fica parada no lugar das mensagens curtas, sem apagar sozinha;
+        # uma mensagem curta (ex.: "Viagem salva") passa na frente
+        livre = not self.lbl_msg.text or self.lbl_msg.text in DICAS
+        if dica and livre:
+            self.lbl_msg.text = dica
+            self.lbl_msg.color = tema.LARANJA
+        elif not dica and self.lbl_msg.text in DICAS:
+            self.lbl_msg.text = ""
 
     def _atualizar_numeros(self):
         v = App.get_running_app().viagem
@@ -179,8 +208,12 @@ class TelaHUD(Screen):
                                   on_release=lambda *a: self._finalizar()))
 
     def _iniciar(self):
-        App.get_running_app().viagem.iniciar()
-        self._mensagem("Gravando viagem", tema.CIANO)
+        app = App.get_running_app()
+        app.viagem.iniciar()
+        if app.sinal_ok():
+            self._mensagem("Gravando viagem", tema.CIANO)
+        else:
+            self._mensagem("Gravando: a distancia comeca quando o GPS pegar", tema.LARANJA)
         self._montar_controles()
         self._atualizar_numeros()
 
@@ -203,7 +236,7 @@ class TelaHUD(Screen):
             self._mensagem("Viagem salva: %s" % fmt_dist(app.ultima_salva_m), tema.VERDE)
         else:
             # antes sumia calada: parecia que o botao nao tinha funcionado
-            self._mensagem("Viagem muito curta: nao foi salva", tema.LARANJA)
+            self._mensagem("Viagem com menos de 20 m: nao foi salva", tema.LARANJA)
         self._montar_controles()
         self._atualizar_numeros()
 

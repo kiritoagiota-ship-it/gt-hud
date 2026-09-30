@@ -41,7 +41,7 @@ class TelaBoot(Screen):
                          valign="top", size_hint_y=None, height=dp(110))
         self.info.add_widget(self.log)
         self.status = Texto(text="", font_size=tema.T_BOTAO, bold=True, color=tema.BRANCO,
-                            size_hint_y=None, height=dp(56))
+                            size_hint_y=None, height=dp(80))  # até 3 linhas
         self.info.add_widget(self.status)
         self.info.add_widget(Widget(size_hint_y=0.4))
         self.botoes = BoxLayout(size_hint_y=None, height=dp(56), spacing=dp(12))
@@ -54,6 +54,9 @@ class TelaBoot(Screen):
 
         self._linha = 0
         self._ev_log = None
+        self._buscando = False
+        self._ev_busca = None
+        self._negacoes = 0
         self._mostrar_botoes_padrao()
 
     def _organizar(self, *a):
@@ -83,16 +86,42 @@ class TelaBoot(Screen):
     # --- chamados pelo app -------------------------------------------------
     def aguardando_sinal(self):
         app = App.get_running_app()
-        if app.gps.modo == "SIM":
-            self.status.text = "Modo simulador ativo"
-        else:
-            self.status.text = "Procurando satelites...\nFique em area aberta."
+        self._buscando = app.gps.modo != "SIM"
         self.status.color = tema.BRANCO
+        if self._buscando:
+            self._atualizar_busca()
+            if self._ev_busca is None:
+                self._ev_busca = Clock.schedule_interval(self._atualizar_busca, 1.0)
+        else:
+            self.status.text = "Modo simulador ativo"
         self._mostrar_botoes_padrao()
 
+    def _atualizar_busca(self, *a):
+        """Enquanto procura, mostra quantos satélites o GPS já está vendo."""
+        if self._saiu or not self._buscando or self.manager.current != self.name:
+            self._ev_busca = None
+            return False
+        app = App.get_running_app()
+        sat = app.gps.satelites()
+        if app.sinal_fraco():
+            linha = "Sinal fraco (%d m), melhorando..." % (app.precisao_ultima or 0)
+        elif sat and sat[0]:
+            linha = "Procurando satelites... %d vistos" % sat[0]
+        else:
+            linha = "Procurando satelites..."
+        self.status.text = linha + "\nFique em area aberta."
+
     def permissao_negada(self):
-        self.status.text = ("Sem permissao de localizacao precisa.\n"
-                            "Toque em Tentar de novo e escolha 'Precisa'.")
+        self._buscando = False
+        self._negacoes += 1
+        if self._negacoes == 1:
+            self.status.text = ("Sem permissao de localizacao precisa.\n"
+                                "Toque em Tentar de novo e escolha 'Precisa'.")
+        else:
+            # negada 2x, o Android para de perguntar: só pelas configurações
+            self.status.text = ("Libere a localizacao em Configuracoes >\n"
+                                "Apps > GT-HUD > Permissoes > Localizacao,\n"
+                                "escolha 'Precisa' e toque em Tentar de novo.")
         self.status.color = tema.VERMELHO
         self.botoes.clear_widgets()
         self.botoes.add_widget(BotaoHUD(text="Tentar de novo", destaque=True,
