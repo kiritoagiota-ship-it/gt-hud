@@ -77,17 +77,20 @@ jobs:
           grep -n "^p4a" buildozer.spec
 
       # Mesma chave de assinatura em todo build: permite atualizar o app
-      # sem desinstalar (e sem perder as viagens salvas).
+      # sem desinstalar (e sem perder as viagens salvas). A chave vai para um
+      # arquivo proprio: o Gradle ignora o ~/.android/debug.keystore e assina
+      # com uma chave dele, entao o APK e assinado de novo no fim (igual ao
+      # TraveteFocus).
       - name: Keystore de debug fixa
         env:
           KS: ${{ secrets.DEBUG_KEYSTORE_B64 }}
         run: |
           if [ -n "$KS" ]; then
             mkdir -p ~/.android
-            echo "$KS" | base64 -d > ~/.android/debug.keystore
-            echo "Keystore fixa aplicada"
+            echo "$KS" | base64 -d > ~/.android/gthud.keystore
+            echo "Keystore fixa restaurada: $(wc -c < ~/.android/gthud.keystore) bytes"
           else
-            echo "Sem DEBUG_KEYSTORE_B64: usando keystore nova (vai exigir desinstalar para atualizar)"
+            echo "::warning::Sem DEBUG_KEYSTORE_B64: o APK sai com chave temporaria (vai exigir desinstalar para atualizar)"
           fi
 
       - name: Build
@@ -95,12 +98,16 @@ jobs:
           yes | buildozer -v android debug > build.log 2>&1 || (tail -n 300 build.log; exit 1)
           tail -n 60 build.log
 
-      # Mostra a impressao digital da assinatura: com o secret certo, e a
-      # mesma do TraveteFocus.
-      - name: Conferir assinatura do APK
+      # Assina de novo com a chave do secret e confere a impressao digital:
+      # tem que ser a mesma do TraveteFocus em todo build.
+      - name: Assinar o APK sempre com a mesma chave
         run: |
           APK=$(ls bin/*.apk | head -n 1)
           BT=$(ls -d "$ANDROID_SDK_ROOT"/build-tools/*/ | sort -V | tail -n 1)
+          if [ -s ~/.android/gthud.keystore ]; then
+            "${BT}apksigner" sign --ks ~/.android/gthud.keystore --ks-pass pass:android --key-pass pass:android "$APK" \
+              || echo "::warning::A chave do secret DEBUG_KEYSTORE_B64 nao abriu (senha android): o APK ficou com a chave temporaria."
+          fi
           DIG=$("${BT}apksigner" verify --print-certs "$APK" | grep -i "SHA-256 digest" | head -n 1 | awk '{print $NF}')
           echo "APK: $APK"
           echo "Impressao digital: $DIG"
