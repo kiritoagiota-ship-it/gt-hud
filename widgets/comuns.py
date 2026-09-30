@@ -1,5 +1,5 @@
 """Peças de interface reaproveitadas entre as telas."""
-from kivy.graphics import Color, Ellipse, Line, Rectangle
+from kivy.graphics import Color, Ellipse, Line, Mesh, Rectangle
 from kivy.metrics import dp
 from kivy.properties import ListProperty, StringProperty
 from kivy.uix.behaviors import ButtonBehavior
@@ -8,7 +8,7 @@ from kivy.uix.label import Label
 from kivy.uix.widget import Widget
 
 import tema
-from widgets.botao import BotaoHUD
+from widgets.botao import BotaoHUD, _poligono
 
 
 def soltar(*widgets):
@@ -17,6 +17,31 @@ def soltar(*widgets):
     for w in widgets:
         if w.parent is not None:
             w.parent.remove_widget(w)
+
+
+class PainelHUD(BoxLayout):
+    """Caixa por cima do mapa: fundo escuro quase opaco, borda com os cantos
+    cortados (mesmo recorte do BotaoHUD)."""
+    cor_borda = ListProperty(tema.CIANO)
+
+    def __init__(self, **kw):
+        kw.setdefault("padding", dp(10))
+        kw.setdefault("spacing", dp(8))
+        super().__init__(**kw)
+        self.bind(pos=self._d, size=self._d, cor_borda=self._d)
+
+    def _d(self, *a):
+        c = min(dp(14), self.height * 0.25)
+        pts = _poligono(self.x, self.y, self.width, self.height, c)
+        vert = []
+        for px, py in pts:
+            vert += [px, py, 0, 0]
+        self.canvas.before.clear()
+        with self.canvas.before:
+            Color(*tema.com_alfa(tema.PAINEL, 0.94))
+            Mesh(vertices=vert, indices=list(range(len(pts))), mode="triangle_fan")
+            Color(*tema.com_alfa(self.cor_borda, 0.9))
+            Line(points=[v for p in pts for v in p], close=True, width=dp(1.2))
 
 
 class Texto(Label):

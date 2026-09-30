@@ -1,5 +1,5 @@
-"""Ajustes: alerta de velocidade, vibração, pausa automática, orientação,
-tela ligada, suavização e simulador."""
+"""Ajustes: voz, subidas e giro do mapa (navegação), alerta de velocidade,
+vibração, pausa automática, orientação, tela ligada, suavização e simulador."""
 import json
 import os
 
@@ -88,6 +88,21 @@ class TelaConfig(Screen):
         rolagem.add_widget(lista)
         raiz.add_widget(rolagem)
 
+        self.alt_voz = Alternar(self._mudar_voz)
+        lista.add_widget(Linha("Voz do assistente",
+                               "Fala as curvas, as subidas e os avisos da navegacao.",
+                               self._centralizar(self.alt_voz)))
+
+        self.alt_subidas = Alternar(self._mudar_subidas)
+        lista.add_widget(Linha("Avisar subidas",
+                               "Na navegacao, avisa antes de cada subida da rota.",
+                               self._centralizar(self.alt_subidas)))
+
+        self.alt_girar = Alternar(lambda v: self._mudar_simples("girar_mapa", self.alt_girar, v))
+        lista.add_widget(Linha("Mapa gira com a direcao",
+                               "Na navegacao, o caminho a frente fica sempre para cima.",
+                               self._centralizar(self.alt_girar)))
+
         self.sel_limite = Seletor("%d km/h", self._mudar_limite)
         lista.add_widget(Linha("Alerta de velocidade",
                                "O velocimetro fica laranja e pisca acima deste valor.",
@@ -136,6 +151,9 @@ class TelaConfig(Screen):
 
     def on_pre_enter(self, *a):
         aj = App.get_running_app().ajustes
+        self.alt_voz.mostrar(aj["voz"])
+        self.alt_subidas.mostrar(aj["avisar_subidas"])
+        self.alt_girar.mostrar(aj["girar_mapa"])
         self.sel_limite.mostrar(aj["limite_kmh"])
         self.alt_vibrar.mostrar(aj["vibrar_limite"])
         self.alt_pausa.mostrar(aj["pausa_auto"])
@@ -153,6 +171,21 @@ class TelaConfig(Screen):
     def _mudar_simples(self, chave, botao, ligado):
         App.get_running_app().ajustes[chave] = ligado
         botao.mostrar(ligado)
+
+    def _mudar_voz(self, ligado):
+        app = App.get_running_app()
+        app.ajustes["voz"] = ligado
+        app.voz.ligada = ligado
+        if not ligado:
+            app.voz.calar()
+        self.alt_voz.mostrar(ligado)
+
+    def _mudar_subidas(self, ligado):
+        app = App.get_running_app()
+        app.ajustes["avisar_subidas"] = ligado
+        if app.nav is not None:
+            app.nav.avisar_subidas = ligado
+        self.alt_subidas.mostrar(ligado)
 
     def _mudar_deitada(self, ligado):
         app = App.get_running_app()
@@ -178,4 +211,4 @@ class TelaConfig(Screen):
         self.alt_sim.mostrar(ligado)
 
     def _voltar(self):
-        self.manager.current = "hud"
+        App.get_running_app().voltar()

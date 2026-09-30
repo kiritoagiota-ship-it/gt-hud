@@ -23,6 +23,7 @@ class Velocimetro(Widget):
     maximo = NumericProperty(tema.VEL_MAXIMA)
     limite = NumericProperty(32)
     alerta = BooleanProperty(False)
+    compacto = BooleanProperty(False)  # pequeno em cima do mapa: sem os números da escala
     segmentos = 25  # 2 km/h cada: o limite padrão (32) cai bem na divisa
 
     def __init__(self, **kw):
@@ -40,8 +41,8 @@ class Velocimetro(Widget):
             self.add_widget(w)
         self._gatilho = Clock.create_trigger(self._desenhar, 0)
         self.bind(pos=self._gatilho, size=self._gatilho, limite=self._gatilho,
-                  maximo=self._gatilho, velocidade=self._on_velocidade,
-                  alerta=self._on_alerta)
+                  maximo=self._gatilho, compacto=self._gatilho,
+                  velocidade=self._on_velocidade, alerta=self._on_alerta)
 
     # ------------------------------------------------------------------
     @staticmethod
@@ -129,5 +130,6 @@ class Velocimetro(Widget):
         self.lbl_unidade.center = (cx, cy - r * 0.42)
 
         for lbl, v in zip(self.marcas, self._valores_marcas):
+            lbl.opacity = 0 if self.compacto else 1
             lbl.font_size = max(dp(10), r * 0.085)
             lbl.center = self._polar(cx, cy, r - esp * 2.1, self._angulo(v))

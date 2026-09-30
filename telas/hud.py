@@ -37,9 +37,9 @@ class TelaHUD(Screen):
         self.lbl_gps = Texto(text="Buscando GPS", font_size=tema.T_ROTULO + 1,
                              color=tema.CIANO_FRACO)
         self.topo.add_widget(self.lbl_gps)
-        self.topo.add_widget(BotaoHUD(text="Viagens", size_hint_x=None, width=dp(92),
+        self.topo.add_widget(BotaoHUD(text="Mapa", size_hint_x=None, width=dp(92),
                                       font_size=tema.T_ROTULO + 1,
-                                      on_release=lambda *a: self._ir("viagens")))
+                                      on_release=lambda *a: App.get_running_app().voltar()))
         self.topo.add_widget(BotaoHUD(text="Ajustes", size_hint_x=None, width=dp(92),
                                       font_size=tema.T_ROTULO + 1,
                                       on_release=lambda *a: self._ir("config")))
@@ -250,4 +250,4 @@ class TelaHUD(Screen):
         self._ev_msg = Clock.schedule_once(lambda dt: setattr(self.lbl_msg, "text", ""), 3)
 
     def _ir(self, nome):
-        self.manager.current = nome
+        App.get_running_app().abrir(nome)

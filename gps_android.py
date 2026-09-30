@@ -79,6 +79,7 @@ class GPSAndroid:
             dados = dict(lat=loc.lat, lon=loc.lon,
                          # sem velocidade no fix: None (o app mantém a última), não 0
                          speed=loc.velocidade if loc.temVelocidade else None,
+                         bearing=loc.rumo if loc.temRumo else None,
                          accuracy=loc.precisao)
             depois = loc.contador
             if depois == n:

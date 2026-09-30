@@ -48,6 +48,15 @@ class ServicoGPS:
         self.parar()
         self.iniciar(usar_simulador)
 
+    def seguir_rota(self, pontos):
+        """No simulador, o "ciclista" passa a andar pela rota."""
+        if self._sim:
+            self._sim.seguir_rota(pontos)
+
+    def deixar_rota(self):
+        if self._sim:
+            self._sim.deixar_rota()
+
     def satelites(self):
         """(vistos, em uso) do GPS real; None no simulador ou sem contador."""
         if self._gps is None:

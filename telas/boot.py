@@ -131,8 +131,8 @@ class TelaBoot(Screen):
 
     def _mostrar_botoes_padrao(self):
         self.botoes.clear_widgets()
-        self.botoes.add_widget(BotaoHUD(text="Ir para o painel",
-                                        on_release=lambda *a: self._ir_para_hud()))
+        self.botoes.add_widget(BotaoHUD(text="Ir para o mapa",
+                                        on_release=lambda *a: self._ir_para_mapa()))
 
     # --- primeira leitura boa ----------------------------------------------
     def _ao_ler(self, vel):
@@ -142,9 +142,9 @@ class TelaBoot(Screen):
         prec = app.precisao or 0
         self.status.text = "Sinal adquirido: precisao %d m" % prec
         self.status.color = tema.VERDE
-        Clock.schedule_once(lambda dt: self._ir_para_hud(), 0.9)
+        Clock.schedule_once(lambda dt: self._ir_para_mapa(), 0.9)
         self._saiu = True
 
-    def _ir_para_hud(self):
+    def _ir_para_mapa(self):
         if self.manager.current == self.name:
-            self.manager.current = "hud"
+            self.manager.current = "mapa"

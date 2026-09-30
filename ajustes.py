@@ -10,6 +10,9 @@ PADRAO = {
     "vibrar_limite": True,
     "pausa_auto": True,
     "tela_deitada": False,
+    "voz": True,
+    "girar_mapa": True,
+    "avisar_subidas": True,
 }
 
 

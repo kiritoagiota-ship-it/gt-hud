@@ -53,4 +53,4 @@ class TelaViagens(Screen):
         self.manager.current = "detalhe"
 
     def _voltar(self):
-        self.manager.current = "hud"
+        App.get_running_app().voltar()

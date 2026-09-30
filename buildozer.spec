@@ -3,7 +3,8 @@ title = GT-HUD
 package.name = gthud
 package.domain = org.kirito
 source.dir = .
-source.include_exts = py,png,jpg,kv,atlas,json,ttf
+# wav = falas do assistente (voz/, geradas por ferramentas/gerar_voz.py)
+source.include_exts = py,png,jpg,kv,atlas,json,ttf,wav
 # ferramentas/, icone/ e java/ nao entram como arquivos do app (o icone e o
 # Java vao pelas opcoes proprias abaixo)
 source.exclude_dirs = .github,bin,.buildozer,__pycache__,ferramentas,icone,java
@@ -26,9 +27,10 @@ orientation = portrait, landscape, landscape-reverse
 android.manifest.orientation = portrait
 fullscreen = 0
 
-android.permissions = ACCESS_FINE_LOCATION,ACCESS_COARSE_LOCATION,WAKE_LOCK,VIBRATE
+# INTERNET: mapa (tiles do OpenStreetMap), rota (Valhalla) e busca (Nominatim)
+android.permissions = ACCESS_FINE_LOCATION,ACCESS_COARSE_LOCATION,WAKE_LOCK,VIBRATE,INTERNET,ACCESS_NETWORK_STATE
 
-# Java proprio: java/org/kirito/gthud/Satelites.java conta os satelites do GPS
+# Java proprio: Localizacao.java recebe o GPS e Satelites.java conta satelites
 android.add_src = %(source.dir)s/java
 android.api = 34
 android.minapi = 24

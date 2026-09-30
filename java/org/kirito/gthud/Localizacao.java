@@ -26,6 +26,8 @@ public class Localizacao implements LocationListener {
     public static volatile double velocidade = 0;      // m/s
     public static volatile boolean temVelocidade = false;
     public static volatile double precisao = 0;        // m
+    public static volatile double rumo = 0;            // graus, 0 = norte, horário
+    public static volatile boolean temRumo = false;
     public static volatile int gpsLigado = -1;         // -1 = não sabe, 0 = não, 1 = sim
 
     private static Localizacao instancia;
@@ -37,6 +39,8 @@ public class Localizacao implements LocationListener {
         temVelocidade = loc.hasSpeed();
         velocidade = loc.hasSpeed() ? loc.getSpeed() : 0;
         precisao = loc.hasAccuracy() ? loc.getAccuracy() : 9999;
+        temRumo = loc.hasBearing();
+        rumo = loc.hasBearing() ? loc.getBearing() : 0;
         contador++;  // por último: o Python só lê quando isto muda
     }
 
