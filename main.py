@@ -1,4 +1,6 @@
 """GT-HUD: velocímetro GPS e registro de viagens para a Ouxi GT20."""
+import time
+
 from kivy.app import App
 from kivy.core.window import Window
 from kivy.uix.screenmanager import FadeTransition, ScreenManager
@@ -15,6 +17,14 @@ from telas.detalhe import TelaDetalhe
 from telas.hud import TelaHUD
 from telas.viagens import TelaViagens
 from viagem import Viagem
+
+# vibra uma vez ao passar do limite e só rearma depois de cair DESARME_KMH
+# abaixo dele e de passar INTERVALO_VIBRA_S desde a última (senão vibraria
+# sem parar andando em cima do limite)
+DESARME_KMH = 2.0
+INTERVALO_VIBRA_S = 15.0
+VIBRA_TEMPOS = [0, 250, 150, 250]  # dois pulsos fortes: dá para sentir no guidão
+VIBRA_FORCAS = [0, 255, 0, 255]
 
 
 class GTHudApp(App):
@@ -35,6 +45,8 @@ class GTHudApp(App):
         self.gps_desligado = False
         self.ultima_salva_m = 0
         self._ouvintes = []
+        self._alerta_armado = True
+        self._ultima_vibracao = -INTERVALO_VIBRA_S
 
         self.sm = ScreenManager(transition=FadeTransition(duration=0.18))
         self.sm.add_widget(TelaBoot(name="boot"))
@@ -47,6 +59,7 @@ class GTHudApp(App):
     # --- ciclo de vida ---------------------------------------------------
     def on_start(self):
         self.aplicar_tela_ligada()
+        self.aplicar_orientacao()
         self.solicitar_gps()
 
     def on_pause(self):
@@ -54,6 +67,7 @@ class GTHudApp(App):
 
     def on_resume(self):
         self.aplicar_tela_ligada()
+        self.aplicar_orientacao()
 
     def on_stop(self):
         self.salvar_viagem_atual()  # não perde a viagem se o app fechar
@@ -97,8 +111,23 @@ class GTHudApp(App):
             vel = self.filtro.valor  # fix sem velocidade: mantém a última
         else:
             vel = self.filtro.atualizar(d["speed"])
+        # antes de registrar: se retomou agora, esta leitura já entra
+        self.viagem.checar_pausa_auto(vel, self.ajustes["pausa_auto"])
         self.viagem.registrar(d["lat"], d["lon"], vel)
+        self._checar_limite(vel)
         self._avisar(vel)
+
+    def _checar_limite(self, vel):
+        limite = self.ajustes["limite_kmh"]
+        if vel > limite:
+            agora = time.monotonic()
+            if (self._alerta_armado and self.ajustes["vibrar_limite"]
+                    and agora - self._ultima_vibracao >= INTERVALO_VIBRA_S):
+                android_utils.vibrar(VIBRA_TEMPOS, VIBRA_FORCAS)
+                self._ultima_vibracao = agora
+            self._alerta_armado = False
+        elif vel <= limite - DESARME_KMH:
+            self._alerta_armado = True
 
     def _ao_status_gps(self, tipo, status):
         if status == "gps":
@@ -121,6 +150,9 @@ class GTHudApp(App):
     # --- tela ------------------------------------------------------------
     def aplicar_tela_ligada(self):
         android_utils.manter_tela_ligada(self.ajustes["tela_ligada"])
+
+    def aplicar_orientacao(self):
+        android_utils.definir_orientacao(self.ajustes["tela_deitada"])
 
     def _tecla(self, janela, tecla, *a):
         if tecla != 27:  # botão voltar do Android

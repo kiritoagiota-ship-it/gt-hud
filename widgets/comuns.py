@@ -11,6 +11,14 @@ import tema
 from widgets.botao import BotaoHUD
 
 
+def soltar(*widgets):
+    """Tira cada widget do layout onde está, para remontar a tela em outro
+    arranjo (em pé / deitada)."""
+    for w in widgets:
+        if w.parent is not None:
+            w.parent.remove_widget(w)
+
+
 class Texto(Label):
     """Label que quebra linha e alinha à esquerda."""
 

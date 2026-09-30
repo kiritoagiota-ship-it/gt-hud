@@ -1,16 +1,22 @@
-"""Partes específicas do Android: permissões e tela sempre ligada.
+"""Partes específicas do Android: permissões, tela ligada, orientação e
+vibração.
 
-No PC tudo aqui vira "não faz nada", para o app rodar no desktop.
+No PC tudo aqui vira "não faz nada" (a orientação só gira a janela, para
+testar o layout deitado), para o app rodar no desktop.
 """
 from kivy.clock import mainthread
 from kivy.utils import platform
 
 NO_ANDROID = platform == "android"
 
+# ActivityInfo.SCREEN_ORIENTATION_*: deitada usa o sensor para aceitar o
+# celular virado para qualquer um dos dois lados no suporte
+_EM_PE, _DEITADA = 1, 6
+
 if NO_ANDROID:
     from android.permissions import Permission, check_permission, request_permissions
     from android.runnable import run_on_ui_thread
-    from jnius import autoclass
+    from jnius import autoclass, cast
 
     _PythonActivity = autoclass("org.kivy.android.PythonActivity")
     _LayoutParams = autoclass("android.view.WindowManager$LayoutParams")
@@ -22,13 +28,66 @@ if NO_ANDROID:
             janela.addFlags(_LayoutParams.FLAG_KEEP_SCREEN_ON)
         else:
             janela.clearFlags(_LayoutParams.FLAG_KEEP_SCREEN_ON)
+
+    @run_on_ui_thread
+    def _orientacao(deitada):
+        _PythonActivity.mActivity.setRequestedOrientation(_DEITADA if deitada else _EM_PE)
 else:
     def _flag_tela(ligar):
         pass
 
+    def _orientacao(deitada):
+        from kivy.core.window import Window
+        w, h = Window.size
+        if (w > h) != deitada:
+            Window.size = (h, w)
+
 
 def manter_tela_ligada(ligar):
     _flag_tela(bool(ligar))
+
+
+def definir_orientacao(deitada):
+    _orientacao(bool(deitada))
+
+
+_vibrador = None  # (vibrador, VibrationEffect ou None, versão do Android); False = sem
+
+
+def _obter_vibrador():
+    global _vibrador
+    if _vibrador is None:
+        _vibrador = False
+        if not NO_ANDROID:
+            return None
+        try:
+            Context = autoclass("android.content.Context")
+            sdk = autoclass("android.os.Build$VERSION").SDK_INT
+            vib = cast("android.os.Vibrator",
+                       _PythonActivity.mActivity.getSystemService(Context.VIBRATOR_SERVICE))
+            if vib is not None and vib.hasVibrator():
+                efeito = autoclass("android.os.VibrationEffect") if sdk >= 26 else None
+                _vibrador = (vib, efeito, sdk)
+        except Exception as e:
+            print("[vibrar] sem vibrador:", e)
+    return _vibrador or None
+
+
+def vibrar(tempos, forcas):
+    """Sequência de pulsos: tempos = [espera, liga, espera, liga, ...] em ms,
+    forcas = intensidade de cada trecho (0..255). Nunca derruba o app."""
+    v = _obter_vibrador()
+    if v is None:
+        return
+    vib, efeito, sdk = v
+    try:
+        if sdk >= 26:
+            vib.vibrate(efeito.createWaveform([int(t) for t in tempos],
+                                              [int(f) for f in forcas], -1))
+        else:
+            vib.vibrate([int(t) for t in tempos], -1)
+    except Exception as e:
+        print("[vibrar]", e)
 
 
 def pedir_permissoes(callback):

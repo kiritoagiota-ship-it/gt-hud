@@ -4,6 +4,11 @@ import time
 
 LIMIAR_MOVIMENTO_KMH = 2.0
 VELOCIDADE_IMPOSSIVEL_KMH = 120.0  # salto de GPS acima disso é ignorado
+# pausa automática: parada por PAUSA_AUTO_APOS_S pausa sozinha e volta a
+# gravar quando passa de RETOMA_AUTO_KMH (um pouco acima do limiar, para
+# não ficar pausando/retomando com o ruído do GPS parado)
+PAUSA_AUTO_APOS_S = 5.0
+RETOMA_AUTO_KMH = 3.0
 
 
 def haversine_m(lat1, lon1, lat2, lon2):
@@ -35,6 +40,8 @@ class Viagem:
         self._ultimo_t = None
         self._acumulado_s = 0.0
         self._retomada = None
+        self.pausa_auto = False  # True = foi a pausa automática que pausou
+        self._parado_desde = None
 
     # --- controle -------------------------------------------------------
     def iniciar(self):
@@ -44,19 +51,49 @@ class Viagem:
         self._retomada = agora
         self.estado = self.GRAVANDO
 
-    def pausar(self):
+    def pausar(self, auto=False):
         if self.estado != self.GRAVANDO:
             return
-        self._acumulado_s += self._relogio() - self._retomada
+        fim = self._relogio()
+        if auto and self._parado_desde is not None:
+            # os segundos esperando parado antes de pausar também não contam
+            fim = max(self._retomada, self._parado_desde)
+        self._acumulado_s += fim - self._retomada
         self._retomada = None
         self._ultimo = None  # não soma distância do trecho pausado
+        self._parado_desde = None
+        self.pausa_auto = auto
         self.estado = self.PAUSADA
 
     def retomar(self):
         if self.estado != self.PAUSADA:
             return
         self._retomada = self._relogio()
+        self._parado_desde = None
+        self.pausa_auto = False
         self.estado = self.GRAVANDO
+
+    def checar_pausa_auto(self, vel_kmh, ligada=True):
+        """Pausa sozinha depois de PAUSA_AUTO_APOS_S parada e retoma quando
+        volta a andar (só se foi ela que pausou; a pausa do botão continua
+        esperando o Retomar). Devolve True se o estado mudou."""
+        if not ligada:
+            self._parado_desde = None
+            return False
+        if self.estado == self.GRAVANDO:
+            if vel_kmh >= LIMIAR_MOVIMENTO_KMH:
+                self._parado_desde = None
+                return False
+            agora = self._relogio()
+            if self._parado_desde is None:
+                self._parado_desde = agora
+            elif agora - self._parado_desde >= PAUSA_AUTO_APOS_S:
+                self.pausar(auto=True)
+                return True
+        elif self.estado == self.PAUSADA and self.pausa_auto and vel_kmh >= RETOMA_AUTO_KMH:
+            self.retomar()
+            return True
+        return False
 
     def finalizar(self):
         """Encerra e devolve (resumo, pontos) ou None se não havia viagem."""

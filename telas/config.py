@@ -1,10 +1,15 @@
-"""Ajustes: limite de velocidade, suavização, tela ligada e simulador."""
+"""Ajustes: alerta de velocidade, vibração, pausa automática, orientação,
+tela ligada, suavização e simulador."""
+import json
+import os
+
 from kivy.app import App
 from kivy.metrics import dp
 from kivy.uix.boxlayout import BoxLayout
+from kivy.uix.gridlayout import GridLayout
 from kivy.uix.label import Label
 from kivy.uix.screenmanager import Screen
-from kivy.uix.widget import Widget
+from kivy.uix.scrollview import ScrollView
 
 import tema
 from widgets.botao import BotaoHUD
@@ -61,33 +66,66 @@ class Alternar(BotaoHUD):
         self.text = "Ligado" if ligado else "Desligado"
 
 
+def _versao():
+    """Número gravado pelo build do GitHub (1.0.N); no PC não existe."""
+    try:
+        with open(os.path.join(App.get_running_app().directory, "versao.json")) as f:
+            return json.load(f)["versao"]
+    except (OSError, ValueError, KeyError):
+        return "de teste (PC)"
+
+
 class TelaConfig(Screen):
     def __init__(self, **kw):
         super().__init__(**kw)
         raiz = BoxLayout(orientation="vertical", padding=tema.MARGEM, spacing=dp(8))
         raiz.add_widget(Cabecalho("Ajustes", self._voltar))
 
-        self.sel_limite = Seletor("%d km/h", self._mudar_limite)
-        raiz.add_widget(Linha("Alerta de velocidade",
-                              "O velocimetro fica laranja e pisca acima deste valor.",
-                              self.sel_limite))
+        # rolagem: as opções não cabem numa tela deitada (nem em celular pequeno)
+        rolagem = ScrollView(do_scroll_x=False, bar_color=tema.CIANO, bar_width=dp(3))
+        lista = GridLayout(cols=1, size_hint_y=None, spacing=dp(4))
+        lista.bind(minimum_height=lista.setter("height"))
+        rolagem.add_widget(lista)
+        raiz.add_widget(rolagem)
 
-        self.sel_alfa = Seletor("%.1f", self._mudar_alfa)
-        raiz.add_widget(Linha("Resposta do velocimetro",
-                              "Menor: numero mais estavel. Maior: reage mais rapido.",
-                              self.sel_alfa))
+        self.sel_limite = Seletor("%d km/h", self._mudar_limite)
+        lista.add_widget(Linha("Alerta de velocidade",
+                               "O velocimetro fica laranja e pisca acima deste valor.",
+                               self.sel_limite))
+
+        self.alt_vibrar = Alternar(lambda v: self._mudar_simples("vibrar_limite", self.alt_vibrar, v))
+        lista.add_widget(Linha("Vibrar no limite",
+                               "O celular vibra quando passa do alerta de velocidade.",
+                               self._centralizar(self.alt_vibrar)))
+
+        self.alt_pausa = Alternar(lambda v: self._mudar_simples("pausa_auto", self.alt_pausa, v))
+        lista.add_widget(Linha("Pausa automatica",
+                               "Parado (semaforo), a viagem pausa sozinha e volta ao andar.",
+                               self._centralizar(self.alt_pausa)))
+
+        self.alt_deitada = Alternar(self._mudar_deitada)
+        lista.add_widget(Linha("Tela deitada",
+                               "Para o celular deitado no suporte do guidao.",
+                               self._centralizar(self.alt_deitada)))
 
         self.alt_tela = Alternar(self._mudar_tela)
-        raiz.add_widget(Linha("Manter tela ligada",
-                              "Evita a tela apagar durante a viagem.",
-                              self._centralizar(self.alt_tela)))
+        lista.add_widget(Linha("Manter tela ligada",
+                               "Evita a tela apagar durante a viagem.",
+                               self._centralizar(self.alt_tela)))
+
+        self.sel_alfa = Seletor("%.1f", self._mudar_alfa)
+        lista.add_widget(Linha("Resposta do velocimetro",
+                               "Menor: numero mais estavel. Maior: reage mais rapido.",
+                               self.sel_alfa))
 
         self.alt_sim = Alternar(self._mudar_sim)
-        raiz.add_widget(Linha("Modo simulador",
-                              "Usa GPS falso para testar o app parado.",
-                              self._centralizar(self.alt_sim)))
+        lista.add_widget(Linha("Modo simulador",
+                               "Usa GPS falso para testar o app parado.",
+                               self._centralizar(self.alt_sim)))
 
-        raiz.add_widget(Widget())
+        self.lbl_versao = Texto(text="", font_size=tema.T_ROTULO, color=tema.CIANO_FRACO,
+                                halign="center", size_hint_y=None, height=dp(40))
+        lista.add_widget(self.lbl_versao)
         self.add_widget(raiz)
 
     @staticmethod
@@ -99,14 +137,28 @@ class TelaConfig(Screen):
     def on_pre_enter(self, *a):
         aj = App.get_running_app().ajustes
         self.sel_limite.mostrar(aj["limite_kmh"])
-        self.sel_alfa.mostrar(aj["alfa"])
+        self.alt_vibrar.mostrar(aj["vibrar_limite"])
+        self.alt_pausa.mostrar(aj["pausa_auto"])
+        self.alt_deitada.mostrar(aj["tela_deitada"])
         self.alt_tela.mostrar(aj["tela_ligada"])
+        self.sel_alfa.mostrar(aj["alfa"])
         self.alt_sim.mostrar(aj["simulador"])
+        self.lbl_versao.text = "GT-HUD versao %s" % _versao()
 
     def _mudar_limite(self, d):
         aj = App.get_running_app().ajustes
-        aj["limite_kmh"] = max(10, min(60, aj["limite_kmh"] + d))
+        aj["limite_kmh"] = max(10, min(tema.VEL_MAXIMA, aj["limite_kmh"] + d))
         self.sel_limite.mostrar(aj["limite_kmh"])
+
+    def _mudar_simples(self, chave, botao, ligado):
+        App.get_running_app().ajustes[chave] = ligado
+        botao.mostrar(ligado)
+
+    def _mudar_deitada(self, ligado):
+        app = App.get_running_app()
+        app.ajustes["tela_deitada"] = ligado
+        app.aplicar_orientacao()
+        self.alt_deitada.mostrar(ligado)
 
     def _mudar_alfa(self, d):
         app = App.get_running_app()

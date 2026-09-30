@@ -7,6 +7,9 @@ PADRAO = {
     "alfa": 0.5,
     "tela_ligada": True,
     "simulador": False,
+    "vibrar_limite": True,
+    "pausa_auto": True,
+    "tela_deitada": False,
 }
 
 

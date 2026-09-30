@@ -12,7 +12,7 @@ import tema
 from util import fmt_dist, fmt_tempo, fmt_vel
 from viagem import Viagem
 from widgets.botao import BotaoHUD
-from widgets.comuns import Bloco, Ponto, Texto
+from widgets.comuns import Bloco, Ponto, Texto, soltar
 from widgets.velocimetro import Velocimetro
 
 SEM_SINAL_APOS_S = 5
@@ -24,49 +24,73 @@ class TelaHUD(Screen):
         self._t_ultima_valida = 0
         self._ev_relogio = None
         self._ev_msg = None
+        self._deitada = None
+        self._estado_visto = None
 
-        raiz = BoxLayout(orientation="vertical", padding=tema.MARGEM, spacing=dp(10))
+        self.raiz = BoxLayout(padding=tema.MARGEM, spacing=dp(10))
 
         # topo: status do GPS + navegação
-        topo = BoxLayout(size_hint_y=None, height=dp(44), spacing=dp(10))
+        self.topo = BoxLayout(size_hint_y=None, height=dp(44), spacing=dp(10))
         self.ponto = Ponto(pos_hint={"center_y": 0.5})
-        topo.add_widget(self.ponto)
+        self.topo.add_widget(self.ponto)
         self.lbl_gps = Texto(text="Procurando sinal", font_size=tema.T_ROTULO + 1,
                              color=tema.CIANO_FRACO)
-        topo.add_widget(self.lbl_gps)
-        topo.add_widget(BotaoHUD(text="Viagens", size_hint_x=None, width=dp(92),
-                                 font_size=tema.T_ROTULO + 1,
-                                 on_release=lambda *a: self._ir("viagens")))
-        topo.add_widget(BotaoHUD(text="Ajustes", size_hint_x=None, width=dp(92),
-                                 font_size=tema.T_ROTULO + 1,
-                                 on_release=lambda *a: self._ir("config")))
-        raiz.add_widget(topo)
+        self.topo.add_widget(self.lbl_gps)
+        self.topo.add_widget(BotaoHUD(text="Viagens", size_hint_x=None, width=dp(92),
+                                      font_size=tema.T_ROTULO + 1,
+                                      on_release=lambda *a: self._ir("viagens")))
+        self.topo.add_widget(BotaoHUD(text="Ajustes", size_hint_x=None, width=dp(92),
+                                      font_size=tema.T_ROTULO + 1,
+                                      on_release=lambda *a: self._ir("config")))
 
         # velocímetro
         self.velo = Velocimetro()
-        raiz.add_widget(self.velo)
 
         # mensagem curta (ex.: "Viagem salva")
         self.lbl_msg = Texto(text="", font_size=tema.T_ROTULO + 1, color=tema.VERDE,
                              halign="center", size_hint_y=None, height=dp(20))
-        raiz.add_widget(self.lbl_msg)
 
         # números
-        grade = GridLayout(cols=2, spacing=dp(8), size_hint_y=None, height=dp(190))
+        self.grade = GridLayout(cols=2, spacing=dp(8))
         self.b_max = Bloco(rotulo="Maxima (km/h)", valor="0")
         self.b_med = Bloco(rotulo="Media (km/h)", valor="0")
         self.b_dist = Bloco(rotulo="Distancia", valor="0 m")
         self.b_tempo = Bloco(rotulo="Tempo", valor="00:00")
         for b in (self.b_max, self.b_med, self.b_dist, self.b_tempo):
-            grade.add_widget(b)
-        raiz.add_widget(grade)
+            self.grade.add_widget(b)
 
         # controles
         self.controles = BoxLayout(size_hint_y=None, height=dp(62), spacing=dp(10))
-        raiz.add_widget(self.controles)
 
-        self.add_widget(raiz)
+        self.add_widget(self.raiz)
+        self.bind(size=self._organizar)
         self._montar_controles()
+
+    def _organizar(self, *a):
+        """Em pé: tudo empilhado. Deitada: velocímetro grande à esquerda e
+        o resto numa coluna à direita."""
+        deitada = self.width > self.height
+        if deitada == self._deitada:
+            return
+        self._deitada = deitada
+        soltar(self.topo, self.velo, self.lbl_msg, self.grade, self.controles)
+        self.raiz.clear_widgets()
+        if deitada:
+            self.raiz.orientation = "horizontal"
+            self.velo.size_hint_x = 0.48
+            self.grade.size_hint_y = 1
+            coluna = BoxLayout(orientation="vertical", spacing=dp(8))
+            for w in (self.topo, self.lbl_msg, self.grade, self.controles):
+                coluna.add_widget(w)
+            self.raiz.add_widget(self.velo)
+            self.raiz.add_widget(coluna)
+        else:
+            self.raiz.orientation = "vertical"
+            self.velo.size_hint_x = 1
+            self.grade.size_hint_y = None
+            self.grade.height = dp(190)
+            for w in (self.topo, self.velo, self.lbl_msg, self.grade, self.controles):
+                self.raiz.add_widget(w)
 
     # --- ciclo de vida ---------------------------------------------------
     def on_pre_enter(self, *a):
@@ -95,6 +119,13 @@ class TelaHUD(Screen):
         self.velo.velocidade = vel
         self.velo.alerta = vel > app.ajustes["limite_kmh"]
         self._status_gps()
+        if app.viagem.estado != self._estado_visto:
+            # quem mudou foi a pausa automática (os botões já remontam sozinhos)
+            if app.viagem.estado == Viagem.PAUSADA:
+                self._mensagem("Pausa automatica: parado", tema.LARANJA)
+            else:
+                self._mensagem("Andando de novo: gravando", tema.CIANO)
+            self._montar_controles()
         self._atualizar_numeros()
 
     def _tique(self, dt):
@@ -131,6 +162,7 @@ class TelaHUD(Screen):
     # --- controles da viagem ---------------------------------------------
     def _montar_controles(self):
         v = App.get_running_app().viagem
+        self._estado_visto = v.estado
         c = self.controles
         c.clear_widgets()
         if v.estado == Viagem.PARADA:

@@ -22,31 +22,46 @@ class TelaBoot(Screen):
     def __init__(self, **kw):
         super().__init__(**kw)
         self._saiu = False
-        raiz = BoxLayout(orientation="vertical", padding=dp(28), spacing=dp(10))
+        # em pé: marca em cima e informações embaixo; deitada: lado a lado
+        self.raiz = BoxLayout(padding=dp(28), spacing=dp(10))
 
-        raiz.add_widget(Widget(size_hint_y=0.6))
+        self.marca = BoxLayout(orientation="vertical", spacing=dp(10))
+        self._esp_cima = Widget(size_hint_y=0.6)
+        self.marca.add_widget(self._esp_cima)
         self.titulo = Label(text="GT-HUD", font_size=dp(58), bold=True, color=tema.CIANO,
                             size_hint_y=None, height=dp(80))
-        raiz.add_widget(self.titulo)
-        raiz.add_widget(Label(text="Ouxi GT20", font_size=tema.T_BOTAO,
-                              color=tema.CIANO_FRACO, size_hint_y=None, height=dp(24)))
-        raiz.add_widget(Widget(size_hint_y=0.25))
+        self.marca.add_widget(self.titulo)
+        self.marca.add_widget(Label(text="Ouxi GT20", font_size=tema.T_BOTAO,
+                                    color=tema.CIANO_FRACO, size_hint_y=None, height=dp(24)))
+        self._esp_baixo = Widget(size_hint_y=0.25)
+        self.marca.add_widget(self._esp_baixo)
 
+        self.info = BoxLayout(orientation="vertical", spacing=dp(10))
         self.log = Texto(text="", font_size=tema.T_ROTULO + 1, color=tema.CIANO_FRACO,
                          valign="top", size_hint_y=None, height=dp(110))
-        raiz.add_widget(self.log)
+        self.info.add_widget(self.log)
         self.status = Texto(text="", font_size=tema.T_BOTAO, bold=True, color=tema.BRANCO,
                             size_hint_y=None, height=dp(56))
-        raiz.add_widget(self.status)
-        raiz.add_widget(Widget(size_hint_y=0.4))
-
+        self.info.add_widget(self.status)
+        self.info.add_widget(Widget(size_hint_y=0.4))
         self.botoes = BoxLayout(size_hint_y=None, height=dp(56), spacing=dp(12))
-        raiz.add_widget(self.botoes)
-        self.add_widget(raiz)
+        self.info.add_widget(self.botoes)
+
+        self.raiz.add_widget(self.marca)
+        self.raiz.add_widget(self.info)
+        self.add_widget(self.raiz)
+        self.bind(size=self._organizar)
 
         self._linha = 0
         self._ev_log = None
         self._mostrar_botoes_padrao()
+
+    def _organizar(self, *a):
+        deitada = self.width > self.height
+        self.raiz.orientation = "horizontal" if deitada else "vertical"
+        # deitada, o nome fica no meio da altura; em pé, um pouco acima
+        self._esp_cima.size_hint_y = 0.5 if deitada else 0.6
+        self._esp_baixo.size_hint_y = 0.5 if deitada else 0.25
 
     # --- sequência de boot -------------------------------------------------
     def on_enter(self, *a):

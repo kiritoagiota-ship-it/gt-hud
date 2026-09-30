@@ -20,10 +20,10 @@ INICIO, FIM = -135.0, 135.0
 
 class Velocimetro(Widget):
     velocidade = NumericProperty(0)
-    maximo = NumericProperty(60)
+    maximo = NumericProperty(tema.VEL_MAXIMA)
     limite = NumericProperty(32)
     alerta = BooleanProperty(False)
-    segmentos = 30
+    segmentos = 25  # 2 km/h cada: o limite padrão (32) cai bem na divisa
 
     def __init__(self, **kw):
         super().__init__(**kw)
@@ -33,8 +33,9 @@ class Velocimetro(Widget):
                                size_hint=(None, None))
         self.lbl_unidade = Label(text="km/h", color=tema.CIANO_FRACO,
                                  size_hint=(None, None))
+        self._valores_marcas = list(range(0, int(self.maximo) + 1, 10))
         self.marcas = [Label(text=str(v), color=tema.CIANO_FRACO, size_hint=(None, None),
-                             size=(dp(30), dp(20))) for v in range(0, 61, 10)]
+                             size=(dp(30), dp(20))) for v in self._valores_marcas]
         for w in [self.lbl_valor, self.lbl_unidade] + self.marcas:
             self.add_widget(w)
         self._gatilho = Clock.create_trigger(self._desenhar, 0)
@@ -127,6 +128,6 @@ class Velocimetro(Widget):
         self.lbl_unidade.size = (r, r * 0.2)
         self.lbl_unidade.center = (cx, cy - r * 0.42)
 
-        for lbl, v in zip(self.marcas, range(0, 61, 10)):
+        for lbl, v in zip(self.marcas, self._valores_marcas):
             lbl.font_size = max(dp(10), r * 0.085)
             lbl.center = self._polar(cx, cy, r - esp * 2.1, self._angulo(v))

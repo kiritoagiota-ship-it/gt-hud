@@ -26,3 +26,6 @@ T_BOTAO = sp(17)
 T_TITULO = sp(22)
 
 MARGEM = dp(14)
+
+# Fim da escala do velocímetro (a GT20 anda até uns 45 km/h)
+VEL_MAXIMA = 50
