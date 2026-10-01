@@ -15,8 +15,8 @@ from widgets.velocimetro import Velocimetro
 
 # sem sinal bom por esse tempo, aparece a dica de ir para um lugar aberto
 DICA_APOS_S = 30
-DICA_FECHADO = "GPS nao pega em lugar fechado. Va para uma area aberta."
-DICA_DESLIGADO = "Ligue a Localizacao do celular (no painel de cima)."
+DICA_FECHADO = "GPS não pega em lugar fechado. Vá para uma área aberta."
+DICA_DESLIGADO = "Ligue a Localização do celular (no painel de cima)."
 DICAS = (DICA_FECHADO, DICA_DESLIGADO)
 
 
@@ -54,9 +54,9 @@ class TelaHUD(Screen):
 
         # números
         self.grade = GridLayout(cols=2, spacing=dp(8))
-        self.b_max = Bloco(rotulo="Maxima (km/h)", valor="0")
-        self.b_med = Bloco(rotulo="Media (km/h)", valor="0")
-        self.b_dist = Bloco(rotulo="Distancia", valor="0 m")
+        self.b_max = Bloco(rotulo="Máxima (km/h)", valor="0")
+        self.b_med = Bloco(rotulo="Média (km/h)", valor="0")
+        self.b_dist = Bloco(rotulo="Distância", valor="0 m")
         self.b_tempo = Bloco(rotulo="Tempo", valor="00:00")
         for b in (self.b_max, self.b_med, self.b_dist, self.b_tempo):
             self.grade.add_widget(b)
@@ -123,7 +123,7 @@ class TelaHUD(Screen):
         if app.viagem.estado != self._estado_visto:
             # quem mudou foi a pausa automática (os botões já remontam sozinhos)
             if app.viagem.estado == Viagem.PAUSADA:
-                self._mensagem("Pausa automatica: parado", tema.LARANJA)
+                self._mensagem("Pausa automática: parado", tema.LARANJA)
             else:
                 self._mensagem("Andando de novo: gravando", tema.CIANO)
             self._montar_controles()
@@ -151,7 +151,7 @@ class TelaHUD(Screen):
             cor = tema.VERDE if prec <= 10 else tema.LARANJA
             texto = "GPS  %d m" % prec
             if sat and sat[1]:
-                texto += "\n%d satelites" % sat[1]
+                texto += "\n%d satélites" % sat[1]
         else:
             if app.sinal_fraco():
                 cor, texto = tema.LARANJA, "Sinal fraco: %d m" % (app.precisao_ultima or 0)
@@ -215,7 +215,7 @@ class TelaHUD(Screen):
         if app.sinal_ok():
             self._mensagem("Gravando viagem", tema.CIANO)
         else:
-            self._mensagem("Gravando: a distancia comeca quando o GPS pegar", tema.LARANJA)
+            self._mensagem("Gravando: a distância começa quando o GPS pegar", tema.LARANJA)
         self._montar_controles()
         self._atualizar_numeros()
 
@@ -238,7 +238,7 @@ class TelaHUD(Screen):
             self._mensagem("Viagem salva: %s" % fmt_dist(app.ultima_salva_m), tema.VERDE)
         else:
             # antes sumia calada: parecia que o botao nao tinha funcionado
-            self._mensagem("Viagem com menos de 20 m: nao foi salva", tema.LARANJA)
+            self._mensagem("Viagem com menos de 20 m: não foi salva", tema.LARANJA)
         self._montar_controles()
         self._atualizar_numeros()
 

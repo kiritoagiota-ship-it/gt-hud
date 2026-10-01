@@ -31,6 +31,7 @@ import urllib.error
 from kivy.clock import Clock
 from kivy.graphics.tesselator import TYPE_POLYGONS, WINDING_ODD, Tesselator
 
+import goiania
 import mvt
 import rede
 
@@ -439,6 +440,42 @@ class FonteVetorial:
         for _ in range(TRABALHADORES):
             threading.Thread(target=self._trabalhar, daemon=True).start()
         threading.Thread(target=self._limpar_disco, daemon=True).start()
+
+    # --- mapa offline de Goiânia (botão nos Ajustes) --------------------------------
+    @staticmethod
+    def tiles_goiania(zooms=(11, 12, 13, 14)):
+        """[(z, x, y)] que cobrem Goiânia (goiania.LIMITES)."""
+        lat0, lon0, lat1, lon1 = goiania.LIMITES
+
+        def tile(lat, lon, z):
+            n = 2 ** z
+            x = int((lon + 180.0) / 360.0 * n)
+            y = int((1.0 - math.asinh(math.tan(math.radians(lat))) / math.pi) / 2.0 * n)
+            return x, y
+        lista = []
+        for z in zooms:
+            xa, ya = tile(lat1, lon0, z)
+            xb, yb = tile(lat0, lon1, z)
+            lista += [(z, x, y) for x in range(xa, xb + 1) for y in range(ya, yb + 1)]
+        return lista
+
+    def baixar_goiania(self, ao_progresso, ao_terminar):
+        """Baixa (ou confere no disco) todos os tiles de Goiânia, numa thread.
+        ao_progresso(feitos, total, mb) e ao_terminar(ok, falhas) na thread do Kivy."""
+        def trabalhar():
+            lista = self.tiles_goiania()
+            total, ok, falhas, tamanho = len(lista), 0, 0, 0
+            for n, (z, x, y) in enumerate(lista, 1):
+                dados = self._ler_ou_baixar(z, x, y)
+                if dados is None:
+                    falhas += 1
+                else:
+                    ok += 1
+                    tamanho += len(dados)
+                if n % 5 == 0 or n == total:
+                    Clock.schedule_once(lambda dt, f=n, mb=tamanho / 1e6: ao_progresso(f, total, mb))
+            Clock.schedule_once(lambda dt: ao_terminar(ok, falhas))
+        threading.Thread(target=trabalhar, daemon=True).start()
 
     def pronto(self, chave):
         p = self._prontos.get(chave)

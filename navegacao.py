@@ -12,6 +12,7 @@ calcula o quanto já andou, a próxima manobra, e decide o que falar:
 import math
 
 import falas
+import sinais
 
 FORA_DA_ROTA_M = 35
 FORA_DA_ROTA_S = 4.0
@@ -20,6 +21,12 @@ AVISO_LONGE_M = (250, 450)   # faixa em que sai o "Em X metros, ..."
 AVISO_PERTO_S = 6.0          # o aviso "na hora" sai uns 6 s antes da curva
 AVISO_PERTO_MIN_M = 35
 AVISO_SUBIDA_M = 220
+AVISO_DESCIDA_M = 180
+DESCIDA_FALADA_MIN = 5.0     # descida mais leve que isso só aparece na tela
+AVISO_SINAL_S = 7.0          # semáforo/lombada: avisa uns 7 s antes (pela velocidade)
+AVISO_SINAL_MIN_M = 50
+SINAL_COM_MANOBRA_M = 60     # semáforo colado numa curva: a fala da curva já basta
+SEMAFORO_FALADO_A_CADA_M = 400   # avenida com semáforo em todo quarteirão: fala 1 a cada 400 m
 DEPOIS_M = 120               # manobra logo depois da próxima: mostra "Depois"
 SEGUE_LINHA_M = 20           # até isso da rota, a seta anda EM CIMA da linha
 _M_POR_GRAU = 111320.0
@@ -40,9 +47,10 @@ def _projecao(p, a, b):
 
 
 class Navegacao:
-    def __init__(self, rota, falar, avisar_subidas=True):
+    def __init__(self, rota, falar, avisar_subidas=True, avisar_semaforos=True):
         self.falar = falar  # falar(pedaços, prioridade[, texto pronto])
         self.avisar_subidas = avisar_subidas
+        self.avisar_semaforos = avisar_semaforos
         self.chegou = False
         self._vel_ms = 0.0
         self._iniciar_rota(rota)
@@ -63,7 +71,11 @@ class Navegacao:
         self._fora_desde = None
         self._faladas = set()
         self._subidas_avisadas = set()
+        self._descidas_avisadas = set()
         self._subida_atual = None
+        self.alertas = sinais.ao_longo(rota)   # [(dist_m, "semaforo"/"lombada")]
+        self._alertas_ditos = set()
+        self._ultimo_semaforo_m = -1e9
 
     def trocar_rota(self, rota):
         """Rota nova depois de recalcular (começa do ponto atual)."""
@@ -127,7 +139,28 @@ class Navegacao:
             self._avisar_manobra(proxima, vel_kmh)
         if self.avisar_subidas:
             self._avisar_subidas()
+        self._avisar_alertas(vel_kmh, proxima)
         return self._estado(proxima)
+
+    def _avisar_alertas(self, vel_kmh, proxima):
+        """Lombada sempre (segurança); semáforo se ligado nos Ajustes e se não
+        estiver colado numa curva (aí a fala da curva já chama a atenção)."""
+        janela = max(AVISO_SINAL_MIN_M, vel_kmh / 3.6 * AVISO_SINAL_S)
+        for k, (dist, tipo) in enumerate(self.alertas):
+            falta = dist - self.dist_feita
+            if falta < 0 or k in self._alertas_ditos:
+                continue
+            if falta > janela:
+                break
+            self._alertas_ditos.add(k)
+            if tipo == "lombada":
+                self.falar(["lombada"], P_AVISO)
+            elif (self.avisar_semaforos
+                  and dist - self._ultimo_semaforo_m >= SEMAFORO_FALADO_A_CADA_M
+                  and not (proxima is not None
+                           and abs(proxima[1]["dist_m"] - dist) < SINAL_COM_MANOBRA_M)):
+                self._ultimo_semaforo_m = dist
+                self.falar(["semaforo"], P_INFO)
 
     def _avisar_manobra(self, proxima, vel_kmh):
         n, m = proxima
@@ -172,9 +205,20 @@ class Navegacao:
                 self.falar(pedacos, P_AVISO)
             if s["inicio_m"] <= self.dist_feita < s["fim_m"]:
                 atual = k
+        for k, s in enumerate(self.rota.descidas):
+            falta = s["inicio_m"] - self.dist_feita
+            if (k not in self._descidas_avisadas and -20 < falta <= AVISO_DESCIDA_M
+                    and s["grau"] >= DESCIDA_FALADA_MIN):
+                self._descidas_avisadas.add(k)
+                pedacos = ["senhor"]
+                if falta > 40:
+                    pedacos.append("em_%d" % falas.distancia_falada(falta))
+                pedacos.append(falas.chave_descida(s["grau"]))
+                self.falar(pedacos, P_AVISO)
         if self._subida_atual is not None and atual is None:
-            fim = self.rota.subidas[self._subida_atual]["fim_m"]
-            if self.dist_feita >= fim:
+            s = self.rota.subidas[self._subida_atual]
+            # "Fim da subida" só depois de subida que cansa (forte ou longa)
+            if self.dist_feita >= s["fim_m"] and (s["grau"] >= 5 or s["fim_m"] - s["inicio_m"] >= 200):
                 self.falar(["fim_subida"], P_INFO)
         self._subida_atual = atual
 
@@ -197,6 +241,7 @@ class Navegacao:
             "restante_s": rota.tempo_s * restante / rota.total_m if rota.total_m else 0,
             "subida_restante_m": rota.subida_restante_m(self.dist_feita),
             "subida": None,
+            "alerta": None,
             "fora_da_rota": self.dist_da_linha > FORA_DA_ROTA_M,
             "chegou": self.chegou,
         }
@@ -208,13 +253,23 @@ class Navegacao:
                 seguinte = rota.manobras[n + 1]
                 if seguinte["dist_m"] - m["dist_m"] < DEPOIS_M:
                     estado["depois"] = seguinte
-        for s in rota.subidas:
+        # chip de subida/descida: a que está acontecendo, senão a mais perto à frente
+        trechos = [("subida", s) for s in rota.subidas] + [("descida", s) for s in rota.descidas]
+        melhor = None
+        for tipo, s in trechos:
             if s["inicio_m"] <= self.dist_feita < s["fim_m"]:
-                estado["subida"] = {"grau": s["grau"], "falta_m": s["fim_m"] - self.dist_feita,
-                                    "em_m": 0}
+                melhor = (-1, {"tipo": tipo, "grau": s["grau"], "falta_m": s["fim_m"] - self.dist_feita,
+                               "em_m": 0})
                 break
-            if 0 < s["inicio_m"] - self.dist_feita <= 400:
-                estado["subida"] = {"grau": s["grau"], "falta_m": s["fim_m"] - s["inicio_m"],
-                                    "em_m": s["inicio_m"] - self.dist_feita}
+            em = s["inicio_m"] - self.dist_feita
+            if 0 < em <= 400 and (melhor is None or em < melhor[0]):
+                melhor = (em, {"tipo": tipo, "grau": s["grau"], "falta_m": s["fim_m"] - s["inicio_m"],
+                               "em_m": em})
+        if melhor is not None:
+            estado["subida"] = melhor[1]
+        for dist, tipo in self.alertas:
+            em = dist - self.dist_feita
+            if 0 <= em <= 200:
+                estado["alerta"] = {"tipo": tipo, "em_m": em}
                 break
         return estado

@@ -28,17 +28,20 @@ import time
 from kivy.clock import Clock
 from kivy.core.text import Label as CoreLabel
 from kivy.graphics import (Color, Ellipse, InstructionGroup, Line, Mesh, PopMatrix,
-                           PushMatrix, Rectangle, Rotate, Scale, Translate)
+                           PushMatrix, Rectangle, Rotate, RoundedRectangle, Scale, Translate)
 from kivy.metrics import Metrics, dp, sp
 from kivy.properties import BooleanProperty, NumericProperty
 from kivy.uix.label import Label
 from kivy.uix.widget import Widget
 
+import goiania
+import sinais
 import tema
 from mapa_vetor import (AREAS, FUNDO, RUAS, FonteVetorial, tela_animando, tiles_do_retangulo,
                         z_dados)
 
-ZOOM_MIN, ZOOM_MAX = 4.0, 19.0
+ZOOM_MIN, ZOOM_MAX = 11.0, 19.0   # o app é só de Goiânia: de longe, a cidade inteira
+SEGURAR_S = 0.6                  # dedo parado esse tempo = marcar o ponto
 TAM = 256.0
 MAX_ROTULOS_RUA = 30
 MAX_ROTULOS_LUGAR = 8
@@ -58,6 +61,8 @@ ZOOM_NAV_PERTO, ZOOM_NAV_LONGE = 17.4, 16.6
 HISTERESE_ZOOM = 0.75      # só troca o nível de desenho com essa folga
 ORCAMENTO_TILES_S = 0.006  # por quadro, no máximo isso montando tiles
 MAX_TEXTURAS_NOVAS = 8     # por escolha de nomes, no máximo tantos nomes novos desenhados
+ZOOM_SINAIS = 16.0         # fora da navegação, semáforos e lombadas a partir desse zoom
+MAX_SINAIS = 40
 
 
 def mundo(lat, lon, z):
@@ -129,11 +134,16 @@ class MapaHUD(Widget):
         self._escala = Metrics.density      # px de tela por px do mundo no zoom 14
         self._origem = mundo(self.centro[0], self.centro[1], 14)
         self._rota, self._trilha, self._destino = [], [], None
+        self._alternativas = []
         self._desenhados = {}               # (dz, tx, ty, rz) -> [(grupo, instrução), ...]
         self._nivel = None                  # (dz, rz) atual
         self._rotulos = []
         self._texturas = collections.OrderedDict()
         self._chave_tiles = None            # vista da última conta de tiles
+        lat0, lon0, lat1, lon1 = goiania.LIMITES  # Goiânia em px do mundo z14
+        x0, y0 = mundo(lat1, lon0, 14)
+        x1, y1 = mundo(lat0, lon1, 14)
+        self._caixa_goiania = (x0, y0, x1, y1)
         self._tiles_sujo = True
         self._t_mexeu = 0.0                 # time.time() do último toque no mapa
         self.areas_cobertas = []            # (x0, y0, x1, y1) tapados por painéis da tela
@@ -151,6 +161,8 @@ class MapaHUD(Widget):
         self._alvo_zoom = None
         self._ev_anim = None
         self._toques = []
+        self.ao_segurar = None              # ao_segurar(lat, lon): dedo parado no mapa
+        self._ev_segurar = None
         self._velocidade = (0.0, 0.0)
         self._movs = []
         self.fonte = FonteVetorial(pasta_cache, self._origem, self._escala, Metrics.density,
@@ -171,10 +183,17 @@ class MapaHUD(Widget):
             self._g_ruas[nome] = InstructionGroup()
             self.canvas.add(self._g_ruas[nome])
         self._g_trilha = InstructionGroup()
+        self._g_alt = InstructionGroup()      # outras rotas que dá para escolher (cinza)
         self._g_rota = InstructionGroup()
         self.canvas.add(self._g_trilha)
+        self.canvas.add(self._g_alt)
         self.canvas.add(self._g_rota)
         self.canvas.add(PopMatrix())
+        self._g_sinais = InstructionGroup()   # semáforos e lombadas (tela)
+        self.canvas.add(self._g_sinais)
+        self._sinais = []                     # [(x local, y local, Translate)]
+        self._icones = {}                     # (lat, lon) -> (grupo, Translate)
+        self.sinais_rota = None               # navegando: só os do caminho [(lat, lon, tipo)]
         self._g_rotulos = InstructionGroup()  # nomes, em coordenadas de tela
         self.canvas.add(self._g_rotulos)
         self._g_tela = InstructionGroup()     # seta e destino
@@ -236,6 +255,11 @@ class MapaHUD(Widget):
 
     def definir_rota(self, pontos):
         self._rota = list(pontos)
+        self._refazer_linhas()
+
+    def definir_alternativas(self, listas):
+        """Rotas que a pessoa pode escolher em vez da atual (desenho cinza)."""
+        self._alternativas = [list(p) for p in listas]
         self._refazer_linhas()
 
     def definir_trilha(self, pontos):
@@ -382,7 +406,9 @@ class MapaHUD(Widget):
             lx, ly = self._tela_para_local(px, py)
             xs.append(lx + self._origem[0])
             ys.append(self._origem[1] - ly)
-        precisa = {(dz, tx, ty, rz) for tx, ty in tiles_do_retangulo(min(xs), min(ys), max(xs), max(ys), dz)}
+        gx0, gy0, gx1, gy1 = self._caixa_goiania
+        precisa = {(dz, tx, ty, rz) for tx, ty in tiles_do_retangulo(
+            max(min(xs), gx0), max(min(ys), gy0), min(max(xs), gx1), min(max(ys), gy1), dz)}
         # do centro para fora: o que está no meio da tela chega primeiro
         lado = 256.0 * 2 ** (14 - dz)
         mx, my = (cx + self._origem[0]) / lado, (self._origem[1] - cy) / lado
@@ -559,11 +585,74 @@ class MapaHUD(Widget):
             self._rotulos.append(rot)
             self._g_rotulos.add(rot.grupo)
         self._mover_rotulos()
+        self._escolher_sinais()
         if faltou_textura and self._ev_rotulos is None:
             # ainda há nomes para desenhar: continua logo (não espera 0,45 s)
             self._ev_rotulos = Clock.schedule_once(self._escolher_rotulos, 0.05)
 
+    # --- semáforos e lombadas -------------------------------------------------------
+    @staticmethod
+    def _icone(tipo):
+        g, tr = InstructionGroup(), Translate(0, 0)
+        g.add(PushMatrix())
+        g.add(tr)
+        if tipo == "semaforo":  # caixinha escura com as três luzes
+            g.add(Color(0.02, 0.03, 0.05, 0.95))
+            g.add(RoundedRectangle(pos=(-dp(5), -dp(11)), size=(dp(10), dp(22)), radius=[dp(3)]))
+            for k, cor in enumerate(((0.95, 0.25, 0.25, 1), (1.0, 0.78, 0.2, 1), (0.25, 0.9, 0.45, 1))):
+                g.add(Color(*cor))
+                g.add(Ellipse(pos=(-dp(3), dp(4) - k * dp(7)), size=(dp(6), dp(6))))
+        else:  # lombada: triângulo laranja de aviso
+            pts = [(0, dp(10)), (dp(10), -dp(8)), (-dp(10), -dp(8))]
+            g.add(Color(*tema.LARANJA))
+            g.add(Mesh(vertices=[v for x, y in pts for v in (x, y, 0, 0)], indices=[0, 1, 2],
+                       mode="triangles"))
+            g.add(Color(*tema.FUNDO))
+            g.add(Line(points=[c for p in pts for c in p], close=True, width=dp(1.3)))
+            g.add(Rectangle(pos=(-dp(1.2), -dp(3)), size=(dp(2.4), dp(7))))
+        g.add(PopMatrix())
+        return g, tr
+
+    def _escolher_sinais(self):
+        """Ícones dos semáforos/lombadas à vista (de perto: de longe poluiria)."""
+        self._g_sinais.clear()
+        self._sinais = []
+        if self.sinais_rota is None and self.zoom < ZOOM_SINAIS:
+            return
+        cantos = [self._local_para_geo(*self._tela_para_local(px, py))
+                  for px, py in ((self.x, self.y), (self.right, self.y), (self.x, self.top),
+                                 (self.right, self.top))]
+        lats, lons = [c[0] for c in cantos], [c[1] for c in cantos]
+        if len(self._icones) > 400:
+            self._icones.clear()
+        postos = []
+        if self.sinais_rota is not None:
+            la0, la1, lo0, lo1 = min(lats), max(lats), min(lons), max(lons)
+            fonte = [p for p in self.sinais_rota if la0 <= p[0] <= la1 and lo0 <= p[1] <= lo1]
+        else:
+            fonte = sinais.na_caixa(min(lats), min(lons), max(lats), max(lons), 300)
+        for lat, lon, tipo in fonte:
+            if len(postos) >= MAX_SINAIS:
+                break
+            sx, sy = self._para_tela(lat, lon)
+            # cruzamento com vários semáforos mapeados: um ícone só
+            if any(t == tipo and abs(sx - x) < dp(30) and abs(sy - y) < dp(30) for x, y, t in postos):
+                continue
+            postos.append((sx, sy, tipo))
+            item = self._icones.get((lat, lon))
+            if item is None:
+                item = self._icones[(lat, lon)] = self._icone(tipo)
+            self._g_sinais.add(item[0])
+            lx, ly = self._local(lat, lon)
+            self._sinais.append((lx, ly, item[1]))
+        self._mover_sinais()
+
+    def _mover_sinais(self):
+        for lx, ly, tr in self._sinais:
+            tr.xy = self._local_para_tela(lx, ly)
+
     def _mover_rotulos(self):
+        self._mover_sinais()
         for rot in self._rotulos:
             r = rot.info
             sx, sy = self._local_para_tela(r["x"], r["y"])
@@ -576,26 +665,35 @@ class MapaHUD(Widget):
 
     # --- rota, trilha, destino e seta ---------------------------------------------
     def _refazer_linhas(self, so_trilha=False):
-        grupos = [(self._g_trilha, self._trilha, "trilha")]
+        grupos = [(self._g_trilha, [self._trilha], "trilha")]
         if not so_trilha:
-            grupos.append((self._g_rota, self._rota, "rota"))
-        for grupo, pontos, tipo in grupos:
+            grupos.append((self._g_rota, [self._rota], "rota"))
+            grupos.append((self._g_alt, self._alternativas, "alt"))
+        for grupo, listas, tipo in grupos:
             grupo.clear()
-            if len(pontos) < 2:
-                continue
-            plano = []
-            for lat, lon in pontos:
-                plano.extend(self._local(lat, lon))
-            if tipo == "rota":
-                grupo.add(Color(*tema.com_alfa(tema.CIANO, 0.28)))
-                grupo.add(Line(points=plano, width=1, joint="round", cap="round"))
-                grupo.add(Color(*tema.CIANO))
-                grupo.add(Line(points=plano, width=1, joint="round", cap="round"))
-            else:
-                grupo.add(Color(*tema.com_alfa(tema.LARANJA, 0.85)))
-                grupo.add(Line(points=plano, width=1, joint="round", cap="round"))
+            for pontos in listas:
+                if len(pontos) >= 2:
+                    self._linha(grupo, pontos, tipo)
         self._larg_usada = None
         self._ajustar_larguras(self._escala_tela())
+
+    def _linha(self, grupo, pontos, tipo):
+        plano = []
+        for p in pontos:
+            plano.extend(self._local(p[0], p[1]))
+        if tipo == "alt":
+            grupo.add(Color(0.05, 0.08, 0.11, 0.9))
+            grupo.add(Line(points=plano, width=1, joint="round", cap="round"))
+            grupo.add(Color(0.55, 0.62, 0.70, 0.95))
+            grupo.add(Line(points=plano, width=1, joint="round", cap="round"))
+        elif tipo == "rota":
+            grupo.add(Color(*tema.com_alfa(tema.CIANO, 0.28)))
+            grupo.add(Line(points=plano, width=1, joint="round", cap="round"))
+            grupo.add(Color(*tema.CIANO))
+            grupo.add(Line(points=plano, width=1, joint="round", cap="round"))
+        else:
+            grupo.add(Color(*tema.com_alfa(tema.LARANJA, 0.85)))
+            grupo.add(Line(points=plano, width=1, joint="round", cap="round"))
 
     def _ajustar_larguras(self, s):
         # largura da Line é em unidades locais: compensa a escala para ficar
@@ -608,6 +706,9 @@ class MapaHUD(Widget):
             linha.width = px / s
         for linha in (i for i in self._g_trilha.children if isinstance(i, Line)):
             linha.width = dp(2.6) / s
+        linhas_alt = [i for i in self._g_alt.children if isinstance(i, Line)]
+        for k, linha in enumerate(linhas_alt):  # contorno escuro e miolo cinza
+            linha.width = (dp(8) if k % 2 == 0 else dp(4.5)) / s
 
     def _montar_marcas(self):
         """Destino, círculo de precisão, seta e bolinha: criados uma vez; a
@@ -780,7 +881,7 @@ class MapaHUD(Widget):
         s = self._escala_tela()
         gx, gy = _girar(dx, dy, -self.rotacao)
         cx, cy = self._local(*self.centro)
-        self.centro = self._local_para_geo(cx - gx / s, cy - gy / s)
+        self.centro = goiania.prender(*self._local_para_geo(cx - gx / s, cy - gy / s))
 
     def _zoom_no_ponto(self, novo_zoom, sx, sy):
         """Muda o zoom mantendo parado o ponto da tela (sx, sy) (sob os dedos)."""
@@ -792,7 +893,8 @@ class MapaHUD(Widget):
             self._em_lote = False
         depois = self._tela_para_local(sx, sy)
         cx, cy = self._local(*self.centro)
-        self.centro = self._local_para_geo(cx + antes[0] - depois[0], cy + antes[1] - depois[1])
+        self.centro = goiania.prender(*self._local_para_geo(cx + antes[0] - depois[0],
+                                                             cy + antes[1] - depois[1]))
 
     def _sair_do_seguir(self):
         if self.seguindo:
@@ -821,13 +923,30 @@ class MapaHUD(Widget):
         self._toques.append(touch)
         touch.ud["mapa_inicio"] = touch.pos
         self._movs = []
+        self._cancelar_segurar()
+        if len(self._toques) == 1 and self.ao_segurar is not None:
+            self._ev_segurar = Clock.schedule_once(lambda dt: self._segurou(touch), SEGURAR_S)
         return True
+
+    def _cancelar_segurar(self):
+        if self._ev_segurar is not None:
+            self._ev_segurar.cancel()
+            self._ev_segurar = None
+
+    def _segurou(self, touch):
+        self._ev_segurar = None
+        if touch in self._toques and len(self._toques) == 1 and self.ao_segurar is not None:
+            lat, lon = self._local_para_geo(*self._tela_para_local(*touch.pos))
+            self.ao_segurar(lat, lon)
 
     def on_touch_move(self, touch):
         if touch.grab_current is not self:
             return False
         self._t_mexeu = time.time()
         tela_animando()
+        x0, y0 = touch.ud.get("mapa_inicio", touch.pos)
+        if len(self._toques) >= 2 or math.hypot(touch.x - x0, touch.y - y0) > dp(10):
+            self._cancelar_segurar()  # mexeu: é arrasto/pinça, não "segurar"
         if len(self._toques) >= 2:
             a, b = self._toques[0], self._toques[1]
             outro = b if touch is a else a
@@ -854,6 +973,7 @@ class MapaHUD(Widget):
             return False
         touch.ungrab(self)
         self._t_mexeu = time.time()
+        self._cancelar_segurar()
         if touch in self._toques:
             self._toques.remove(touch)
         # inércia: continua deslizando na velocidade dos últimos movimentos

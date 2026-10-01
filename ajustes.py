@@ -13,8 +13,12 @@ PADRAO = {
     "voz": True,
     "girar_mapa": True,
     "avisar_subidas": True,
-    "voz_indice": -1,        # -1 = a voz padrão do motor do celular
-    "voz_tom": 0.88,         # abaixo de 1 = mais grave
+    "avisar_semaforos": True,   # lombada é avisada sempre (segurança)
+    "voz_indice": -1,        # -1 = automática: a mais grave (masculina) do celular
+    "voz_auto": -1,          # índice que a medição achou (-1 = ainda não mediu)
+    "voz_auto_nome": "",     # nome dessa voz (se a lista mudar, mede de novo)
+    "voz_masculina_v1": False,  # já passou para a voz automática uma vez (pedido do dono)
+    "voz_tom": 0.94,         # abaixo de 1 = mais grave
     "voz_efeito": True,      # tratamento estilo assistente de IA
 }
 

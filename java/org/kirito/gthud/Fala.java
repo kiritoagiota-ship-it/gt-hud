@@ -39,6 +39,16 @@ public class Fala {
     public static volatile boolean ocupada = false;
     public static volatile String nomesVozes = "";    // separados por \n
     public static volatile int vozAtual = -1;
+    // voz masculina automática: o Android não diz o gênero da voz, então cada
+    // voz pt-BR fala uma frase num arquivo (sem tocar) e a altura da voz (F0)
+    // é medida; a mais grave é a masculina. -2 nada feito, -1 medindo, >= 0
+    // índice da mais grave. tonsVozes: "índice:Hz" de cada uma (diagnóstico).
+    public static volatile int vozGrave = -2;
+    public static volatile String tonsVozes = "";
+    private static final String FRASE_MEDIDA = "Bom dia, senhor. Em duzentos metros, vire à direita.";
+    private static List<Integer> paraMedir;
+    private static double[] tons;
+    private static int medindo = -1;
 
     private static Context ctx;
     private static TextToSpeech tts;
@@ -136,6 +146,10 @@ public class Fala {
 
                 @Override
                 public void onDone(String id) {
+                    if (id.startsWith("medida")) {
+                        medirArquivo(id);
+                        return;
+                    }
                     if (!id.equals(falaAtual)) {
                         new File(ctx.getCacheDir(), id + ".wav").delete();  // fala já cortada
                         return;
@@ -149,6 +163,10 @@ public class Fala {
 
                 @Override
                 public void onError(String id) {
+                    if (id.startsWith("medida")) {
+                        proximaMedida();
+                        return;
+                    }
                     liberar(id);
                 }
             });
@@ -158,6 +176,140 @@ public class Fala {
         } catch (Exception e) {
             estado = -1;
         }
+    }
+
+    // --- voz masculina automática ---------------------------------------------------
+    public static void acharVozGrave() {
+        if (estado != 1 || tts == null || vozes.isEmpty() || vozGrave == -1) {
+            return;
+        }
+        paraMedir = new ArrayList<>();
+        for (int i = 0; i < vozes.size() && paraMedir.size() < 10; i++) {
+            if (!vozes.get(i).isNetworkConnectionRequired()) {
+                paraMedir.add(i);  // só as que funcionam sem internet
+            }
+        }
+        if (paraMedir.isEmpty()) {
+            for (int i = 0; i < vozes.size() && i < 6; i++) {
+                paraMedir.add(i);
+            }
+        }
+        tons = new double[vozes.size()];
+        tonsVozes = "";
+        medindo = -1;
+        vozGrave = -1;
+        proximaMedida();
+    }
+
+    private static void proximaMedida() {
+        medindo++;
+        if (medindo >= paraMedir.size()) {
+            int melhor = -2;
+            for (int i : paraMedir) {
+                if (tons[i] > 0 && (melhor < 0 || tons[i] < tons[melhor])) {
+                    melhor = i;
+                }
+            }
+            try {  // volta para a voz que estava
+                if (vozAtual >= 0) {
+                    tts.setVoice(vozes.get(vozAtual));
+                }
+            } catch (Exception e) {
+                // nada
+            }
+            vozGrave = melhor;
+            return;
+        }
+        int i = paraMedir.get(medindo);
+        try {
+            tts.setVoice(vozes.get(i));
+            tts.setPitch(1.0f);
+            tts.setSpeechRate(1.0f);
+            String id = "medida" + i;
+            File arquivo = new File(ctx.getCacheDir(), id + ".wav");
+            if (tts.synthesizeToFile(FRASE_MEDIDA, new Bundle(), arquivo, id) == TextToSpeech.SUCCESS) {
+                return;  // segue em onDone -> medirArquivo
+            }
+        } catch (Exception e) {
+            // essa voz não deu: pula
+        }
+        proximaMedida();
+    }
+
+    private static void medirArquivo(final String id) {
+        new Thread(new Runnable() {
+            @Override
+            public void run() {
+                File arquivo = new File(ctx.getCacheDir(), id + ".wav");
+                try {
+                    int i = Integer.parseInt(id.substring("medida".length()));
+                    int[] taxa = new int[1];
+                    short[] pcm = lerWav(lerArquivo(arquivo), taxa);
+                    if (pcm != null && pcm.length > 0) {
+                        tons[i] = alturaDaVoz(pcm, taxa[0]);
+                        tonsVozes += i + ":" + Math.round(tons[i]) + " ";
+                    }
+                } catch (Exception e) {
+                    // sem medida dessa voz
+                } finally {
+                    arquivo.delete();
+                    proximaMedida();
+                }
+            }
+        }).start();
+    }
+
+    /** Altura (F0, Hz) mediana da voz, por autocorrelação em janelas de 40 ms.
+     *  Voz masculina ~85-155 Hz, feminina ~165-255 Hz. */
+    private static double alturaDaVoz(short[] pcm, int taxa) {
+        int janela = taxa * 40 / 1000;
+        int passo = taxa / 50;
+        int lagMin = taxa / 320;
+        int lagMax = taxa / 65;
+        double maiorRms = 0;
+        for (int ini = 0; ini + janela < pcm.length; ini += passo) {
+            double e = 0;
+            for (int k = ini; k < ini + janela; k++) {
+                e += (double) pcm[k] * pcm[k];
+            }
+            maiorRms = Math.max(maiorRms, Math.sqrt(e / janela));
+        }
+        List<Double> f0 = new ArrayList<>();
+        double[] r = new double[lagMax + 1];
+        for (int ini = 0; ini + janela + lagMax < pcm.length; ini += passo) {
+            double e0 = 0;
+            for (int k = ini; k < ini + janela; k++) {
+                e0 += (double) pcm[k] * pcm[k];
+            }
+            if (Math.sqrt(e0 / janela) < maiorRms * 0.25) {
+                continue;  // silêncio ou consoante fraca
+            }
+            double maior = 0;
+            for (int lag = lagMin; lag <= lagMax; lag++) {
+                double soma = 0, e1 = 0;
+                for (int k = ini; k < ini + janela; k++) {
+                    soma += (double) pcm[k] * pcm[k + lag];
+                    e1 += (double) pcm[k + lag] * pcm[k + lag];
+                }
+                r[lag] = soma / Math.sqrt(e0 * e1 + 1e-9);
+                maior = Math.max(maior, r[lag]);
+            }
+            if (maior < 0.6) {
+                continue;  // trecho sem tom (s, f, x...)
+            }
+            // o MENOR atraso perto do máximo: evita confundir com meia altura
+            for (int lag = lagMin + 1; lag < lagMax; lag++) {
+                if (r[lag] >= maior * 0.9 && r[lag] >= r[lag - 1] && r[lag] >= r[lag + 1]) {
+                    f0.add(taxa / (double) lag);
+                    break;
+                }
+            }
+        }
+        if (f0.size() < 5) {
+            return 0;
+        }
+        Collections.sort(f0);
+        return f0.get(f0.size() / 2);
     }
 
     public static void escolherVoz(int indice) {
@@ -369,7 +521,7 @@ public class Fala {
         biquad(x, passaBaixa(Math.min(10500, taxa * 0.45), taxa, 0.707));
         float[] y = x.clone();                                  // sala pequena, discreta
         int[] ms = {11, 23, 37};
-        float[] ganho = {0.10f, 0.07f, 0.04f};
+        float[] ganho = {0.07f, 0.045f, 0.025f};
         for (int j = 0; j < ms.length; j++) {
             int d = taxa * ms[j] / 1000;
             for (int k = d; k < n; k++) {
@@ -382,16 +534,16 @@ public class Fala {
             if (pos >= 0) {
                 int p0 = (int) pos;
                 double fr = pos - p0;
-                z[k] += 0.06f * (float) (y[p0] * (1 - fr) + y[Math.min(p0 + 1, n - 1)] * fr);
+                z[k] += 0.035f * (float) (y[p0] * (1 - fr) + y[Math.min(p0 + 1, n - 1)] * fr);
             }
         }
         float maior = 1e-6f;
         for (float v : z) {
             maior = Math.max(maior, Math.abs(v));
         }
-        double t = Math.tanh(2.0);
+        double t = Math.tanh(1.6);
         for (int k = 0; k < n; k++) {                           // compressão suave
-            z[k] = (float) (Math.tanh(2.0 * z[k] / maior) / t * 0.95);
+            z[k] = (float) (Math.tanh(1.6 * z[k] / maior) / t * 0.95);
         }
         return z;
     }

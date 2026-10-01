@@ -40,9 +40,9 @@ class TelaDetalhe(Screen):
 
         self.grade = GridLayout(cols=2, spacing=dp(8))
         self.b = {}
-        for chave, rot in [("dist", "Distancia"), ("dur", "Tempo total"),
-                           ("mov", "Em movimento"), ("max", "Maxima (km/h)"),
-                           ("med", "Media (km/h)"), ("pts", "Leituras de GPS")]:
+        for chave, rot in [("dist", "Distância"), ("dur", "Tempo total"),
+                           ("mov", "Em movimento"), ("max", "Máxima (km/h)"),
+                           ("med", "Média (km/h)"), ("pts", "Leituras de GPS")]:
             self.b[chave] = Bloco(rotulo=rot)
             self.grade.add_widget(self.b[chave])
 

@@ -6,31 +6,55 @@ import os
 from kivy.app import App
 from kivy.clock import Clock
 from kivy.metrics import dp
+from kivy.uix.anchorlayout import AnchorLayout
 from kivy.uix.boxlayout import BoxLayout
 from kivy.uix.gridlayout import GridLayout
 from kivy.uix.label import Label
 from kivy.uix.screenmanager import Screen
 from kivy.uix.scrollview import ScrollView
+from kivy.uix.widget import Widget
 
 import tema
 from widgets.botao import BotaoHUD
 from widgets.comuns import Cabecalho, Texto
 
 
+def _texto_que_cresce(texto, **kw):
+    """Label com quebra de linha cuja ALTURA acompanha o texto (com a fonte
+    do celular maior, a explicação de 3 linhas invadia a linha de baixo)."""
+    lbl = Label(text=texto, halign="left", valign="top", size_hint_y=None, **kw)
+    lbl.bind(width=lambda l, w: setattr(l, "text_size", (w, None)),
+             texture_size=lambda l, t: setattr(l, "height", t[1]))
+    return lbl
+
+
 class Linha(BoxLayout):
-    """Título + explicação à esquerda, controle à direita."""
+    """Título + explicação à esquerda, controle à direita (centralizado na
+    altura). A linha cresce até caber o texto."""
+    ALTURA_MIN = dp(80)
 
     def __init__(self, titulo, explicacao, controle, **kw):
         kw.setdefault("size_hint_y", None)
-        kw.setdefault("height", dp(84))
+        kw.setdefault("height", self.ALTURA_MIN)
         kw.setdefault("spacing", dp(10))
         super().__init__(**kw)
-        textos = BoxLayout(orientation="vertical")
-        textos.add_widget(Texto(text=titulo, font_size=tema.T_BOTAO, bold=True))
-        textos.add_widget(Texto(text=explicacao, font_size=tema.T_ROTULO, color=tema.CIANO_FRACO))
+        textos = BoxLayout(orientation="vertical", spacing=dp(3), padding=(0, dp(10)))
+        self.titulo = _texto_que_cresce(titulo, font_size=tema.T_BOTAO, bold=True, color=tema.BRANCO)
+        self.explicacao = _texto_que_cresce(explicacao, font_size=tema.T_ROTULO, color=tema.CIANO_FRACO)
+        textos.add_widget(self.titulo)
+        textos.add_widget(self.explicacao)
+        textos.add_widget(Widget())  # sobra embaixo, não no meio
+        for lbl in (self.titulo, self.explicacao):
+            lbl.bind(height=self._ajustar)
+        ancora = AnchorLayout(size_hint_x=None, width=controle.width, anchor_y="center")
+        controle.size_hint_y = None
+        controle.height = dp(50)
+        ancora.add_widget(controle)
         self.add_widget(textos)
-        self.add_widget(controle)
-        self.explicacao = textos.children[0]
+        self.add_widget(ancora)
+
+    def _ajustar(self, *a):
+        self.height = max(self.ALTURA_MIN, self.titulo.height + self.explicacao.height + dp(26))
 
 
 class Seletor(BoxLayout):
@@ -38,17 +62,19 @@ class Seletor(BoxLayout):
 
     def __init__(self, formato, ao_mudar, **kw):
         kw.setdefault("size_hint_x", None)
-        kw.setdefault("width", dp(170))
-        kw.setdefault("spacing", dp(6))
-        kw.setdefault("padding", (0, dp(16)))
+        kw.setdefault("width", dp(192))
+        kw.setdefault("spacing", dp(4))
         super().__init__(**kw)
         self.formato = formato
         self.ao_mudar = ao_mudar
-        self.add_widget(BotaoHUD(text="-", size_hint_x=None, width=dp(46),
+        self.add_widget(BotaoHUD(text="-", size_hint_x=None, width=dp(44),
                                  on_release=lambda *a: self.ao_mudar(-1)))
-        self.lbl = Label(font_size=tema.T_BOTAO, bold=True, color=tema.BRANCO)
+        # o valor ("32 km/h", "gravada") ficava por baixo dos botões com a fonte grande
+        self.lbl = Label(font_size=tema.T_BOTAO, bold=True, color=tema.BRANCO,
+                         halign="center", valign="middle", shorten=True, shorten_from="right")
+        self.lbl.bind(size=lambda l, s: setattr(l, "text_size", s))
         self.add_widget(self.lbl)
-        self.add_widget(BotaoHUD(text="+", size_hint_x=None, width=dp(46),
+        self.add_widget(BotaoHUD(text="+", size_hint_x=None, width=dp(44),
                                  on_release=lambda *a: self.ao_mudar(+1)))
 
     def mostrar(self, valor):
@@ -92,7 +118,7 @@ class TelaConfig(Screen):
 
         self.alt_voz = Alternar(self._mudar_voz)
         lista.add_widget(Linha("Voz do assistente",
-                               "Fala as curvas, as subidas e os avisos da navegacao.",
+                               "Fala as curvas, as subidas e os avisos da navegação.",
                                self._centralizar(self.alt_voz)))
 
         self.sel_qual_voz = Seletor("%s", self._mudar_qual_voz)
@@ -115,18 +141,23 @@ class TelaConfig(Screen):
                                                           on_release=lambda *a: self._testar_voz()))))
 
         self.alt_subidas = Alternar(self._mudar_subidas)
-        lista.add_widget(Linha("Avisar subidas",
-                               "Na navegacao, avisa antes de cada subida da rota.",
+        lista.add_widget(Linha("Avisar subidas e descidas",
+                               "Na navegação, avisa antes de cada subida e descida forte.",
                                self._centralizar(self.alt_subidas)))
 
+        self.alt_semaforos = Alternar(self._mudar_semaforos)
+        lista.add_widget(Linha("Avisar semáforos",
+                               "Fala \"Semáforo à frente\" no caminho (lombada é sempre avisada).",
+                               self._centralizar(self.alt_semaforos)))
+
         self.alt_girar = Alternar(lambda v: self._mudar_simples("girar_mapa", self.alt_girar, v))
-        lista.add_widget(Linha("Mapa gira com a direcao",
-                               "Na navegacao, o caminho a frente fica sempre para cima.",
+        lista.add_widget(Linha("Mapa gira com a direção",
+                               "Na navegação, o caminho à frente fica sempre para cima.",
                                self._centralizar(self.alt_girar)))
 
         self.sel_limite = Seletor("%d km/h", self._mudar_limite)
         lista.add_widget(Linha("Alerta de velocidade",
-                               "O velocimetro fica laranja e pisca acima deste valor.",
+                               "O velocímetro fica laranja e pisca acima deste valor.",
                                self.sel_limite))
 
         self.alt_vibrar = Alternar(lambda v: self._mudar_simples("vibrar_limite", self.alt_vibrar, v))
@@ -135,13 +166,13 @@ class TelaConfig(Screen):
                                self._centralizar(self.alt_vibrar)))
 
         self.alt_pausa = Alternar(lambda v: self._mudar_simples("pausa_auto", self.alt_pausa, v))
-        lista.add_widget(Linha("Pausa automatica",
-                               "Parado (semaforo), a viagem pausa sozinha e volta ao andar.",
+        lista.add_widget(Linha("Pausa automática",
+                               "Parado (semáforo), a viagem pausa sozinha e volta ao andar.",
                                self._centralizar(self.alt_pausa)))
 
         self.alt_deitada = Alternar(self._mudar_deitada)
         lista.add_widget(Linha("Tela deitada",
-                               "Para o celular deitado no suporte do guidao.",
+                               "Para o celular deitado no suporte do guidão.",
                                self._centralizar(self.alt_deitada)))
 
         self.alt_tela = Alternar(self._mudar_tela)
@@ -150,9 +181,17 @@ class TelaConfig(Screen):
                                self._centralizar(self.alt_tela)))
 
         self.sel_alfa = Seletor("%.1f", self._mudar_alfa)
-        lista.add_widget(Linha("Resposta do velocimetro",
-                               "Menor: numero mais estavel. Maior: reage mais rapido.",
+        lista.add_widget(Linha("Resposta do velocímetro",
+                               "Menor: número mais estável. Maior: reage mais rápido.",
                                self.sel_alfa))
+
+        self.btn_offline = BotaoHUD(text="Baixar", size_hint_x=None, width=dp(130),
+                                    on_release=lambda *a: self._baixar_offline())
+        self.linha_offline = Linha("Mapa offline de Goiânia",
+                                   "Baixa a cidade toda (~40 MB, use o Wi-Fi): o mapa abre "
+                                   "na hora e funciona sem internet.",
+                                   self._centralizar(self.btn_offline))
+        lista.add_widget(self.linha_offline)
 
         self.alt_sim = Alternar(self._mudar_sim)
         lista.add_widget(Linha("Modo simulador",
@@ -160,15 +199,13 @@ class TelaConfig(Screen):
                                self._centralizar(self.alt_sim)))
 
         self.lbl_versao = Texto(text="", font_size=tema.T_ROTULO, color=tema.CIANO_FRACO,
-                                halign="center", size_hint_y=None, height=dp(40))
+                                halign="center", size_hint_y=None, height=dp(64))
         lista.add_widget(self.lbl_versao)
         self.add_widget(raiz)
 
     @staticmethod
     def _centralizar(w):
-        caixa = BoxLayout(size_hint_x=None, width=w.width, padding=(0, dp(16)))
-        caixa.add_widget(w)
-        return caixa
+        return w  # a Linha já centraliza o controle na altura
 
     def on_pre_enter(self, *a):
         aj = App.get_running_app().ajustes
@@ -177,6 +214,7 @@ class TelaConfig(Screen):
         self.sel_tom.mostrar(aj["voz_tom"])
         self.alt_efeito.mostrar(aj["voz_efeito"])
         self.alt_subidas.mostrar(aj["avisar_subidas"])
+        self.alt_semaforos.mostrar(aj["avisar_semaforos"])
         self.alt_girar.mostrar(aj["girar_mapa"])
         self.sel_limite.mostrar(aj["limite_kmh"])
         self.alt_vibrar.mostrar(aj["vibrar_limite"])
@@ -185,7 +223,8 @@ class TelaConfig(Screen):
         self.alt_tela.mostrar(aj["tela_ligada"])
         self.sel_alfa.mostrar(aj["alfa"])
         self.alt_sim.mostrar(aj["simulador"])
-        self.lbl_versao.text = "GT-HUD versao %s" % _versao()
+        self.lbl_versao.text = ("GT-HUD versão %s\nMapa (c) OpenStreetMap, OpenFreeMap  |  "
+                                "Lugares (c) Overture Maps Foundation" % _versao())
 
     def _mudar_limite(self, d):
         aj = App.get_running_app().ajustes
@@ -217,11 +256,24 @@ class TelaConfig(Screen):
                 Clock.schedule_once(self._mostrar_qual_voz, 0.5)
         elif estado == "sem":
             self.sel_qual_voz.mostrar("gravada")
-            explicacao = "Sem voz em portugues no celular: usando a voz gravada do app."
-        elif n == 0 or i < 0 or i >= n:
+            explicacao = "Sem voz em português no celular: usando a voz gravada do app."
+        elif n == 0:
             self.sel_qual_voz.mostrar("padrao")
-            explicacao = ("Voz padrao do celular. Toque em + para ouvir as outras (%d)." % n
-                          if n else "Voz padrao do celular.")
+            explicacao = "Voz padrão do celular."
+        elif i < 0:
+            self.sel_qual_voz.mostrar("auto")
+            auto = app.ajustes["voz_auto"]
+            if app.voz._t_medida is not None:
+                explicacao = "Medindo as vozes para achar a masculina..."
+                if self.manager is not None and self.manager.current == self.name:
+                    Clock.schedule_once(self._mostrar_qual_voz, 0.7)
+            elif 0 <= auto < n:
+                explicacao = "Automática (a mais grave, masculina): %s" % nomes[auto]
+            else:
+                explicacao = "Automática: a voz mais grave (masculina) do celular."
+        elif i >= n:
+            self.sel_qual_voz.mostrar("auto")
+            explicacao = "Automática: a voz mais grave (masculina) do celular."
         else:
             self.sel_qual_voz.mostrar("%d de %d" % (i + 1, n))
             explicacao = "Voz: %s" % nomes[i]
@@ -232,9 +284,12 @@ class TelaConfig(Screen):
         n = len(app.voz.nomes_vozes())
         if n == 0:
             return  # sem motor de voz em português: fica a voz gravada
-        atual = app.ajustes["voz_indice"]   # -1 = padrão do celular (só no começo)
-        app.ajustes["voz_indice"] = (0 if d > 0 else n - 1) if atual < 0 else (atual + d) % n
+        atual = app.ajustes["voz_indice"]   # -1 = automática (a mais grave)
+        # roda por: auto, 1, 2, ... n, auto...
+        app.ajustes["voz_indice"] = (atual + 1 + d) % (n + 1) - 1
         self._aplicar_voz(testar=True)
+        if app.ajustes["voz_indice"] < 0:
+            app._voz_automatica()
         self._mostrar_qual_voz()
 
     def _mudar_tom(self, d):
@@ -250,8 +305,7 @@ class TelaConfig(Screen):
 
     def _aplicar_voz(self, testar=False):
         app = App.get_running_app()
-        aj = app.ajustes
-        app.voz.configurar(aj["voz_indice"], aj["voz_tom"], aj["voz_efeito"])
+        app.aplicar_voz()
         if testar:
             self._testar_voz()
 
@@ -266,6 +320,13 @@ class TelaConfig(Screen):
         if app.nav is not None:
             app.nav.avisar_subidas = ligado
         self.alt_subidas.mostrar(ligado)
+
+    def _mudar_semaforos(self, ligado):
+        app = App.get_running_app()
+        app.ajustes["avisar_semaforos"] = ligado
+        if app.nav is not None:
+            app.nav.avisar_semaforos = ligado
+        self.alt_semaforos.mostrar(ligado)
 
     def _mudar_deitada(self, ligado):
         app = App.get_running_app()
@@ -289,6 +350,26 @@ class TelaConfig(Screen):
     def _mudar_sim(self, ligado):
         App.get_running_app().aplicar_simulador(ligado)
         self.alt_sim.mostrar(ligado)
+
+    def _baixar_offline(self):
+        if self.btn_offline.disabled:
+            return
+        self.btn_offline.disabled = True
+        self.btn_offline.text = "..."
+        fonte = App.get_running_app().sm.get_screen("mapa").mapa.fonte
+        expl = self.linha_offline.explicacao
+
+        def progresso(feitos, total, mb):
+            expl.text = "Baixando: %d de %d partes (%.0f MB)..." % (feitos, total, mb)
+
+        def fim(ok, falhas):
+            self.btn_offline.disabled = False
+            self.btn_offline.text = "Baixar"
+            if falhas:
+                expl.text = "Faltaram %d partes (sem internet?). Toque em Baixar de novo." % falhas
+            else:
+                expl.text = "Pronto: Goiânia inteira no celular (%d partes)." % ok
+        fonte.baixar_goiania(progresso, fim)
 
     def _voltar(self):
         App.get_running_app().voltar()

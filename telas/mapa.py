@@ -18,9 +18,13 @@ from kivy.properties import NumericProperty
 from kivy.uix.boxlayout import BoxLayout
 from kivy.uix.floatlayout import FloatLayout
 from kivy.uix.label import Label
+from kivy.uix.popup import Popup
 from kivy.uix.screenmanager import Screen
+from kivy.uix.textinput import TextInput
 from kivy.uix.widget import Widget
 
+import android_utils
+import goiania
 import tema
 from falas import texto_manobra
 from util import fmt_dist, fmt_dist_nav, fmt_duracao, fmt_hora_chegada, fmt_tempo
@@ -103,15 +107,44 @@ class ChipStatus(BoxLayout):
         self._fundo.pos, self._fundo.size = self.pos, self.size
 
 
+class EscolhaRotas(BoxLayout):
+    """Uma "aba" por rota (nome curto, tempo e km); a escolhida fica acesa."""
+
+    def __init__(self, **kw):
+        kw.setdefault("spacing", dp(6))
+        super().__init__(**kw)
+
+    @staticmethod
+    def nome_curto(rota):
+        n = rota.nome_perfil.replace("Mais ", "").replace("Menos subida", "plana")
+        return n[:1].upper() + n[1:]
+
+    def mostrar(self, rotas, escolhida, ao_escolher):
+        self.clear_widgets()
+        for i, r in enumerate(rotas):
+            b = BotaoHUD(text="%s\n%s  %s" % (self.nome_curto(r), fmt_duracao(r.tempo_s),
+                                              fmt_dist_nav(r.total_m)),
+                         destaque=(r is escolhida), font_size=tema.T_ROTULO,
+                         halign="center", valign="middle", max_lines=2,
+                         on_release=lambda w, rr=r: ao_escolher(rr))
+            # texto centralizado em cada linha (sem text_size, a 2ª linha
+            # ficava torta em relação à 1ª)
+            b.bind(size=lambda w, t: setattr(w, "text_size", (t[0] - dp(8), t[1])))
+            self.add_widget(b)
+
+
 class Coluna(BoxLayout):
     """Número grande com rótulo pequeno embaixo (barras de baixo)."""
 
     def __init__(self, rotulo, **kw):
         kw.setdefault("orientation", "vertical")
         super().__init__(**kw)
-        self.valor = Texto(text="-", font_size=sp(22), bold=True, halign="center")
+        # uma linha cada (com a fonte grande do celular, "chegada 13:14"
+        # quebrava em duas e encavalava)
+        self.valor = Texto(text="-", font_size=sp(22), bold=True, halign="center",
+                           shorten=True, max_lines=1)
         self.rotulo = Texto(text=rotulo, font_size=tema.T_ROTULO, color=tema.CIANO_FRACO,
-                            halign="center", size_hint_y=0.6)
+                            halign="center", size_hint_y=0.6, shorten=True, max_lines=1)
         self.add_widget(self.valor)
         self.add_widget(self.rotulo)
 
@@ -128,6 +161,7 @@ class TelaMapa(Screen):
         self._confirmando_fim = False
         self._tem_depois = False
         self._tem_subida = False
+        self._tem_alerta = False
 
         self.raiz = FloatLayout()
         self.mapa = MapaHUD(app.user_data_dir, girar=app.ajustes["girar_mapa"])
@@ -163,6 +197,10 @@ class TelaMapa(Screen):
                                      padding=(dp(12), dp(4)))
         self.lbl_subida = Texto(text="", font_size=tema.T_BOTAO, bold=True, color=tema.LARANJA)
         self.chip_subida.add_widget(self.lbl_subida)
+        self.chip_alerta = PainelHUD(size_hint=(None, None), cor_borda=tema.VERMELHO,
+                                     padding=(dp(12), dp(4)))
+        self.lbl_alerta = Texto(text="", font_size=tema.T_BOTAO, bold=True, color=tema.BRANCO)
+        self.chip_alerta.add_widget(self.lbl_alerta)
 
         # --- velocímetro e botões do mapa ---
         self.disco = DiscoVelocimetro()
@@ -177,7 +215,7 @@ class TelaMapa(Screen):
 
         # --- barra de baixo: livre (viagem) ---
         self.barra_livre = PainelHUD(size_hint=(None, None))
-        self.col_dist = Coluna("Distancia")
+        self.col_dist = Coluna("Distância")
         self.col_tempo = Coluna("Tempo")
         self.controles = BoxLayout(spacing=dp(8), size_hint_x=1.6)
         for w in (self.col_dist, self.col_tempo, self.controles):
@@ -188,24 +226,63 @@ class TelaMapa(Screen):
         self.col_tempo_nav = Coluna("chegada")
         self.col_falta = Coluna("faltam")
         self.col_sobe = Coluna("de subida")
-        self.btn_encerrar = BotaoHUD(text="Encerrar", cor=tema.VERMELHO, font_size=tema.T_ROTULO + 2,
-                                     size_hint_x=0.9, on_release=lambda *a: self._encerrar())
-        for w in (self.col_tempo_nav, self.col_falta, self.col_sobe, self.btn_encerrar):
+        self.btn_encerrar = BotaoHUD(text="Encerrar", cor=tema.VERMELHO, font_size=tema.T_ROTULO + 1,
+                                     on_release=lambda *a: self._encerrar())
+        self.btn_rotas = BotaoHUD(text="Rotas", font_size=tema.T_ROTULO + 1,
+                                  on_release=lambda *a: app.calcular_rotas_navegando())
+        botoes_nav = BoxLayout(orientation="vertical", spacing=dp(4), size_hint_x=0.95)
+        botoes_nav.add_widget(self.btn_rotas)
+        botoes_nav.add_widget(self.btn_encerrar)
+        for w in (self.col_tempo_nav, self.col_falta, self.col_sobe, botoes_nav):
             self.barra_nav.add_widget(w)
+
+        # --- navegando: escolher outra rota até o destino ---
+        self._escolha_nav = None   # None, "calculando" ou (rotas, escolhida)
+        self.painel_rotas = PainelHUD(orientation="vertical", size_hint=(None, None), spacing=dp(6))
+        self.lbl_rotas = Texto(text="", font_size=tema.T_ROTULO + 2, bold=True, color=tema.CIANO,
+                               size_hint_y=None, height=dp(22))
+        self.escolha_nav = EscolhaRotas(size_hint_y=None, height=dp(50))
+        botoes_esc = BoxLayout(size_hint_y=None, height=dp(46), spacing=dp(8))
+        botoes_esc.add_widget(BotaoHUD(text="Manter a atual", font_size=tema.T_ROTULO + 2,
+                                       on_release=lambda *a: self.fechar_escolha_nav()))
+        self.btn_usar = BotaoHUD(text="Usar esta", destaque=True, font_size=tema.T_ROTULO + 2,
+                                 on_release=lambda *a: self._usar_escolhida())
+        botoes_esc.add_widget(self.btn_usar)
+        for w in (self.lbl_rotas, self.escolha_nav, botoes_esc):
+            self.painel_rotas.add_widget(w)
 
         # --- prévia da rota ---
         self.card = PainelHUD(orientation="vertical", size_hint=(None, None), spacing=dp(6))
         self.lbl_destino = Texto(text="", font_size=tema.T_BOTAO + 1, bold=True, color=tema.CIANO,
+                                 shorten=True, shorten_from="right", max_lines=1,
                                  size_hint_y=None, height=dp(26))
-        self.lbl_resumo = Texto(text="", font_size=tema.T_ROTULO + 2, size_hint_y=None, height=dp(22))
+        self.lbl_resumo = Texto(text="", font_size=tema.T_ROTULO + 2, size_hint_y=None, height=dp(22),
+                                shorten=True, shorten_from="right", max_lines=1)
         self.perfil = PerfilAltimetria(size_hint_y=None, height=dp(64))
+        self.escolha = EscolhaRotas(size_hint_y=None, height=dp(50))
         botoes = BoxLayout(size_hint_y=None, height=dp(50), spacing=dp(10))
         botoes.add_widget(BotaoHUD(text="Cancelar", on_release=lambda *a: app.cancelar_previa()))
         self.btn_iniciar = BotaoHUD(text="Iniciar", destaque=True,
                                     on_release=lambda *a: app.iniciar_navegacao())
         botoes.add_widget(self.btn_iniciar)
-        for w in (self.lbl_destino, self.lbl_resumo, self.perfil, botoes):
+        for w in (self.lbl_destino, self.lbl_resumo, self.escolha, self.perfil, botoes):
             self.card.add_widget(w)
+
+        # --- ponto marcado (segurar o dedo no mapa) ---
+        self._marca = None
+        self.card_marca = PainelHUD(orientation="vertical", size_hint=(None, None), spacing=dp(8))
+        self.lbl_marca = Texto(text="Ponto marcado", font_size=tema.T_BOTAO, bold=True,
+                               color=tema.CIANO, size_hint_y=None, height=dp(26))
+        botoes_marca = BoxLayout(size_hint_y=None, height=dp(50), spacing=dp(8))
+        botoes_marca.add_widget(BotaoHUD(text="Fechar", font_size=tema.T_ROTULO + 2,
+                                         on_release=lambda *a: self._fechar_marca()))
+        botoes_marca.add_widget(BotaoHUD(text="Salvar", font_size=tema.T_ROTULO + 2,
+                                         on_release=lambda *a: self._pedir_nome()))
+        botoes_marca.add_widget(BotaoHUD(text="Ir para cá", destaque=True, font_size=tema.T_ROTULO + 2,
+                                         on_release=lambda *a: self._ir_marca()))
+        self.card_marca.add_widget(self.lbl_marca)
+        self.card_marca.add_widget(botoes_marca)
+        self.mapa.ao_segurar = self._ao_segurar
 
         self.add_widget(self.raiz)
         self.bind(size=self._posicionar)
@@ -234,8 +311,10 @@ class TelaMapa(Screen):
     # --- modos (chamados pelo app) -----------------------------------------------
     def modo_livre(self, mensagem=None, cor=None):
         self.estado = LIVRE
-        self._tem_depois = self._tem_subida = False
+        self._marca = None
+        self._tem_depois = self._tem_subida = self._tem_alerta = False
         self.mapa.modo_navegacao(False)
+        self.mapa.sinais_rota = None
         self.mapa.definir_rota([])
         self.mapa.definir_destino(None)
         self.mapa.recentralizar()
@@ -248,17 +327,28 @@ class TelaMapa(Screen):
         self.lbl_destino.text = lugar["nome"]
         self.lbl_resumo.text = "Calculando a rota..."
         self.lbl_resumo.color = tema.CIANO_FRACO
+        self.escolha.clear_widgets()
+        self.mapa.definir_alternativas([])
         self.perfil.elevacao = []
         self.btn_iniciar.disabled = True
         self.mapa.definir_destino((lugar["lat"], lugar["lon"]))
         self._montar()
 
-    def mostrar_previa(self, rota):
+    def mostrar_previa(self, rota, rotas=None, enquadrar=True):
+        """Rota escolhida (+ as outras opções, em abas e em cinza no mapa)."""
         self.estado = PREVIA
+        rotas = rotas or [rota]
+        app = App.get_running_app()
+        self.escolha.mostrar(rotas, rota, app.escolher_rota_previa)
+        if len(rotas) == 1 and app.calculando_alternativas:
+            self.escolha.add_widget(Texto(text="Buscando outras\nrotas...", font_size=tema.T_ROTULO,
+                                          color=tema.CIANO_FRACO, halign="center"))
+        self.mapa.definir_alternativas([r.pontos for r in rotas if r is not rota])
         n = len(rota.subidas)
         self.lbl_resumo.text = "%s  |  %s  |  sobe %d m  |  %d %s" % (
             fmt_dist_nav(rota.total_m), fmt_duracao(rota.tempo_s), rota.subida_total_m,
-            n, "subida" if n == 1 else "subidas")
+            n, "subida" if n == 1 else "subidas") if n else "%s  |  %s  |  sobe %d m" % (
+            fmt_dist_nav(rota.total_m), fmt_duracao(rota.tempo_s), rota.subida_total_m)
         self.lbl_resumo.color = tema.BRANCO
         self.perfil.subidas = rota.subidas
         self.perfil.elevacao = rota.elevacao
@@ -266,7 +356,9 @@ class TelaMapa(Screen):
         self.mapa.definir_rota(rota.pontos)
         self.mapa.definir_destino(rota.pontos[-1])
         self._montar()
-        Clock.schedule_once(lambda dt: self.mapa.enquadrar(rota.pontos, dp(36), self._cobertos_previa()))
+        if enquadrar:
+            todos = [p for r in rotas for p in r.pontos]
+            Clock.schedule_once(lambda dt: self.mapa.enquadrar(todos, dp(36), self._cobertos_previa()))
 
     def previa_erro(self, texto):
         self.lbl_resumo.text = texto
@@ -275,17 +367,67 @@ class TelaMapa(Screen):
 
     def modo_navegando(self, rota):
         self.estado = NAVEGANDO
-        self._tem_depois = self._tem_subida = False
+        self._tem_depois = self._tem_subida = self._tem_alerta = False
         self._confirmando_fim = False
         self.btn_encerrar.text = "Encerrar"
+        self._escolha_nav = None
+        self.mapa.definir_alternativas([])
         self.mapa.definir_rota(rota.pontos)
         self.mapa.definir_destino(rota.pontos[-1])
         self.mapa.modo_navegacao(True)
         self.mapa.prever = App.get_running_app().nav.prever  # seta anda em cima da rota
+        self._sinais_da_rota()
         self._montar()
 
     def trocar_rota(self, rota):
         self.mapa.definir_rota(rota.pontos)
+        self._sinais_da_rota()
+
+    def _sinais_da_rota(self):
+        """Navegando, o mapa mostra só os semáforos/lombadas do caminho."""
+        nav = App.get_running_app().nav
+        if nav is None:
+            self.mapa.sinais_rota = None
+            return
+        self.mapa.sinais_rota = [nav.rota.ponto_em(d)[:2] + (tipo,) for d, tipo in nav.alertas]
+
+    # --- navegando: escolher outra rota -----------------------------------------------
+    def escolha_nav_calculando(self):
+        self._escolha_nav = "calculando"
+        self.lbl_rotas.text = "Calculando rotas daqui até o destino..."
+        self.escolha_nav.clear_widgets()
+        self.btn_usar.disabled = True
+        self._montar()
+
+    def mostrar_escolha_nav(self, rotas, escolhida=None):
+        if self._escolha_nav is None:
+            return  # fechou enquanto calculava
+        escolhida = escolhida or rotas[0]
+        self._escolha_nav = (rotas, escolhida)
+        n = len(rotas)
+        self.lbl_rotas.text = ("%d rotas daqui até o destino" % n) if n > 1 else \
+            "Só há um bom caminho daqui até o destino"
+        self.escolha_nav.mostrar(rotas, escolhida, lambda r: self.mostrar_escolha_nav(rotas, r))
+        self.btn_usar.disabled = False
+        self.mapa.definir_rota(escolhida.pontos)
+        self.mapa.definir_alternativas([r.pontos for r in rotas if r is not escolhida])
+        self._montar()
+
+    def fechar_escolha_nav(self):
+        self._escolha_nav = None
+        app = App.get_running_app()
+        self.mapa.definir_alternativas([])
+        if app.nav is not None:
+            self.mapa.definir_rota(app.nav.rota.pontos)
+        self._montar()
+
+    def _usar_escolhida(self):
+        if isinstance(self._escolha_nav, tuple):
+            rota = self._escolha_nav[1]
+            self._escolha_nav = None
+            self.mapa.definir_alternativas([])
+            App.get_running_app().trocar_rota_navegando(rota)
+            self._montar()
 
     def mensagem(self, texto, cor=tema.VERDE, segundos=3.5):
         self.lbl_msg.text = texto
@@ -299,17 +441,25 @@ class TelaMapa(Screen):
         visiveis = [self.mapa, self.disco, self.lbl_msg, self.btn_mais, self.btn_menos]
         if not self.mapa.seguindo:
             visiveis.append(self.btn_centro)
-        if self.estado == LIVRE:
+        if self.estado == LIVRE and self._marca is not None:
+            visiveis += [self.busca, self.status, self.menu, self.card_marca]
+            visiveis.remove(self.disco)
+        elif self.estado == LIVRE:
             visiveis += [self.busca, self.status, self.menu, self.barra_livre]
         elif self.estado == PREVIA:
             visiveis += [self.status, self.card]
             visiveis.remove(self.disco)
         else:
             visiveis += [self.faixa, self.barra_nav]
+            if self._escolha_nav is not None:
+                visiveis.append(self.painel_rotas)
+                visiveis.remove(self.disco)
             if self._tem_depois:
                 visiveis.append(self.depois)
             if self._tem_subida:
                 visiveis.append(self.chip_subida)
+            if self._tem_alerta:
+                visiveis.append(self.chip_alerta)
         for w in list(self.raiz.children):
             if w not in visiveis:
                 self.raiz.remove_widget(w)
@@ -362,17 +512,27 @@ class TelaMapa(Screen):
         if self._tem_depois:
             y_chip -= dp(44)
         self.chip_subida.pos, self.chip_subida.size = (m, y_chip), (larg_chip, dp(44))
+        y_alerta = y_chip - (dp(50) if self._tem_subida else 0)
+        self.chip_alerta.pos, self.chip_alerta.size = (m, y_alerta), (min(larg_chip, dp(250)), dp(44))
         if self.estado == PREVIA:
             self.status.topo_alvo = topo
             self.status.largura_max = W - 2 * m
 
         # prévia
         larg_card = min(W - 2 * m, dp(480))
-        self.card.size = (larg_card, dp(212))
+        self.card.size = (larg_card, dp(268))
+        self.painel_rotas.pos = (m, m + alt_barra + m)
+        self.painel_rotas.size = (larg_topo, dp(150))
         self.card.pos = (W - m - larg_card, m) if deitada else (m, m)
 
         # botões do mapa (direita, acima da barra)
-        base = m + alt_barra + m if self.estado != PREVIA else m + dp(212) + m
+        base = m + alt_barra + m if self.estado != PREVIA else m + self.card.height + m
+        if self.estado == NAVEGANDO and self._escolha_nav is not None:
+            base += dp(150) + m
+        self.card_marca.pos = (m, m)
+        self.card_marca.size = (min(W - 2 * m, dp(480)), dp(110))
+        if self.estado == LIVRE and self._marca is not None:
+            base = m + dp(110) + m
         if deitada and self.estado == PREVIA:
             base = m
         x_btn = W - m - dp(50) if not (deitada and self.estado == PREVIA) else W - larg_card - 2 * m - dp(50)
@@ -393,6 +553,66 @@ class TelaMapa(Screen):
         self.mapa.areas_cobertas = [(w.x, w.y, w.right, w.top) for w in self.raiz.children
                                     if w is not self.mapa and w is not self.lbl_msg]
         self.mapa._aplicar()
+
+    # --- ponto marcado: segurar o dedo no mapa --------------------------------------
+    def _ao_segurar(self, lat, lon):
+        if self.estado != LIVRE:
+            return  # na prévia/navegação o dedo no mapa é só para olhar
+        if not goiania.dentro(lat, lon):
+            self.mensagem("Fora de Goiânia", tema.LARANJA)
+            return
+        android_utils.vibrar([0, 35], [0, 160])  # "pegou": dá para sentir sem olhar
+        self._marca = (lat, lon)
+        self.lbl_marca.text = "Ponto marcado: salvar ou ir para cá?"
+        self.mapa.definir_destino(self._marca)
+        self._montar()
+
+    def _fechar_marca(self):
+        self._marca = None
+        self.mapa.definir_destino(None)
+        self._montar()
+
+    def _ir_marca(self):
+        if self._marca is None:
+            return
+        lat, lon = self._marca
+        self._marca = None
+        App.get_running_app().escolher_destino({"nome": "Ponto marcado", "endereco": "",
+                                                "lat": lat, "lon": lon})
+
+    def _pedir_nome(self):
+        if self._marca is None:
+            return
+        caixa = BoxLayout(orientation="vertical", spacing=dp(10), padding=dp(4))
+        campo = TextInput(hint_text="Ex.: Barbearia do amigo", multiline=False,
+                          font_size=tema.T_BOTAO, size_hint_y=None, height=dp(48),
+                          background_normal="", background_active="", background_color=tema.FUNDO,
+                          foreground_color=tema.BRANCO, hint_text_color=tema.CIANO_FRACO,
+                          cursor_color=tema.CIANO, padding=(dp(10), dp(12)))
+        botoes = BoxLayout(size_hint_y=None, height=dp(48), spacing=dp(8))
+        janela = Popup(title="Nome do lugar", content=caixa, size_hint=(0.92, None), height=dp(210),
+                       title_color=tema.CIANO, title_size=tema.T_BOTAO, separator_color=tema.CIANO,
+                       background="", background_color=tema.PAINEL, auto_dismiss=True)
+
+        def salvar(*a):
+            nome = campo.text.strip()
+            if not nome:
+                return
+            lat, lon = self._marca
+            App.get_running_app().salvar_lugar(nome, lat, lon)
+            janela.dismiss()
+            self._fechar_marca()
+            self.mensagem("Salvo! Ache em \"Para onde, senhor?\"", tema.VERDE)
+
+        botoes.add_widget(BotaoHUD(text="Cancelar", font_size=tema.T_ROTULO + 2,
+                                   on_release=lambda *a: janela.dismiss()))
+        botoes.add_widget(BotaoHUD(text="Salvar", destaque=True, font_size=tema.T_ROTULO + 2,
+                                   on_release=salvar))
+        campo.bind(on_text_validate=salvar)
+        caixa.add_widget(campo)
+        caixa.add_widget(botoes)
+        janela.open()
+        campo.focus = True
 
     # --- viagem (modo livre) --------------------------------------------------------
     def _montar_controles(self):
@@ -429,7 +649,7 @@ class TelaMapa(Screen):
             if app.salvar_viagem_atual():
                 self.mensagem("Viagem salva: %s" % fmt_dist(app.ultima_salva_m))
             else:
-                self.mensagem("Viagem com menos de 20 m: nao foi salva", tema.LARANJA)
+                self.mensagem("Viagem com menos de 20 m: não foi salva", tema.LARANJA)
             self.mapa.definir_trilha([])
         self._montar_controles()
         self._atualizar_viagem()
@@ -493,7 +713,7 @@ class TelaMapa(Screen):
             app = App.get_running_app()
             self.lbl_instr.text = "Recalculando a rota..." if app.recalculando else "Fora da rota"
         self.col_tempo_nav.valor.text = fmt_duracao(e["restante_s"])
-        self.col_tempo_nav.rotulo.text = "chegada %s" % fmt_hora_chegada(e["restante_s"])
+        self.col_tempo_nav.rotulo.text = "às %s" % fmt_hora_chegada(e["restante_s"])
         self.col_falta.valor.text = fmt_dist_nav(e["restante_m"])
         self.col_sobe.valor.text = "+%d m" % e["subida_restante_m"]
         # "Depois" e subida aparecem só quando existem
@@ -502,10 +722,21 @@ class TelaMapa(Screen):
             self.icone_depois.acao = depois["acao"]
             self.icone_depois.saida = depois.get("saida") or 0
         if s is not None:
+            nome = "Subida" if s["tipo"] == "subida" else "Descida"
+            cor = tema.LARANJA if s["tipo"] == "subida" else tema.CIANO
+            self.lbl_subida.color = cor
+            self.chip_subida.cor_borda = cor
             if s["em_m"] > 0:
-                self.lbl_subida.text = "Subida de %d%% em %s" % (round(s["grau"]), fmt_dist_nav(s["em_m"]))
+                self.lbl_subida.text = "%s de %d%% em %s" % (nome, round(s["grau"]), fmt_dist_nav(s["em_m"]))
             else:
-                self.lbl_subida.text = "Subida %d%%  |  faltam %s" % (round(s["grau"]), fmt_dist_nav(s["falta_m"]))
-        if (depois is not None, s is not None) != (self._tem_depois, self._tem_subida):
-            self._tem_depois, self._tem_subida = depois is not None, s is not None
+                self.lbl_subida.text = "%s %d%%  |  faltam %s" % (nome, round(s["grau"]),
+                                                                  fmt_dist_nav(s["falta_m"]))
+        a = e.get("alerta")
+        if a is not None:
+            self.lbl_alerta.text = "%s em %s" % ("Semáforo" if a["tipo"] == "semaforo" else "Lombada",
+                                                 fmt_dist_nav(a["em_m"]))
+            self.chip_alerta.cor_borda = tema.VERMELHO if a["tipo"] == "semaforo" else tema.LARANJA
+        tem = (depois is not None, s is not None, a is not None)
+        if tem != (self._tem_depois, self._tem_subida, self._tem_alerta):
+            self._tem_depois, self._tem_subida, self._tem_alerta = tem
             self._montar()

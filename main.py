@@ -12,6 +12,7 @@ from kivy.core.window import Window
 from kivy.uix.screenmanager import NoTransition, ScreenManager
 
 import android_utils
+import goiania
 import rede
 import rota as rotas
 import tema
@@ -68,8 +69,15 @@ class GTHudApp(App):
         self.gps = ServicoGPS(self._ao_receber_gps, self._ao_status_gps)
         self.voz = Voz(pasta)
         self.voz.ligada = self.ajustes["voz"]
-        self.voz.configurar(self.ajustes["voz_indice"], self.ajustes["voz_tom"],
-                            self.ajustes["voz_efeito"])
+        if not self.ajustes["voz_masculina_v1"]:
+            # o dono pediu voz masculina: quem tinha escolhido outra volta para a
+            # automática (a mais grave do celular) uma vez
+            self.ajustes["voz_masculina_v1"] = True
+            self.ajustes["voz_indice"] = -1
+            if self.ajustes["voz_tom"] == 0.88:
+                self.ajustes["voz_tom"] = 0.94   # voz masculina já é grave: menos rebaixada
+        self.aplicar_voz()
+        Clock.schedule_once(self._voz_automatica, 1.0)
 
         self.precisao = None         # da última leitura boa (m)
         self.precisao_ultima = None  # da última leitura, boa ou não
@@ -89,6 +97,9 @@ class GTHudApp(App):
         self.nav = None              # Navegacao durante a navegação
         self.estado_nav = None       # o que a navegação mostra na tela
         self.rota_previa = None
+        self.rotas_previa = []
+        self.calculando_alternativas = False
+        self._pedido = 0               # cada busca de rota tem um número: resposta velha é ignorada
         self.destino = None
         self._recalculando = False
         self._t_falha_recalculo = 0.0
@@ -98,6 +109,8 @@ class GTHudApp(App):
         self._pilha_telas = []
         self._caminho_recentes = os.path.join(pasta, "recentes.json")
         self.recentes = self._ler_recentes()
+        self._caminho_salvos = os.path.join(pasta, "salvos.json")
+        self.salvos = self._ler_json(self._caminho_salvos)
 
         # sem animação de troca: o esmaecer desenhava o mapa 2x por quadro
         # (pesado no celular) e a troca instantânea parece mais rápida
@@ -111,6 +124,38 @@ class GTHudApp(App):
         self.sm.add_widget(TelaConfig(name="config"))
         Clock.schedule_interval(self._vigiar_gps, 2.0)
         return self.sm
+
+    # --- voz -------------------------------------------------------------------
+    def indice_voz(self):
+        """Voz em uso: a escolhida nos Ajustes ou, na automática, a mais grave."""
+        i = self.ajustes["voz_indice"]
+        return i if i >= 0 else self.ajustes["voz_auto"]
+
+    def aplicar_voz(self):
+        self.voz.configurar(self.indice_voz(), self.ajustes["voz_tom"], self.ajustes["voz_efeito"])
+
+    def _voz_automatica(self, dt=None, tentativas=[0]):
+        """Na automática, mede as vozes uma vez (ou se a lista do celular mudou)."""
+        if self.ajustes["voz_indice"] >= 0:
+            return
+        estado = self.voz.estado_motor()
+        if estado == "iniciando" and tentativas[0] < 20:
+            tentativas[0] += 1
+            Clock.schedule_once(self._voz_automatica, 0.5)
+            return
+        if estado != "pronto":
+            return
+        nomes = self.voz.nomes_vozes()
+        i = self.ajustes["voz_auto"]
+        if 0 <= i < len(nomes) and nomes[i] == self.ajustes["voz_auto_nome"]:
+            return  # já medida neste celular
+
+        def achou(indice):
+            if indice is not None and indice < len(nomes):
+                self.ajustes["voz_auto"] = indice
+                self.ajustes["voz_auto_nome"] = nomes[indice]
+                self.aplicar_voz()
+        self.voz.medir_vozes(achou)
 
     # --- ciclo de vida ---------------------------------------------------
     def on_start(self):
@@ -198,13 +243,13 @@ class GTHudApp(App):
             return tema.LARANJA, "Simulador  %d m" % (self.precisao or 0)
         if self.sinal_ok():
             prec = self.precisao or 0
-            texto = "GPS  %d m" % prec + ("\n%d satelites" % sat[1] if sat and sat[1] else "")
+            texto = "GPS  %d m" % prec + ("\n%d satélites" % sat[1] if sat and sat[1] else "")
             return (tema.VERDE if prec <= 10 else tema.LARANJA), texto
         if self.sinal_fraco():
             return tema.LARANJA, "Sinal fraco\n%d m" % (self.precisao_ultima or 0)
         texto = "Sem sinal" if self.ja_teve_sinal else "Buscando GPS"
         if sat and sat[0]:
-            texto += "\n%d de %d satelites" % (sat[1], sat[0])
+            texto += "\n%d de %d satélites" % (sat[1], sat[0])
         return (tema.VERMELHO if self.ja_teve_sinal else tema.LARANJA), texto
 
     @property
@@ -290,19 +335,44 @@ class GTHudApp(App):
         tela = self.sm.get_screen("mapa")
         self.sm.current = "mapa"
         tela.previa_calculando(lugar)
+        if not goiania.dentro(lugar["lat"], lugar["lon"], 0.01):
+            tela.previa_erro("Fora de Goiânia: o app navega só dentro da cidade.")
+            return
         if self.posicao is None:
             tela.previa_erro("Esperando o sinal do GPS para calcular a rota.")
             return
-        origem, rumo = self.posicao, self.rumo_recente()
-        rede.em_segundo_plano(
-            lambda: rotas.pedir_rota(origem, (lugar["lat"], lugar["lon"]), rumo, lugar["nome"]),
-            self._rota_pronta, self._rota_falhou)
+        self._pedido += 1
+        pedido = self._pedido
+        origem, rumo, alvo = self.posicao, self.rumo_recente(), (lugar["lat"], lugar["lon"])
+        # 1º a mais rápida (aparece logo); as outras opções chegam depois
+        rede.em_segundo_plano(lambda: rotas.pedir_rota(origem, alvo, rumo, lugar["nome"]),
+                              lambda r: self._rota_pronta(r, pedido, origem, rumo, alvo),
+                              self._rota_falhou)
 
-    def _rota_pronta(self, rota):
-        if self.destino is None:
-            return  # cancelou enquanto calculava
+    def _rota_pronta(self, rota, pedido, origem, rumo, alvo):
+        if self.destino is None or pedido != self._pedido:
+            return  # cancelou (ou escolheu outro destino) enquanto calculava
         self.rota_previa = rota
-        self.sm.get_screen("mapa").mostrar_previa(rota)
+        self.rotas_previa = [rota]
+        self.calculando_alternativas = True
+        self.sm.get_screen("mapa").mostrar_previa(rota, self.rotas_previa)
+        nome = self.destino["nome"]
+        rede.em_segundo_plano(lambda: rotas.pedir_alternativas(origem, alvo, rumo, nome, [rota]),
+                              lambda rs: self._alternativas_prontas(rs, pedido),
+                              lambda e: self._alternativas_prontas([rota], pedido))
+
+    def _alternativas_prontas(self, lista, pedido):
+        if pedido != self._pedido or self.destino is None or self.nav is not None:
+            return
+        self.calculando_alternativas = False
+        self.rotas_previa = lista or [self.rota_previa]
+        if self.rota_previa not in self.rotas_previa:
+            self.rota_previa = self.rotas_previa[0]
+        self.sm.get_screen("mapa").mostrar_previa(self.rota_previa, self.rotas_previa, enquadrar=True)
+
+    def escolher_rota_previa(self, rota):
+        self.rota_previa = rota
+        self.sm.get_screen("mapa").mostrar_previa(rota, self.rotas_previa, enquadrar=False)
 
     def _rota_falhou(self, erro):
         if self.destino is None:
@@ -312,11 +382,13 @@ class GTHudApp(App):
             tela.previa_erro(str(erro))
             self.voz.falar(["sem_rota"], P_INFO)
         else:
-            tela.previa_erro("Nao consegui calcular a rota. Confira a internet.")
+            tela.previa_erro("Não consegui calcular a rota. Confira a internet.")
             self.voz.falar(["sem_internet"], P_INFO)
 
     def cancelar_previa(self):
         self.rota_previa = None
+        self.rotas_previa = []
+        self._pedido += 1
         self.destino = None
         self.sm.get_screen("mapa").modo_livre()
 
@@ -324,7 +396,8 @@ class GTHudApp(App):
         rota = self.rota_previa
         if rota is None:
             return
-        self.nav = Navegacao(rota, self.voz.falar, self.ajustes["avisar_subidas"])
+        self.nav = Navegacao(rota, self.voz.falar, self.ajustes["avisar_subidas"],
+                             self.ajustes["avisar_semaforos"])
         self.estado_nav = None
         self._fim_agendado = False
         if self.viagem.estado == Viagem.PARADA:
@@ -358,6 +431,39 @@ class GTHudApp(App):
               and agora - self._t_falha_recalculo > RECALCULO_ESPERA_S):
             self._recalcular()
 
+    # --- navegando: escolher outra rota até o destino ---------------------------------
+    def calcular_rotas_navegando(self):
+        if self.nav is None or self.destino is None or self.posicao is None:
+            return
+        tela = self.sm.get_screen("mapa")
+        tela.escolha_nav_calculando()
+        self._pedido += 1
+        pedido = self._pedido
+        origem, rumo, d = self.posicao, self.rumo_recente(), self.destino
+        alvo = (d["lat"], d["lon"])
+
+        def todas():
+            primeira = rotas.pedir_rota(origem, alvo, rumo, d["nome"])
+            return rotas.pedir_alternativas(origem, alvo, rumo, d["nome"], [primeira])
+
+        def prontas(lista):
+            if pedido == self._pedido and self.nav is not None:
+                tela.mostrar_escolha_nav(lista)
+
+        def falhou(erro):
+            if pedido == self._pedido and self.nav is not None:
+                tela.fechar_escolha_nav()
+                tela.mensagem("Sem internet para calcular rotas.", tema.LARANJA)
+        rede.em_segundo_plano(todas, prontas, falhou)
+
+    def trocar_rota_navegando(self, rota):
+        if self.nav is None:
+            return
+        self.nav.trocar_rota(rota)
+        self.gps.seguir_rota(rota.pontos)
+        self.sm.get_screen("mapa").trocar_rota(rota)
+        self.voz.falar(["rota_trocada"], P_INFO)
+
     def _recalcular(self):
         if self.destino is None or self.posicao is None:
             return
@@ -386,13 +492,37 @@ class GTHudApp(App):
             if not isinstance(erro, rotas.SemRota):
                 self.voz.falar(["sem_internet"], P_INFO)
 
-    # --- destinos recentes ----------------------------------------------------
-    def _ler_recentes(self):
+    # --- destinos recentes e lugares salvos ------------------------------------
+    @staticmethod
+    def _ler_json(caminho):
         try:
-            with open(self._caminho_recentes, encoding="utf-8") as f:
-                return json.load(f)[:MAX_RECENTES]
+            with open(caminho, encoding="utf-8") as f:
+                return json.load(f)
         except (OSError, ValueError):
             return []
+
+    @staticmethod
+    def _gravar_json(caminho, dados):
+        try:
+            temporario = caminho + ".tmp"
+            with open(temporario, "w", encoding="utf-8") as f:
+                json.dump(dados, f, ensure_ascii=False)
+            os.replace(temporario, caminho)
+        except OSError:
+            pass
+
+    def _ler_recentes(self):
+        return self._ler_json(self._caminho_recentes)[:MAX_RECENTES]
+
+    def salvar_lugar(self, nome, lat, lon, endereco=""):
+        """Lugar marcado no mapa pela pessoa (aparece primeiro na busca)."""
+        self.salvos = [s for s in self.salvos if s["nome"] != nome]
+        self.salvos.insert(0, {"nome": nome, "endereco": endereco, "lat": lat, "lon": lon})
+        self._gravar_json(self._caminho_salvos, self.salvos)
+
+    def apagar_salvo(self, lugar):
+        self.salvos = [s for s in self.salvos if s is not lugar and s != lugar]
+        self._gravar_json(self._caminho_salvos, self.salvos)
 
     def _guardar_recente(self, lugar):
         item = {k: lugar[k] for k in ("nome", "endereco", "lat", "lon") if k in lugar}
@@ -401,11 +531,7 @@ class GTHudApp(App):
                          != (round(item["lat"], 4), round(item["lon"], 4))]
         self.recentes.insert(0, item)
         del self.recentes[MAX_RECENTES:]
-        try:
-            with open(self._caminho_recentes, "w", encoding="utf-8") as f:
-                json.dump(self.recentes, f)
-        except OSError:
-            pass
+        self._gravar_json(self._caminho_recentes, self.recentes)
 
     # --- viagem ----------------------------------------------------------
     def salvar_viagem_atual(self):

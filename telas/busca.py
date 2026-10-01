@@ -1,5 +1,5 @@
 """Busca de destino: digita, toca em Buscar, escolhe o lugar. Sem texto,
-mostra os destinos recentes."""
+mostra os lugares salvos (com botão de apagar) e os destinos recentes."""
 from kivy.app import App
 from kivy.metrics import dp
 from kivy.uix.boxlayout import BoxLayout
@@ -25,7 +25,7 @@ class TelaBusca(Screen):
 
         linha = BoxLayout(size_hint_y=None, height=dp(52), spacing=dp(8))
         self.campo = TextInput(
-            hint_text="Endereco ou lugar", multiline=False, font_size=tema.T_BOTAO,
+            hint_text="Lugar, tipo ou rua", multiline=False, font_size=tema.T_BOTAO,
             background_normal="", background_active="", background_color=tema.PAINEL,
             foreground_color=tema.BRANCO, hint_text_color=tema.CIANO_FRACO,
             cursor_color=tema.CIANO, padding=(dp(12), dp(14)), write_tab=False)
@@ -58,19 +58,42 @@ class TelaBusca(Screen):
             self._mostrar_recentes()
 
     def _mostrar_recentes(self):
-        recentes = App.get_running_app().recentes
-        self.lbl_status.text = "Recentes" if recentes else "Digite um endereco, bairro ou lugar."
-        self._listar(recentes)
+        app = App.get_running_app()
+        if app.salvos or app.recentes:
+            self.lbl_status.text = "Salvos e recentes"
+        else:
+            self.lbl_status.text = "Digite um lugar, tipo (farmácia) ou rua de Goiânia."
+        self.lista.clear_widgets()
+        for lugar in app.salvos:
+            self._adicionar(dict(lugar, fonte="salvo"), apagavel=True)
+        for lugar in app.recentes:
+            self._adicionar(lugar)
 
     def _listar(self, lugares):
         self.lista.clear_widgets()
         for lugar in lugares:
-            detalhe = lugar.get("endereco") or ""
-            if lugar.get("dist_m") is not None:
-                detalhe = "%s  |  %s" % (fmt_dist_nav(lugar["dist_m"]), detalhe)
-            item = ItemViagem(lugar["nome"], detalhe)
-            item.bind(on_release=lambda w, l=lugar: self._escolher(l))
+            self._adicionar(lugar)
+
+    def _adicionar(self, lugar, apagavel=False):
+        partes = ["Salvo por você" if lugar.get("fonte") == "salvo" else "",
+                  fmt_dist_nav(lugar["dist_m"]) if lugar.get("dist_m") is not None else "",
+                  (lugar.get("endereco") or "").strip()]
+        item = ItemViagem(lugar["nome"], "  |  ".join(p for p in partes if p) or " ")
+        item.bind(on_release=lambda w, l=lugar: self._escolher(l))
+        if not apagavel:
             self.lista.add_widget(item)
+            return
+        linha = BoxLayout(size_hint_y=None, height=item.height, spacing=dp(6))
+        linha.add_widget(item)
+        linha.add_widget(BotaoHUD(text="Apagar", cor=tema.VERMELHO, font_size=tema.T_ROTULO + 1,
+                                  size_hint_x=None, width=dp(84),
+                                  on_release=lambda w, l=lugar: self._apagar(l)))
+        self.lista.add_widget(linha)
+
+    def _apagar(self, lugar):
+        app = App.get_running_app()
+        app.apagar_salvo({k: lugar[k] for k in ("nome", "endereco", "lat", "lon") if k in lugar})
+        self._mostrar_recentes()
 
     def _buscar(self):
         texto = self.campo.text.strip()
@@ -80,20 +103,20 @@ class TelaBusca(Screen):
         self._buscando = True
         self.lbl_status.text = "Buscando..."
         self.lista.clear_widgets()
-        rede.em_segundo_plano(lambda: busca.buscar(texto, app.posicao),
+        salvos = list(app.salvos)
+        rede.em_segundo_plano(lambda: busca.buscar(texto, app.posicao, salvos),
                               self._resultados, self._falhou)
 
     def _resultados(self, lugares):
         self._buscando = False
         n = len(lugares)
-        fonte = lugares[0].get("fonte", "") if lugares else ""
-        self.lbl_status.text = ("%d %s (%s)" % (n, "resultado" if n == 1 else "resultados", fonte)) \
-            if n else "Nada encontrado. Tente com o bairro ou a cidade."
+        self.lbl_status.text = ("%d %s" % (n, "resultado" if n == 1 else "resultados")) if n else \
+            "Nada encontrado. Dica: segure o dedo no mapa para marcar e salvar um lugar."
         self._listar(lugares)
 
     def _falhou(self, erro):
         self._buscando = False
-        self.lbl_status.text = "Sem internet para buscar. Confira a conexao."
+        self.lbl_status.text = "Nada na base offline e sem internet para buscar ruas."
 
     def _escolher(self, lugar):
         self.campo.focus = False

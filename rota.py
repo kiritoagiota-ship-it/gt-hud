@@ -7,6 +7,7 @@ longo da rota; é dela que saem as subidas.
 """
 import json
 import math
+import time
 import urllib.error
 import urllib.parse
 
@@ -103,7 +104,24 @@ def achar_subidas(elevacao, passo=ELEVACAO_PASSO_M):
     return subidas
 
 
+# Rotas que a pessoa pode escolher (pedido do dono: mais reta, mais dentro
+# das vias, mais tranquila...). Opções do custo "bicycle" do Valhalla:
+#   use_roads: 0 = foge de avenidas (ciclovia/rua calma), 1 = não se importa
+#   use_hills: 0 = foge de subida, 1 = não se importa
+#   shortest:  a menor distância, ignorando o resto
+PERFIS = [
+    ("rapida", "Mais rápida", {"use_roads": 0.75, "use_hills": 0.5, "avoid_bad_surfaces": 0.25}),
+    ("tranquila", "Mais tranquila", {"use_roads": 0.1, "use_hills": 0.5, "avoid_bad_surfaces": 0.5}),
+    ("plana", "Menos subida", {"use_roads": 0.5, "use_hills": 0.0, "avoid_bad_surfaces": 0.25}),
+    ("curta", "Mais curta", {"use_roads": 0.75, "use_hills": 0.5, "shortest": True}),
+]
+NOMES_PERFIS = {p[0]: p[1] for p in PERFIS}
+
+
 class Rota:
+    perfil = "rapida"
+    nome_perfil = "Mais rápida"
+
     def __init__(self, pontos, manobras, elevacao, tempo_s, destino_nome=""):
         self.pontos = pontos
         self.acumulado = [0.0]
@@ -114,6 +132,8 @@ class Rota:
         self.destino_nome = destino_nome
         self.elevacao = elevacao
         self.subidas = achar_subidas(elevacao)
+        # descida = "subida" da altimetria ao contrário (grau positivo = % de descida)
+        self.descidas = achar_subidas([-e for e in elevacao])
         self.subida_total_m = sum(max(0.0, b - a) for a, b in zip(elevacao, elevacao[1:]))
         for m in manobras:
             m["dist_m"] = self.acumulado[min(m["indice"], len(self.acumulado) - 1)]
@@ -159,8 +179,10 @@ class Rota:
         return sum(max(0.0, e[i + 1] - e[i]) for i in range(max(0, i0), len(e) - 1))
 
 
-def pedir_rota(origem, destino, rumo=None, destino_nome=""):
+def pedir_rota(origem, destino, rumo=None, destino_nome="", perfil="rapida"):
     """Chamada que espera a resposta (use rede.em_segundo_plano)."""
+    opcoes = {"bicycle_type": "Hybrid", "cycling_speed": 22}   # bike elétrica na cidade
+    opcoes.update(dict((p[0], p[2]) for p in PERFIS)[perfil])
     partida = {"lat": origem[0], "lon": origem[1]}
     if rumo is not None:
         # já pedalando: evita uma rota que comece com meia-volta
@@ -168,16 +190,22 @@ def pedir_rota(origem, destino, rumo=None, destino_nome=""):
     pedido = {
         "locations": [partida, {"lat": destino[0], "lon": destino[1]}],
         "costing": "bicycle",
-        "costing_options": {"bicycle": {
-            "bicycle_type": "Hybrid", "cycling_speed": 22,   # bike elétrica na cidade
-            "use_roads": 0.75, "use_hills": 0.5, "avoid_bad_surfaces": 0.25}},
+        "costing_options": {"bicycle": opcoes},
         "language": "pt-BR",
         "directions_options": {"language": "pt-BR", "units": "kilometers"},
         "elevation_interval": ELEVACAO_PASSO_M,
     }
     url = VALHALLA + "?json=" + urllib.parse.quote(json.dumps(pedido))
     try:
-        dados = rede.baixar_json(url, timeout=25)
+        try:
+            dados = rede.baixar_json(url, timeout=25)
+        except urllib.error.HTTPError as e:
+            if e.code not in (429, 503):
+                raise
+            # servidor gratuito pedindo calma (ex.: logo depois das rotas
+            # alternativas): espera um pouco e tenta de novo uma vez
+            time.sleep(1.5)
+            dados = rede.baixar_json(url, timeout=25)
     except urllib.error.HTTPError as e:
         if e.code == 400:  # ex.: "No path could be found for input" (erro 442)
             try:
@@ -185,7 +213,85 @@ def pedir_rota(origem, destino, rumo=None, destino_nome=""):
             except ValueError:
                 codigo = None
             if codigo == 154:
-                raise SemRota("Longe demais: rota de bike vai ate 150 km.")
-            raise SemRota("Nao achei um caminho de bike ate esse lugar.")
+                raise SemRota("Longe demais: rota de bike vai até 150 km.")
+            raise SemRota("Não achei um caminho de bike até esse lugar.")
         raise
-    return Rota.do_valhalla(dados, destino_nome)
+    rota = Rota.do_valhalla(dados, destino_nome)
+    rota.perfil = perfil
+    return rota
+
+
+def _dist_segmento(p, a, b):
+    """Metros do ponto p ao segmento ab (plano local; serve para cidade)."""
+    k = math.cos(math.radians(p[0])) * 111320.0
+    ax, ay = (a[1] - p[1]) * k, (a[0] - p[0]) * 111320.0
+    bx, by = (b[1] - p[1]) * k, (b[0] - p[0]) * 111320.0
+    dx, dy = bx - ax, by - ay
+    c2 = dx * dx + dy * dy
+    t = 0.0 if c2 == 0 else max(0.0, min(1.0, -(ax * dx + ay * dy) / c2))
+    return math.hypot(ax + t * dx, ay + t * dy)
+
+
+def parecidas(a, b):
+    """Duas rotas praticamente iguais (mesma distância e mesmo caminho)."""
+    if abs(a.total_m - b.total_m) > 0.03 * max(a.total_m, b.total_m) + 30:
+        return False
+    for k in range(1, 12):
+        p = a.ponto_em(a.total_m * k / 12.0)
+        if min(_dist_segmento(p, q, r) for q, r in zip(b.pontos, b.pontos[1:])) > 40:
+            return False
+    return True
+
+
+def pedir_alternativas(origem, destino, rumo=None, destino_nome="", ja=()):
+    """As outras rotas (perfis de PERFIS que ainda não estão em `ja`), sem as
+    repetidas. Uma de cada vez: o servidor é gratuito e compartilhado."""
+    rotas = list(ja)
+    tem = {r.perfil for r in rotas}
+    for perfil, nome, _ in PERFIS:
+        if perfil in tem:
+            continue
+        try:
+            nova = pedir_rota(origem, destino, rumo, destino_nome, perfil)
+        except Exception as e:
+            print("[rota] perfil", perfil, "falhou:", e)
+            continue
+        igual = next((r for r in rotas if parecidas(r, nova)), None)
+        if igual is None:
+            rotas.append(nova)
+        elif perfil == "tranquila":
+            igual.perfil_tranquilo = True
+    return rotular(rotas)
+
+
+def rotular(rotas):
+    """Nome de cada rota pelos NÚMEROS dela (o servidor nem sempre acerta: a
+    "menos subida" pedida às vezes sobe mais). Rota que não é a melhor em
+    nada sai da lista. A primeira é sempre a mais rápida."""
+    if len(rotas) <= 1:
+        for r in rotas:
+            r.nome_perfil = "Mais rápida"
+        return rotas
+    rapida = min(rotas, key=lambda r: r.tempo_s)
+    curta = min(rotas, key=lambda r: r.total_m)
+    plana = min(rotas, key=lambda r: r.subida_total_m)
+    boas = []
+    for r in rotas:
+        nomes = []
+        if r is rapida:
+            nomes.append("rápida")
+        if r is curta and r.total_m < rapida.total_m - 50:
+            nomes.append("curta")
+        if r is plana and r.subida_total_m < rapida.subida_total_m - 5:
+            nomes.append("menos subida")
+        if (r.perfil == "tranquila" or getattr(r, "perfil_tranquilo", False)) and r is not rapida:
+            nomes.append("tranquila")
+        if nomes:
+            if nomes[0] == "menos subida":
+                r.nome_perfil = "Menos subida" + "".join(" e " + n for n in nomes[1:])
+            else:
+                texto = " e ".join(nomes)
+                r.nome_perfil = "Mais " + texto.replace(" e menos subida", ", menos subida")
+            boas.append(r)
+    boas.sort(key=lambda r: r is not rapida)
+    return boas

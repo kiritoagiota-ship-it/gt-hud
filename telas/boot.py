@@ -14,7 +14,7 @@ from widgets.comuns import Texto
 LINHAS = [
     "Nucleo do sistema ............ ok",
     "Banco de viagens ............. ok",
-    "Velocimetro .................. ok",
+    "Velocímetro .................. ok",
 ]
 
 
@@ -106,21 +106,21 @@ class TelaBoot(Screen):
         if app.sinal_fraco():
             linha = "Sinal fraco (%d m), melhorando..." % (app.precisao_ultima or 0)
         elif sat and sat[0]:
-            linha = "Procurando satelites... %d vistos, %d em uso" % sat
+            linha = "Procurando satélites... %d vistos, %d em uso" % sat
         else:
-            linha = "Procurando satelites..."
-        self.status.text = linha + "\nFique em area aberta."
+            linha = "Procurando satélites..."
+        self.status.text = linha + "\nFique em área aberta."
 
     def permissao_negada(self):
         self._buscando = False
         self._negacoes += 1
         if self._negacoes == 1:
-            self.status.text = ("Sem permissao de localizacao precisa.\n"
+            self.status.text = ("Sem permissão de localização precisa.\n"
                                 "Toque em Tentar de novo e escolha 'Precisa'.")
         else:
             # negada 2x, o Android para de perguntar: só pelas configurações
-            self.status.text = ("Libere a localizacao em Configuracoes >\n"
-                                "Apps > GT-HUD > Permissoes > Localizacao,\n"
+            self.status.text = ("Libere a localização em Configurações >\n"
+                                "Apps > GT-HUD > Permissões > Localização,\n"
                                 "escolha 'Precisa' e toque em Tentar de novo.")
         self.status.color = tema.VERMELHO
         self.botoes.clear_widgets()
@@ -140,7 +140,7 @@ class TelaBoot(Screen):
             return
         app = App.get_running_app()
         prec = app.precisao or 0
-        self.status.text = "Sinal adquirido: precisao %d m" % prec
+        self.status.text = "Sinal adquirido: precisão %d m" % prec
         self.status.color = tema.VERDE
         Clock.schedule_once(lambda dt: self._ir_para_mapa(), 0.9)
         self._saiu = True

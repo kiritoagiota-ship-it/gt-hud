@@ -129,8 +129,12 @@ class ItemViagem(ButtonBehavior, BoxLayout):
         kw.setdefault("height", dp(74))
         kw.setdefault("padding", (dp(14), dp(8)))
         super().__init__(**kw)
-        self.add_widget(Texto(text=titulo, font_size=tema.T_BOTAO, bold=True))
-        self.add_widget(Texto(text=detalhe, font_size=tema.T_ROTULO + 1, color=tema.CIANO_FRACO))
+        # uma linha cada, com "..." no fim: nome comprido quebrava em duas
+        # linhas e invadia a de baixo (texto desalinhado)
+        self.add_widget(Texto(text=titulo, font_size=tema.T_BOTAO, bold=True,
+                              shorten=True, shorten_from="right", max_lines=1))
+        self.add_widget(Texto(text=detalhe, font_size=tema.T_ROTULO + 1, color=tema.CIANO_FRACO,
+                              shorten=True, shorten_from="right", max_lines=1))
         self.bind(pos=self._d, size=self._d, state=self._d)
         self._d()
 

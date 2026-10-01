@@ -24,7 +24,8 @@ PASTA_VOZ = os.path.join(os.path.dirname(os.path.abspath(__file__)), "voz")
 RESPIRO_S = 0.09
 VALIDADE_NA_FILA_S = 7.0
 ESPERA_MOTOR_S = 4.0     # ao abrir o app, espera o motor de voz ficar pronto
-RITMO = 0.95             # um pouco mais pausada: soa mais "assistente"
+RITMO = 1.0              # ritmo natural do motor (mais lento soava robótico)
+MEDIDA_MAX_S = 40.0      # medição das vozes (masculina automática): desiste depois disso
 # o motor de voz às vezes não avisa que terminou (ex.: o sistema matou o
 # serviço de voz): passado esse tempo, a fala é cortada e a fila anda
 TRAVADA_BASE_S = 6.0
@@ -47,6 +48,7 @@ class Voz:
         self._config_aplicada = False
         self._fala = None          # classe Java Fala (motor do celular)
         self._limite_fala = 0.0    # time.monotonic() em que a fala atual "travou"
+        self._t_medida = None      # medindo as vozes (a fila espera)
         if platform == "android":
             try:
                 from jnius import autoclass
@@ -61,8 +63,32 @@ class Voz:
         return self._fala is not None and self._fala.estado == 1
 
     def _motor_iniciando(self):
+        if (self._fala is not None and self._t_medida is not None
+                and time.monotonic() - self._t_medida < MEDIDA_MAX_S):
+            return True  # medindo as vozes: falar agora sairia com uma voz qualquer
         return (self._fala is not None and self._fala.estado == 0
                 and time.monotonic() - self._t_inicio < ESPERA_MOTOR_S)
+
+    def medir_vozes(self, ao_terminar):
+        """Acha a voz mais GRAVE (masculina) do celular medindo a altura de
+        cada uma (Fala.acharVozGrave); ao_terminar(índice ou None)."""
+        if not self.motor_pronto():
+            ao_terminar(None)
+            return
+        self._fala.acharVozGrave()
+        self._t_medida = time.monotonic()
+
+        def conferir(dt):
+            grave = self._fala.vozGrave
+            if grave == -1 and time.monotonic() - self._t_medida < MEDIDA_MAX_S:
+                return True
+            self._t_medida = None
+            print("[voz] altura das vozes (indice:Hz):", self._fala.tonsVozes)
+            ao_terminar(grave if grave >= 0 else None)
+            self._config_aplicada = False
+            self._tentar()
+            return False
+        Clock.schedule_interval(conferir, 0.5)
 
     def estado_motor(self):
         """"pronto", "iniciando" ou "sem" (sem motor: voz gravada)."""

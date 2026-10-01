@@ -48,6 +48,7 @@ for _n, _t in _ORDINAIS.items():
     FALAS["rotatoria_%d" % _n] = "na rotatória, pegue a %s saída." % _t
 for _g, _t in _NUMEROS.items():
     FALAS["subida_%d" % _g] = "subida de %s por cento." % _t
+    FALAS["descida_%d" % _g] = "descida de %s por cento, segure a velocidade." % _t
 FALAS.update({
     "fim_subida": "Fim da subida.",
     "chegou": "você chegou ao destino.",
@@ -59,6 +60,9 @@ FALAS.update({
     "gps_ok": "Sinal do GPS de volta.",
     "bem_vindo": "Sistemas online. Bem-vindo, senhor.",
     "logo_depois": "E logo depois,",
+    "rota_trocada": "Rota alterada.",
+    "semaforo": "Semáforo à frente.",
+    "lombada": "Lombada à frente, reduza.",
     "sem_rota": "Não encontrei um caminho de bike até esse destino.",
 })
 
@@ -105,6 +109,10 @@ def distancia_falada(metros):
 
 def chave_subida(grau):
     return "subida_%d" % max(SUBIDA_MIN, min(SUBIDA_MAX, int(round(grau))))
+
+
+def chave_descida(grau):
+    return "descida_%d" % max(SUBIDA_MIN, min(SUBIDA_MAX, int(round(grau))))
 
 
 def texto_manobra(acao, saida=None):

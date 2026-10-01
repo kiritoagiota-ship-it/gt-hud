@@ -33,7 +33,7 @@ class MapaTrajeto(Widget):
         super().__init__(**kw)
         self._aviso = Label(font_size=tema.T_ROTULO, color=tema.CIANO_FRACO,
                             size_hint=(None, None), size=(dp(200), dp(20)))
-        self._lbl_inicio = Label(text="Inicio", font_size=tema.T_ROTULO, color=tema.CIANO_FRACO,
+        self._lbl_inicio = Label(text="Início", font_size=tema.T_ROTULO, color=tema.CIANO_FRACO,
                                  size_hint=(None, None), size=(dp(44), dp(18)))
         self._lbl_fim = Label(text="Fim", font_size=tema.T_ROTULO, color=tema.CIANO_FRACO,
                               size_hint=(None, None), size=(dp(30), dp(18)))
