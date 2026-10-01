@@ -131,6 +131,10 @@ class Voz:
         self._fila.sort(key=lambda f: (-f[0], f[1]))
         self._tentar()
 
+    def bombear(self):
+        """Faz a fila andar sem o Clock (app minimizado: segundo_plano.py)."""
+        self._tentar()
+
     def testar(self):
         self.falar(["bem_vindo"], 3, texto=FRASE_TESTE)
 

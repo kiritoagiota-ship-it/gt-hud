@@ -28,7 +28,7 @@ android.manifest.orientation = portrait
 fullscreen = 0
 
 # INTERNET: mapa (tiles do OpenStreetMap), rota (Valhalla) e busca (Nominatim)
-android.permissions = ACCESS_FINE_LOCATION,ACCESS_COARSE_LOCATION,WAKE_LOCK,VIBRATE,INTERNET,ACCESS_NETWORK_STATE
+android.permissions = ACCESS_FINE_LOCATION,ACCESS_COARSE_LOCATION,WAKE_LOCK,VIBRATE,INTERNET,ACCESS_NETWORK_STATE,FOREGROUND_SERVICE,FOREGROUND_SERVICE_LOCATION,POST_NOTIFICATIONS,SYSTEM_ALERT_WINDOW
 
 # Java proprio: Localizacao.java recebe o GPS e Satelites.java conta satelites
 android.add_src = %(source.dir)s/java

@@ -14,7 +14,7 @@ import sys
 
 PASTA = os.path.dirname(os.path.abspath(__file__))
 TESTES = ["tela_navegacao.py", "tela_busca_recalculo.py", "tela_volta_do_fundo.py", "tela_chip_gps.py",
-          "tela_velocimetro.py", "tela_novidades.py"]
+          "tela_velocimetro.py", "tela_novidades.py", "tela_fundo.py"]
 
 
 def rodar(nome):

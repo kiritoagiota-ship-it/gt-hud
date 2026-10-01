@@ -71,9 +71,17 @@ class GPSAndroid:
         if ligado >= 0 and ligado != self._ligado:
             self._ligado = ligado
             self._ao_status("provider-enabled" if ligado else "provider-disabled", PROVEDOR)
+        dados = self.ler()
+        if dados is not None:
+            self._ao_receber(**dados)
+
+    def ler(self):
+        """Posição nova desde a última leitura (dict) ou None. Usado pelo
+        Clock (app aberto) e pela thread de segundo plano (app minimizado)."""
+        loc = self._loc
         n = loc.contador
         if n == self._visto:
-            return
+            return None
         # lê os campos; se chegou outra posição no meio da leitura, lê de novo
         for _ in range(3):
             dados = dict(lat=loc.lat, lon=loc.lon,
@@ -86,7 +94,7 @@ class GPSAndroid:
                 break
             n = depois
         self._visto = n
-        self._ao_receber(**dados)
+        return dados
 
     def satelites(self):
         """(vistos, em uso) agora, ou None se o contador não existir."""

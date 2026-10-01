@@ -57,6 +57,17 @@ class ServicoGPS:
         if self._sim:
             self._sim.deixar_rota()
 
+    def ler_direto(self):
+        """Posição nova (dict) sem passar pelo Clock (app minimizado); None no
+        simulador ou se não chegou nada."""
+        if self._gps is None:
+            return None
+        try:
+            return self._gps.ler()
+        except Exception as e:
+            print("[gps] leitura direta falhou:", e)
+            return None
+
     def satelites(self):
         """(vistos, em uso) do GPS real; None no simulador ou sem contador."""
         if self._gps is None:

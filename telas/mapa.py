@@ -226,14 +226,13 @@ class TelaMapa(Screen):
         self.col_tempo_nav = Coluna("chegada")
         self.col_falta = Coluna("faltam")
         self.col_sobe = Coluna("de subida")
-        self.btn_encerrar = BotaoHUD(text="Encerrar", cor=tema.VERMELHO, font_size=tema.T_ROTULO + 1,
-                                     on_release=lambda *a: self._encerrar())
-        self.btn_rotas = BotaoHUD(text="Rotas", font_size=tema.T_ROTULO + 1,
+        # botões grandes: dá para acertar com a bike tremendo
+        self.btn_encerrar = BotaoHUD(text="Encerrar", cor=tema.VERMELHO, font_size=tema.T_ROTULO + 2,
+                                     size_hint_x=0.95, on_release=lambda *a: self._encerrar())
+        self.btn_rotas = BotaoHUD(text="Rotas", size_hint=(None, None), opaco=True,
+                                  font_size=tema.T_ROTULO + 2,
                                   on_release=lambda *a: app.calcular_rotas_navegando())
-        botoes_nav = BoxLayout(orientation="vertical", spacing=dp(4), size_hint_x=0.95)
-        botoes_nav.add_widget(self.btn_rotas)
-        botoes_nav.add_widget(self.btn_encerrar)
-        for w in (self.col_tempo_nav, self.col_falta, self.col_sobe, botoes_nav):
+        for w in (self.col_tempo_nav, self.col_falta, self.col_sobe, self.btn_encerrar):
             self.barra_nav.add_widget(w)
 
         # --- navegando: escolher outra rota até o destino ---
@@ -451,6 +450,8 @@ class TelaMapa(Screen):
             visiveis.remove(self.disco)
         else:
             visiveis += [self.faixa, self.barra_nav]
+            if self._escolha_nav is None:
+                visiveis.append(self.btn_rotas)
             if self._escolha_nav is not None:
                 visiveis.append(self.painel_rotas)
                 visiveis.remove(self.disco)
@@ -499,15 +500,18 @@ class TelaMapa(Screen):
 
         # topo
         larg_topo = min(W - 2 * m, dp(480))
+        col = larg_topo
+        if deitada:  # coluna da esquerda (curva, avisos); o mapa fica com a direita
+            col = min(W * 0.42, dp(400))
         self.busca.pos, self.busca.size = (m, topo - dp(54)), (larg_topo, dp(54))
         larg_menu = 3 * dp(74) + 2 * dp(6)
         self.menu.pos, self.menu.size = (W - m - larg_menu, topo - dp(54) - m - dp(40)), (larg_menu, dp(40))
         self.status.x = m
         self.status.topo_alvo = topo - dp(54) - m
         self.status.largura_max = W - 3 * m - larg_menu
-        self.faixa.pos, self.faixa.size = (m, topo - dp(132)), (larg_topo, dp(132))
+        self.faixa.pos, self.faixa.size = (m, topo - dp(132)), (col, dp(132))
         self.depois.pos, self.depois.size = (m, topo - dp(132) - dp(6) - dp(38)), (dp(118), dp(38))
-        larg_chip = min(larg_topo, dp(330))
+        larg_chip = min(col, dp(330))
         y_chip = topo - dp(132) - dp(6) - dp(44)
         if self._tem_depois:
             y_chip -= dp(44)
@@ -521,8 +525,8 @@ class TelaMapa(Screen):
         # prévia
         larg_card = min(W - 2 * m, dp(480))
         self.card.size = (larg_card, dp(268))
-        self.painel_rotas.pos = (m, m + alt_barra + m)
-        self.painel_rotas.size = (larg_topo, dp(150))
+        self.painel_rotas.pos = (m, m + alt_barra + m) if not deitada else (bx, m + alt_barra + m)
+        self.painel_rotas.size = (larg_topo if not deitada else min(bw, dp(480)), dp(150))
         self.card.pos = (W - m - larg_card, m) if deitada else (m, m)
 
         # botões do mapa (direita, acima da barra)
@@ -535,11 +539,16 @@ class TelaMapa(Screen):
             base = m + dp(110) + m
         if deitada and self.estado == PREVIA:
             base = m
-        x_btn = W - m - dp(50) if not (deitada and self.estado == PREVIA) else W - larg_card - 2 * m - dp(50)
-        self.btn_menos.pos, self.btn_menos.size = (x_btn, base), (dp(50), dp(46))
-        self.btn_mais.pos, self.btn_mais.size = (x_btn, base + dp(52)), (dp(50), dp(46))
-        self.btn_centro.pos = (x_btn + dp(50) - dp(128), base + 2 * dp(52))
-        self.btn_centro.size = (dp(128), dp(46))
+        lb, ab, gap = dp(58), dp(54), dp(8)   # botões do mapa: grandes para o guidão
+        x_btn = W - m - lb if not (deitada and self.estado == PREVIA) else W - larg_card - 2 * m - lb
+        self.btn_menos.pos, self.btn_menos.size = (x_btn, base), (lb, ab)
+        self.btn_mais.pos, self.btn_mais.size = (x_btn, base + ab + gap), (lb, ab)
+        y_extra = base + 2 * (ab + gap)
+        if self.estado == NAVEGANDO and self._escolha_nav is None:
+            self.btn_rotas.pos, self.btn_rotas.size = (x_btn + lb - dp(96), y_extra), (dp(96), ab)
+            y_extra += ab + gap
+        self.btn_centro.pos = (x_btn + lb - dp(150), y_extra)
+        self.btn_centro.size = (dp(150), ab)
 
         # mensagem curta
         if deitada:
@@ -547,6 +556,13 @@ class TelaMapa(Screen):
         else:
             self.lbl_msg.pos = (m + tam_velo + m, m + alt_barra + m)
             self.lbl_msg.size = (W - tam_velo - 3 * m - dp(60), dp(44))
+        # seta navegando: no meio da parte livre do mapa (deitada: à direita da coluna)
+        if deitada:
+            self.mapa.ancora_nav = ((m + col + W) / 2.0 / W, 0.40)
+        else:
+            self.mapa.ancora_nav = (0.5, 0.30)
+        if self.estado == NAVEGANDO and self.mapa.girar and self.mapa.ancora != self.mapa.ancora_nav:
+            self.mapa.ancora = self.mapa.ancora_nav
         # crédito do OpenStreetMap: à esquerda da coluna de botões (não por baixo dela)
         self.mapa.credito_margem = (W - x_btn + m, base + dp(2) if self.estado != PREVIA else m)
         # nomes do mapa não vão para baixo dos painéis (ficavam escondidos)

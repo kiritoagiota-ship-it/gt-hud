@@ -22,6 +22,7 @@ from banco import Banco
 from filtro import FiltroVelocidade
 from gps_service import ServicoGPS
 from navegacao import P_INFO, Navegacao
+from segundo_plano import SegundoPlano
 from telas.boot import TelaBoot
 from telas.busca import TelaBusca
 from telas.config import TelaConfig
@@ -124,7 +125,8 @@ class GTHudApp(App):
         self.sm.add_widget(TelaViagens(name="viagens"))
         self.sm.add_widget(TelaDetalhe(name="detalhe"))
         self.sm.add_widget(TelaConfig(name="config"))
-        Clock.schedule_interval(self._vigiar_gps, 2.0)
+        Clock.schedule_interval(lambda dt: self.vigiar_gps(), 2.0)
+        self.fundo = SegundoPlano(self)
         return self.sm
 
     # --- voz -------------------------------------------------------------------
@@ -183,14 +185,19 @@ class GTHudApp(App):
         gc.freeze()
 
     def on_pause(self):
+        self.fundo.ao_pausar()  # rota ativa: segue navegando minimizado
         return True  # não fecha o app ao trocar de tela no celular
 
     def on_resume(self):
+        self.fundo.ao_voltar()
+        if self.sm.current == "config":  # pode estar voltando da tela de permissão da bolha
+            self.sm.get_screen("config").on_pre_enter()
         self.aplicar_tela_ligada()
         self.aplicar_orientacao()
         self.sm.get_screen("mapa").mapa.ao_voltar()
 
     def on_stop(self):
+        self.fundo.terminou()
         self.salvar_viagem_atual()  # não perde a viagem se o app fechar
         self.gps.parar()
 
@@ -278,15 +285,32 @@ class GTHudApp(App):
         velho (parou, virou a bike) faria a rota começar com meia-volta."""
         return self.rumo if time.monotonic() - self._t_rumo <= RUMO_VALIDO_S else None
 
+    def na_tela(self, funcao):
+        """Mexer em tela só na thread do Kivy: com o app minimizado (thread de
+        segundo plano), fica para quando ele voltar."""
+        if self.fundo.minimizado:
+            Clock.schedule_once(lambda dt: funcao())
+        else:
+            funcao()
+
     def _ao_receber_gps(self, d):
+        """Leitura do GPS com o app aberto (Clock): lógica + tela."""
+        vel = self.processar_leitura(d)
+        self._avisar(vel)
+        if self.nav is not None:
+            self.fundo.atualizar()
+
+    def processar_leitura(self, d):
+        """Tudo da leitura que NÃO é tela (filtro, viagem, alerta, navegação).
+        Roda também na thread de segundo plano. Devolve a velocidade (km/h)
+        ou None se a leitura era ruim."""
         self.gps_desligado = False
         agora = time.monotonic()
         precisao = d.get("accuracy")
         self._t_leitura = agora
         self.precisao_ultima = precisao
         if not self.filtro.leitura_valida(precisao):
-            self._avisar(None)
-            return
+            return None
         self._t_valida = agora
         self.ja_teve_sinal = True
         self.precisao = precisao
@@ -307,7 +331,7 @@ class GTHudApp(App):
         self._checar_limite(vel)
         if self.nav is not None:
             self._navegar(d["lat"], d["lon"], vel, agora)
-        self._avisar(vel)
+        return vel
 
     def _checar_limite(self, vel):
         limite = self.ajustes["limite_kmh"]
@@ -328,7 +352,7 @@ class GTHudApp(App):
             elif tipo == "provider-enabled":
                 self.gps_desligado = False
 
-    def _vigiar_gps(self, dt):
+    def vigiar_gps(self):
         """Navegando, o assistente avisa quando o GPS some e quando volta."""
         if self.nav is None or self.gps.modo == "SIM":
             self._avisou_gps_perdido = False
@@ -418,6 +442,7 @@ class GTHudApp(App):
             self.viagem.iniciar()  # a navegação grava a viagem sozinha
         self.gps.seguir_rota(rota.pontos)
         self.sm.get_screen("mapa").modo_navegando(rota)
+        self.fundo.comecou()  # notificação + Android deixa seguir minimizado
 
     def encerrar_navegacao(self, chegou=False):
         if self.nav is None:
@@ -426,6 +451,7 @@ class GTHudApp(App):
         self.estado_nav = None
         self.rota_previa = None
         self.destino = None
+        self.fundo.terminou()
         self.gps.deixar_rota()
         salvou = self.salvar_viagem_atual()
         if not chegou:
@@ -494,7 +520,7 @@ class GTHudApp(App):
             return
         self.nav.trocar_rota(rota)
         self.gps.seguir_rota(rota.pontos)
-        self.sm.get_screen("mapa").trocar_rota(rota)
+        self.na_tela(lambda: self.sm.get_screen("mapa").trocar_rota(rota))
 
     def _recalculo_falhou(self, erro):
         self._recalculando = False

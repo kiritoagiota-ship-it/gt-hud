@@ -143,6 +143,19 @@ class TelaConfig(Screen):
                                "Fala \"Semáforo à frente\" no caminho (lombada é sempre avisada).",
                                self._centralizar(self.alt_semaforos)))
 
+        self.alt_fundo = Alternar(lambda v: self._mudar_simples("segundo_plano", self.alt_fundo, v))
+        lista.add_widget(Linha("Navegação em segundo plano",
+                               "Com rota ativa, minimizar o app (ou apagar a tela) não para a "
+                               "navegação: a voz continua e aparece uma notificação.",
+                               self._centralizar(self.alt_fundo)))
+
+        self.alt_bolha = Alternar(self._mudar_bolha)
+        self.linha_bolha = Linha("Bolha flutuante",
+                                 "Minimizado, mostra os minutos e os km até o destino por cima "
+                                 "dos outros apps (como a 99). Toque nela para voltar.",
+                                 self._centralizar(self.alt_bolha))
+        lista.add_widget(self.linha_bolha)
+
         self.alt_girar = Alternar(lambda v: self._mudar_simples("girar_mapa", self.alt_girar, v))
         lista.add_widget(Linha("Mapa gira com a direção",
                                "Na navegação, o caminho à frente fica sempre para cima.",
@@ -214,6 +227,8 @@ class TelaConfig(Screen):
         self.alt_efeito.mostrar(aj["voz_efeito"])
         self.alt_subidas.mostrar(aj["avisar_subidas"])
         self.alt_semaforos.mostrar(aj["avisar_semaforos"])
+        self.alt_fundo.mostrar(aj["segundo_plano"])
+        self._mostrar_bolha()
         self.alt_girar.mostrar(aj["girar_mapa"])
         self.sel_limite.mostrar(aj["limite_kmh"])
         self.alt_vibrar.mostrar(aj["vibrar_limite"])
@@ -319,6 +334,31 @@ class TelaConfig(Screen):
         if app.nav is not None:
             app.nav.avisar_subidas = ligado
         self.alt_subidas.mostrar(ligado)
+
+    def _mostrar_bolha(self):
+        app = App.get_running_app()
+        ligada = app.ajustes["bolha"]
+        permitida = app.fundo.android.bolha_permitida()
+        self.alt_bolha.mostrar(ligada)
+        if ligada and app.fundo.android.bolha is not None and not permitida:
+            self.alt_bolha.text = "Permitir"
+            self.linha_bolha.explicacao.text = ("Falta liberar \"Exibir sobre outros apps\" "
+                                                "para o GT-HUD: toque em Permitir.")
+        else:
+            self.linha_bolha.explicacao.text = ("Minimizado, mostra os minutos e os km até o destino "
+                                                "por cima dos outros apps (como a 99). Toque nela "
+                                                "para voltar.")
+
+    def _mudar_bolha(self, ligado):
+        app = App.get_running_app()
+        android = app.fundo.android
+        if self.alt_bolha.text == "Permitir":
+            android.pedir_bolha()   # abre a tela do Android; ao voltar, on_pre_enter atualiza
+            return
+        app.ajustes["bolha"] = ligado
+        if ligado and android.bolha is not None and not android.bolha_permitida():
+            android.pedir_bolha()
+        self._mostrar_bolha()
 
     def _mudar_semaforos(self, ligado):
         app = App.get_running_app()

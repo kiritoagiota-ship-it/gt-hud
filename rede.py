@@ -56,16 +56,35 @@ def enviar_json(url, corpo, cabecalhos=None, timeout=20):
         return json.loads(resposta.read().decode("utf-8"))
 
 
+_desvio = None   # app minimizado: quem recebe as respostas (segundo_plano.py)
+
+
+def desviar_respostas(funcao):
+    """Com o app minimizado o Clock do Kivy para: as respostas vão para
+    funcao(callback, valor) (a thread de segundo plano trata). None = Clock."""
+    global _desvio
+    _desvio = funcao
+
+
+def _entregar(callback, valor):
+    desvio = _desvio
+    if desvio is not None:
+        desvio(callback, valor)
+    else:
+        Clock.schedule_once(lambda dt: callback(valor))
+
+
 def em_segundo_plano(tarefa, ao_terminar, ao_falhar=None):
     """Roda tarefa() numa thread; ao_terminar(resultado) ou ao_falhar(erro)
-    são chamados depois na thread do Kivy (onde pode mexer na tela)."""
+    são chamados depois na thread do Kivy (onde pode mexer na tela) ou, com
+    o app minimizado, na thread de segundo plano."""
     def rodar():
         try:
             resultado = tarefa()
         except Exception as erro:
             print("[rede]", erro)
             if ao_falhar is not None:
-                Clock.schedule_once(lambda dt, e=erro: ao_falhar(e))
+                _entregar(ao_falhar, erro)
             return
-        Clock.schedule_once(lambda dt: ao_terminar(resultado))
+        _entregar(ao_terminar, resultado)
     threading.Thread(target=rodar, daemon=True).start()

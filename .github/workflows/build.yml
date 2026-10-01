@@ -110,6 +110,18 @@ jobs:
           assert s.count(old) == 1, "trecho do filtro de rodas nao encontrado"
           s = s.replace(old, 'filename.endswith(".whl") and not filename.endswith("-any.whl")')
           open(p, "w", encoding="utf-8").write(s)
+          # Servico de navegacao em segundo plano (java/.../ServicoNavegacao.java):
+          # o Android 14 exige o tipo "location" declarado no manifesto, e o p4a
+          # so declara servicos Python; aqui entra o nosso, antes de </application>
+          m = os.path.join(os.environ["HOME"], "p4a-src", "pythonforandroid", "bootstraps",
+                           "_sdl_common", "build", "templates", "AndroidManifest.tmpl.xml")
+          t = open(m, encoding="utf-8").read()
+          assert t.count("</application>") == 1, "manifesto do p4a mudou"
+          t = t.replace("</application>", '<service android:name="org.kirito.gthud.ServicoNavegacao" '
+                        'android:foregroundServiceType="location" android:exported="false" /> '
+                        '</application>')
+          open(m, "w", encoding="utf-8").write(t)
+          print("servico de navegacao declarado no manifesto")
           PY
           sed -i '/^p4a.branch/d' buildozer.spec
           sed -i "/^p4a.hook/a p4a.source_dir = $HOME/p4a-src" buildozer.spec

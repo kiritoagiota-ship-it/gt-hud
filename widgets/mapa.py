@@ -129,6 +129,7 @@ class MapaHUD(Widget):
         super().__init__(**kw)
         self.centro = (-16.6799, -49.2550)  # até o GPS responder: centro de Goiânia
         self.ancora = (0.5, 0.5)            # onde o centro fica na tela (frações)
+        self.ancora_nav = (0.5, 0.30)       # navegando e girando (a tela muda isso deitada)
         self.eu = None                      # (lat, lon, rumo ou None, precisão m)
         self._navegando = False
         self._escala = Metrics.density      # px de tela por px do mundo no zoom 14
@@ -243,7 +244,7 @@ class MapaHUD(Widget):
     def modo_navegacao(self, ligado):
         self._navegando = ligado
         # navegando e girando: a seta fica mais embaixo, sobra mapa à frente
-        self.ancora = (0.5, 0.30) if (ligado and self.girar) else (0.5, 0.5)
+        self.ancora = self.ancora_nav if (ligado and self.girar) else (0.5, 0.5)
         if ligado:
             self.seguindo = True
             self._alvo_zoom = ZOOM_NAV_PERTO

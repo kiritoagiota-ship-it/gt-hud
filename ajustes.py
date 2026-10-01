@@ -14,6 +14,8 @@ PADRAO = {
     "girar_mapa": True,
     "avisar_subidas": True,
     "avisar_semaforos": True,   # lombada é avisada sempre (segurança)
+    "segundo_plano": True,      # rota ativa + app minimizado: continua navegando
+    "bolha": True,              # ... com a bolha de km/minutos por cima dos apps
     "voz_indice": -1,        # -1 = automática: a mais grave (masculina) do celular
     "voz_auto": -1,          # índice que a medição achou (-1 = ainda não mediu)
     "voz_auto_nome": "",     # nome dessa voz (se a lista mudar, mede de novo)
