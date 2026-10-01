@@ -111,7 +111,7 @@ class TelaBusca(Screen):
         self._buscando = False
         n = len(lugares)
         self.lbl_status.text = ("%d %s" % (n, "resultado" if n == 1 else "resultados")) if n else \
-            "Nada encontrado. Cole aqui o link do Google Maps, ou segure o dedo no mapa e salve o ponto."
+            "Nada encontrado. Cole o Plus Code ou o link do Google Maps, ou segure o dedo no mapa e salve o ponto."
         self._listar(lugares)
 
     def _falhou(self, erro):

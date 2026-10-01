@@ -14,9 +14,13 @@ Ordem:
 A busca só roda quando a pessoa confirma (nada de buscar a cada letra).
 
 Lugar que só o Google conhece (ex.: "Barbearia Imagem", que não está em
-nenhuma base gratuita): no Google Maps, Compartilhar -> Copiar link (ou
-segurar o dedo no ponto e copiar as coordenadas) e colar aqui: vira destino
-(lugar_colado), sem chave nem conta.
+nenhuma base gratuita): colar aqui o que o Google Maps dá (lugar_colado):
+- o PLUS CODE da página do lugar (ex.: "9MJH+9W"): ponto exato, sem internet;
+- coordenadas ("-16.61906, -49.32019"): ponto exato;
+- o LINK de Compartilhar: o link curto do app (maps.app.goo.gl) leva a uma
+  página SEM coordenadas (testado com um link real em 01/10/2026), só nome
+  e endereço; o app procura esse endereço no mapa aberto (aproximado: a
+  rua). Link antigo/longo com "@lat,lon" ou "!3d..!4d.." é exato.
 """
 import os
 import re
@@ -26,6 +30,7 @@ import urllib.parse
 
 import chaves
 import goiania
+import pluscode
 import rede
 from rota import distancia_m
 
@@ -63,12 +68,53 @@ def _ponto_da_url(url):
     return None
 
 
-def lugar_colado(texto, resolver=None):
-    """Link do Google Maps (curto ou longo) ou "lat, lon" -> lugar, ou None
-    se não é isso. resolver(url) -> url final (segue o redirecionamento do
-    link curto maps.app.goo.gl); padrão: pela internet."""
+_ABREVIACOES = [(r"\bR\.", "Rua"), (r"\bAv\.", "Avenida"), (r"\bAl\.", "Alameda"),
+                 (r"\bSt\.", "Setor"), (r"\bJd\.", "Jardim"), (r"\bPq\.", "Parque"),
+                 (r"\bRes\.", "Residencial"), (r"\bVl\.", "Vila"), (r"\bTv\.", "Travessa")]
+_PEDACO_INUTIL = re.compile(r"^(qd|quadra|lt|lote|n|nº|n°|sala|apto|casa|bloco|s/n|\d)|^\d{5}-?\d{3}$|^go$|^goi[aâ]nia$",
+                            re.IGNORECASE)
+
+
+def _do_endereco(nome_e_endereco, geocodificar=None):
+    """ "BARBEARIA IMAGEM - R. do Sereno, quadra 141 - lote 20 - St. Morada do
+    Sol, Goiânia - GO, 74475-211" -> (nome, endereço, ponto da RUA ou None)."""
+    partes = [p.strip() for p in nome_e_endereco.split(" - ")]
+    nome, resto = partes[0], " - ".join(partes[1:])
+    pedacos = [p.strip() for p in re.split(r",| - ", resto) if p.strip()]
+    uteis = []
+    for p in pedacos:
+        if not _PEDACO_INUTIL.search(p):
+            for a, b in _ABREVIACOES:
+                p = re.sub(a, b, p)
+            uteis.append(p)
+    consulta = ", ".join(uteis[:2] + ["Goiânia"])
+    ponto = (geocodificar or _geocodificar_rua)(consulta) if uteis else None
+    return nome[:60], resto, ponto
+
+
+def _geocodificar_rua(consulta):
+    lat0, lon0, lat1, lon1 = goiania.LIMITES
+    dados = rede.baixar_json(PHOTON + "?" + urllib.parse.urlencode(
+        {"q": consulta, "limit": 3, "bbox": "%s,%s,%s,%s" % (lon0, lat0, lon1, lat1)}))
+    for f in dados.get("features", []):
+        lon, lat = f["geometry"]["coordinates"][:2]
+        if goiania.dentro(lat, lon):
+            return lat, lon
+    return None
+
+
+def lugar_colado(texto, resolver=None, geocodificar=None):
+    """Plus Code, "lat, lon" ou link do Google Maps -> lugar, ou None se o
+    texto não é nada disso. resolver(url) -> url final (segue o link curto);
+    geocodificar(endereço) -> (lat, lon) da rua. Os dois vão à internet."""
     texto = (texto or "").strip()
     link = next((p for p in texto.split() if p.startswith("http")), None)
+    codigo = pluscode.achar(texto) if link is None else None
+    if codigo is not None:
+        lat, lon = pluscode.recuperar(codigo, *goiania.CENTRO)
+        resto = texto.replace(codigo, "").strip(" ,")
+        return {"nome": ("Plus Code " + codigo.upper()), "endereco": resto[:80] or "Plus Code do Google Maps",
+                "lat": lat, "lon": lon}
     if link is None:
         m = _COORDENADAS.search(texto)
         if m and not re.search(r"[a-zA-Z]{3,}", texto.replace(m.group(0), "")):
@@ -81,15 +127,21 @@ def lugar_colado(texto, resolver=None):
     if ponto is None and "goo.gl" in link:
         link = (resolver or rede.url_final)(link)
         ponto = _ponto_da_url(link)
+    m = _NOME.search(link)
+    titulo = urllib.parse.unquote_plus(m.group(1)) if m else ""
+    if ponto is not None:
+        nome = titulo.split(" - ")[0][:60] if titulo else ""
+        # o texto copiado do app do Google costuma vir "Nome do lugar\nhttps://..."
+        antes = texto.split(link)[0].strip() if link in texto else ""
+        nome = nome or (antes.splitlines()[-1][:60] if antes else "Lugar do Google Maps")
+        return {"nome": nome, "endereco": "do Google Maps", "lat": ponto[0], "lon": ponto[1]}
+    if not titulo:
+        return None
+    nome, endereco, ponto = _do_endereco(titulo, geocodificar)
     if ponto is None:
         return None
-    m = _NOME.search(link)
-    nome = urllib.parse.unquote_plus(m.group(1)) if m else "Lugar do Google Maps"
-    # o texto copiado do app do Google costuma vir "Nome do lugar\nhttps://..."
-    antes = texto.split(link)[0].strip()
-    if nome == "Lugar do Google Maps" and antes:
-        nome = antes.splitlines()[-1][:60]
-    return {"nome": nome, "endereco": "do Google Maps", "lat": ponto[0], "lon": ponto[1]}
+    return {"nome": nome, "endereco": "Aproximado (pela rua): " + endereco, "lat": ponto[0],
+            "lon": ponto[1], "aproximado": True}
 
 
 # --- 1) salvos -------------------------------------------------------------------

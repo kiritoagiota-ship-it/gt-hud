@@ -64,5 +64,40 @@ class TesteSinais(unittest.TestCase):
         self.assertTrue(all(-16.70 <= p[0] <= -16.66 for p in perto))
 
 
+class TestePlusCodeELinkSemCoordenadas(unittest.TestCase):
+    def test_plus_code_ida_e_volta(self):
+        import pluscode
+        from rota import distancia_m
+        codigo = pluscode.codificar(-16.6799, -49.2550)
+        self.assertEqual(codigo, "58MG8PCW+22")
+        self.assertLess(distancia_m(pluscode.decodificar(codigo), (-16.6799, -49.2550)), 15)
+        # código curto da página da Barbearia Imagem no Google Maps
+        lat, lon = pluscode.recuperar("9MJH+9W", *goiania.CENTRO)
+        self.assertAlmostEqual(lat, -16.61906, places=4)
+        self.assertAlmostEqual(lon, -49.32019, places=4)
+        self.assertEqual(pluscode.achar("9MJH+9W St. Morada do Sol, Goiânia"), "9MJH+9W")
+        self.assertIsNone(pluscode.achar("Rua 5, 120"))
+
+    def test_plus_code_colado_vira_destino(self):
+        lugar = busca.lugar_colado("9MJH+9W St. Morada do Sol, Goiânia")
+        self.assertEqual(lugar["nome"], "Plus Code 9MJH+9W")
+        self.assertAlmostEqual(lugar["lat"], -16.61906, places=4)
+
+    def test_link_do_app_sem_coordenadas_usa_o_endereco(self):
+        # o link curto real (maps.app.goo.gl) leva a uma página assim, sem lat/lon
+        final = ("https://www.google.com/maps/place/BARBEARIA+IMAGEM+-+R.+do+Sereno,+quadra+141+-+lote+20"
+                 "+-+St.+Morada+do+Sol,+Goi%C3%A2nia+-+GO,+74475-211/data=!4m2!3m1!1s0x935ef4d6d0236577:0x2")
+        consultas = []
+
+        def geo(consulta):
+            consultas.append(consulta)
+            return (-16.6182, -49.3222)
+        lugar = busca.lugar_colado("https://maps.app.goo.gl/abc", resolver=lambda u: final, geocodificar=geo)
+        self.assertEqual(consultas, ["Rua do Sereno, Setor Morada do Sol, Goiânia"])
+        self.assertEqual(lugar["nome"], "BARBEARIA IMAGEM")
+        self.assertTrue(lugar["aproximado"])
+        self.assertTrue(lugar["endereco"].startswith("Aproximado"))
+
+
 if __name__ == "__main__":
     unittest.main()
