@@ -12,6 +12,11 @@ Ordem:
 4) Google Places, SÓ se um dia houver chave (chaves.py; exige conta paga no
    Google Cloud, que o dono não tem por enquanto).
 A busca só roda quando a pessoa confirma (nada de buscar a cada letra).
+
+Lugar que só o Google conhece (ex.: "Barbearia Imagem", que não está em
+nenhuma base gratuita): no Google Maps, Compartilhar -> Copiar link (ou
+segurar o dedo no ponto e copiar as coordenadas) e colar aqui: vira destino
+(lugar_colado), sem chave nem conta.
 """
 import os
 import re
@@ -32,6 +37,11 @@ BASE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "dados", "goiani
 MAX_RESULTADOS = 12
 POUCOS = 4                 # menos que isso na base offline: pergunta também ao Photon
 _PALAVRAS_VAZIAS = {"e", "de", "da", "do", "das", "dos", "a", "o", "as", "os", "&", "-"}
+_COORDENADAS = re.compile(r"(-?\d{1,2}\.\d{3,})\s*,\s*(-?\d{1,3}\.\d{3,})")
+_PINO = re.compile(r"!3d(-?\d+\.\d+)!4d(-?\d+\.\d+)")          # o ponto do lugar
+_CENTRO = re.compile(r"@(-?\d+\.\d+),(-?\d+\.\d+)")            # o centro do mapa
+_CONSULTA = re.compile(r"[?&](?:q|query|ll|destination)=(-?\d+\.\d+)(?:%2C|,)(-?\d+\.\d+)")
+_NOME = re.compile(r"/maps/place/([^/@?]+)")
 _PARECE_ENDERECO = re.compile(r"\d|^(rua|r\.?|av\.?|avenida|alameda|al\.?|travessa|praca|rodovia|go-|br-)\b")
 
 
@@ -42,6 +52,44 @@ def normalizar(texto):
 
 def _termos(texto):
     return [t for t in normalizar(texto).split() if t not in _PALAVRAS_VAZIAS]
+
+
+# --- 0) link do Google Maps ou coordenadas coladas ---------------------------------
+def _ponto_da_url(url):
+    for padrao in (_PINO, _CONSULTA, _CENTRO):
+        m = padrao.search(url)
+        if m:
+            return float(m.group(1)), float(m.group(2))
+    return None
+
+
+def lugar_colado(texto, resolver=None):
+    """Link do Google Maps (curto ou longo) ou "lat, lon" -> lugar, ou None
+    se não é isso. resolver(url) -> url final (segue o redirecionamento do
+    link curto maps.app.goo.gl); padrão: pela internet."""
+    texto = (texto or "").strip()
+    link = next((p for p in texto.split() if p.startswith("http")), None)
+    if link is None:
+        m = _COORDENADAS.search(texto)
+        if m and not re.search(r"[a-zA-Z]{3,}", texto.replace(m.group(0), "")):
+            lat, lon = float(m.group(1)), float(m.group(2))
+            return {"nome": "Local colado", "endereco": "%.5f, %.5f" % (lat, lon), "lat": lat, "lon": lon}
+        return None
+    if "goo.gl" not in link and "google." not in link:
+        return None
+    ponto = _ponto_da_url(link)
+    if ponto is None and "goo.gl" in link:
+        link = (resolver or rede.url_final)(link)
+        ponto = _ponto_da_url(link)
+    if ponto is None:
+        return None
+    m = _NOME.search(link)
+    nome = urllib.parse.unquote_plus(m.group(1)) if m else "Lugar do Google Maps"
+    # o texto copiado do app do Google costuma vir "Nome do lugar\nhttps://..."
+    antes = texto.split(link)[0].strip()
+    if nome == "Lugar do Google Maps" and antes:
+        nome = antes.splitlines()[-1][:60]
+    return {"nome": nome, "endereco": "do Google Maps", "lat": ponto[0], "lon": ponto[1]}
 
 
 # --- 1) salvos -------------------------------------------------------------------
@@ -135,6 +183,11 @@ def _google(texto, perto, chave):
 def buscar(texto, perto=None, salvos=()):
     """Chamada que espera a resposta (use rede.em_segundo_plano).
     Devolve [{nome, endereco, lat, lon, dist_m, fonte}], o melhor primeiro."""
+    colado = lugar_colado(texto)
+    if colado is not None:
+        colado.update(fonte="colado", nota=100,
+                      dist_m=distancia_m(perto, (colado["lat"], colado["lon"])) if perto else None)
+        return [colado]
     lugares = _salvos(texto, salvos) + _offline(texto)
     chave = chaves.chave("google_places")
     if chave:

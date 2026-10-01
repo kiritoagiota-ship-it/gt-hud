@@ -34,6 +34,14 @@ def baixar(url, timeout=20):
         return resposta.read()
 
 
+def url_final(url, timeout=15):
+    """Para onde um link curto (ex.: maps.app.goo.gl) leva, seguindo os
+    redirecionamentos. Use numa thread."""
+    pedido = urllib.request.Request(url, headers={"User-Agent": USER_AGENT})
+    with urllib.request.urlopen(pedido, context=_CTX, timeout=timeout) as resposta:
+        return resposta.geturl()
+
+
 def baixar_json(url, timeout=20):
     return json.loads(baixar(url, timeout).decode("utf-8"))
 

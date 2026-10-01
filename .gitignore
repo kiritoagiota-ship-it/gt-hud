@@ -5,3 +5,6 @@ __pycache__/
 build.log
 versao.json
 chaves.json
+ferramentas/testes_tela/fotos*/
+ferramentas/testes_tela/.tmp/
+diagnostico.txt

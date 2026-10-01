@@ -12,6 +12,7 @@ from kivy.core.window import Window
 from kivy.uix.screenmanager import NoTransition, ScreenManager
 
 import android_utils
+import diagnostico
 import goiania
 import rede
 import rota as rotas
@@ -62,6 +63,7 @@ class GTHudApp(App):
         Window.bind(on_keyboard=self._tecla)
 
         pasta = self.user_data_dir
+        diagnostico.iniciar(pasta, self.versao())
         self.ajustes = Ajustes(pasta)
         self.banco = Banco(pasta)
         self.filtro = FiltroVelocidade(alfa=self.ajustes["alfa"])
@@ -158,10 +160,22 @@ class GTHudApp(App):
         self.voz.medir_vozes(achou)
 
     # --- ciclo de vida ---------------------------------------------------
+    def versao(self):
+        """1.0.N (gravado pelo build do GitHub); no PC não existe."""
+        try:
+            with open(os.path.join(self.directory, "versao.json")) as f:
+                return json.load(f)["versao"]
+        except (OSError, ValueError, KeyError):
+            return "de teste (PC)"
+
     def on_start(self):
         self.aplicar_tela_ligada()
         self.aplicar_orientacao()
         self.solicitar_gps()
+        if diagnostico.fechou_com_erro():
+            Clock.schedule_once(lambda dt: self.sm.get_screen("mapa").mensagem(
+                "O app fechou com erro da última vez. Ajustes > Diagnóstico > Enviar",
+                tema.LARANJA, 10), 4)
         # telas, botões e módulos vivem até o app fechar: "congelados", o
         # coletor de lixo para de varrê-los a cada passada (cada varredura
         # para o app inteiro; quanto menos objetos, menor o tranco)

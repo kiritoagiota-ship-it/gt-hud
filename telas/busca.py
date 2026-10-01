@@ -25,7 +25,7 @@ class TelaBusca(Screen):
 
         linha = BoxLayout(size_hint_y=None, height=dp(52), spacing=dp(8))
         self.campo = TextInput(
-            hint_text="Lugar, tipo ou rua", multiline=False, font_size=tema.T_BOTAO,
+            hint_text="Lugar, tipo, rua ou link do Google Maps", multiline=False, font_size=tema.T_BOTAO,
             background_normal="", background_active="", background_color=tema.PAINEL,
             foreground_color=tema.BRANCO, hint_text_color=tema.CIANO_FRACO,
             cursor_color=tema.CIANO, padding=(dp(12), dp(14)), write_tab=False)
@@ -111,7 +111,7 @@ class TelaBusca(Screen):
         self._buscando = False
         n = len(lugares)
         self.lbl_status.text = ("%d %s" % (n, "resultado" if n == 1 else "resultados")) if n else \
-            "Nada encontrado. Dica: segure o dedo no mapa para marcar e salvar um lugar."
+            "Nada encontrado. Cole aqui o link do Google Maps, ou segure o dedo no mapa e salve o ponto."
         self._listar(lugares)
 
     def _falhou(self, erro):
@@ -120,7 +120,11 @@ class TelaBusca(Screen):
 
     def _escolher(self, lugar):
         self.campo.focus = False
-        App.get_running_app().escolher_destino(lugar)
+        app = App.get_running_app()
+        if lugar.get("fonte") == "colado":
+            # veio do Google Maps: fica salvo (na próxima, é só digitar o nome)
+            app.salvar_lugar(lugar["nome"], lugar["lat"], lugar["lon"], lugar.get("endereco", ""))
+        app.escolher_destino(lugar)
 
     def _voltar(self):
         self.campo.focus = False

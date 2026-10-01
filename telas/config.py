@@ -1,7 +1,5 @@
 """Ajustes: voz, subidas e giro do mapa (navegação), alerta de velocidade,
 vibração, pausa automática, orientação, tela ligada, suavização e simulador."""
-import json
-import os
 
 from kivy.app import App
 from kivy.clock import Clock
@@ -95,12 +93,7 @@ class Alternar(BotaoHUD):
 
 
 def _versao():
-    """Número gravado pelo build do GitHub (1.0.N); no PC não existe."""
-    try:
-        with open(os.path.join(App.get_running_app().directory, "versao.json")) as f:
-            return json.load(f)["versao"]
-    except (OSError, ValueError, KeyError):
-        return "de teste (PC)"
+    return App.get_running_app().versao()
 
 
 class TelaConfig(Screen):
@@ -192,6 +185,12 @@ class TelaConfig(Screen):
                                    "na hora e funciona sem internet.",
                                    self._centralizar(self.btn_offline))
         lista.add_widget(self.linha_offline)
+
+        lista.add_widget(Linha("Diagnóstico",
+                               "Algo deu errado? Envie o registro do app para o Claude "
+                               "(pelo WhatsApp, por exemplo). Pode conter sua localização.",
+                               BotaoHUD(text="Enviar", size_hint_x=None, width=dp(130),
+                                        on_release=lambda *a: self._enviar_diagnostico())))
 
         self.alt_sim = Alternar(self._mudar_sim)
         lista.add_widget(Linha("Modo simulador",
@@ -370,6 +369,11 @@ class TelaConfig(Screen):
             else:
                 expl.text = "Pronto: Goiânia inteira no celular (%d partes)." % ok
         fonte.baixar_goiania(progresso, fim)
+
+    def _enviar_diagnostico(self):
+        import diagnostico
+        if not diagnostico.compartilhar(diagnostico.texto_para_enviar()):
+            print("[diagnostico] nao deu para compartilhar")
 
     def _voltar(self):
         App.get_running_app().voltar()
