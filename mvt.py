@@ -3,10 +3,17 @@ OpenFreeMap), em Python puro: não tem biblioteca de protobuf no APK.
 
 ler(dados) -> {camada: (extent, [(tipo, propriedades, partes), ...])}
   tipo: 1 ponto, 2 linha, 3 polígono
-  partes: listas de (x, y) em unidades do tile (0..extent, Y para baixo)
+  partes: cada uma um array PLANO [x0, y0, x1, y1, ...] em unidades do tile
+          (0..extent, Y para baixo)
+
+Array e não lista de tuplas (x, y): os tiles decodificados ficam guardados e
+eram milhões de tuplas, que o coletor de lixo do Python varre de tempos em
+tempos com tudo parado (até 91 ms no PC, medido em 01/10/2026). Um array é
+um objeto só, que o coletor nem olha.
 """
 import gzip
 import struct
+from array import array
 
 
 def _varint(b, i):
@@ -68,7 +75,7 @@ def _valor(b):
 
 
 def _geometria(cmds):
-    partes, atual, x, y, i = [], [], 0, 0, 0
+    partes, atual, x, y, i = [], array("i"), 0, 0, 0
     while i < len(cmds):
         c = cmds[i]
         i += 1
@@ -81,16 +88,20 @@ def _geometria(cmds):
                 y += (dy >> 1) ^ -(dy & 1)
                 if cid == 1 and atual:
                     partes.append(atual)
-                    atual = []
-                atual.append((x, y))
+                    atual = array("i")
+                atual.append(x)
+                atual.append(y)
         elif cid == 7 and atual:  # ClosePath
             atual.append(atual[0])
+            atual.append(atual[1])
     if atual:
         partes.append(atual)
     return partes
 
 
-def ler(dados, camadas_desejadas=None):
+def ler(dados, camadas_desejadas=None, respirar=None):
+    """respirar(): chamado a cada feição (quem roda numa thread pode dar a
+    vez para a tela)."""
     if dados[:2] == b"\x1f\x8b":
         dados = gzip.decompress(dados)
     camadas = {}
@@ -113,6 +124,8 @@ def ler(dados, camadas_desejadas=None):
             continue
         lista = []
         for f in feicoes:
+            if respirar is not None:
+                respirar()
             tags, tipo, geo = [], 0, []
             for c3, v3 in _campos(f):
                 if c3 == 2:

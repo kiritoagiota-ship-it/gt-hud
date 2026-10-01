@@ -11,6 +11,13 @@ triângulos, no estilo do app e na espessura certa para o zoom de desenho:
 A thread do Kivy só transforma as listas prontas em Mesh (rápido). O app
 nunca trava esperando o mapa.
 
+Fluidez (medida em 01/10/2026): no Python só uma thread roda por vez (GIL).
+Com 2 threads preparando, a tela esperava a vez e travava até 1 s no zoom;
+e o tesselador (código C) segura a vez inteira enquanto roda: os prédios
+vêm TODOS juntos numa feição só (até ~3000 pontos) e travavam a tela 50 ms
+de uma vez no PC (bem mais no celular). Por isso: UMA thread, e cada
+polígono vai sozinho para o tesselador (prédio simples nem passa por ele).
+
 Coordenadas "locais": pixels do Web Mercator no zoom 14, menos uma origem
 fixa, com Y para cima (como no Kivy).
 """
@@ -31,12 +38,21 @@ TILEJSON = "https://tiles.openfreemap.org/planet"
 URL_PADRAO = "https://tiles.openfreemap.org/planet/20260927_080001_pt/{z}/{x}/{y}.pbf"
 Z_DADOS_MAX = 14
 VALIDADE_S = 30 * 86400
-TRABALHADORES = 2
+TRABALHADORES = 1          # mais threads = a tela espera mais pela vez (GIL)
 MAX_PREPARADOS = 64
 MAX_DECODIFICADOS = 24
 LIMITE_DISCO_MB = 200
 MAX_VERTICES_MESH = 60000  # índices do Mesh são de 16 bits
+# os nomes candidatos do tile ficam numa grade de GRADE x GRADE quadrados: a
+# tela olha só os quadrados à vista (no zoom de navegação um tile é ~10x a
+# tela; olhar os milhares de candidatos do tile a cada 0,45 s custava caro)
+GRADE = 8
 REDESCOBRIR_S = 120        # no máximo uma nova consulta da versão a cada isso
+# enquanto a tela anima (seta andando, zoom, arrasto), a thread do mapa
+# trabalha em fatias de FATIA_S e dorme PAUSA_S entre elas: a tela tem a vez
+# sempre que precisa. Mapa parado: trabalha direto.
+FATIA_S = 0.003
+PAUSA_S = 0.003
 
 # --- estilo (cores RGBA; larguras em dp no zoom 16) ---------------------------
 FUNDO = (0.016, 0.027, 0.043, 1)
@@ -101,7 +117,67 @@ def tiles_do_retangulo(x0, y0, x1, y1, dz):
     return [(tx, ty) for tx in range(tx0, tx1 + 1) for ty in range(ty0, ty1 + 1)]
 
 
+_tela = {"animando_ate": 0.0, "ultimo_respiro": 0.0}
+
+
+def tela_animando():
+    """A tela chama a cada quadro de animação."""
+    _tela["animando_ate"] = time.monotonic() + 0.3
+
+
+def _respirar():
+    """Chamado pela thread do mapa a cada pedacinho de trabalho."""
+    agora = time.perf_counter()
+    if agora - _tela["ultimo_respiro"] >= FATIA_S:
+        time.sleep(PAUSA_S if time.monotonic() < _tela["animando_ate"] else 0)
+        _tela["ultimo_respiro"] = time.perf_counter()
+
+
 # --- geometria ------------------------------------------------------------------
+def _area2(pts):
+    """Duas vezes a área com sinal (o sinal diz o sentido do anel)."""
+    a = 0.0
+    x0, y0 = pts[-1]
+    for x1, y1 in pts:
+        a += x0 * y1 - x1 * y0
+        x0, y0 = x1, y1
+    return a
+
+
+def _poligonos(aneis):
+    """Anéis do MVT -> polígonos [externo, furos...]. O 1º anel é sempre
+    externo; os de mesmo sentido abrem um polígono novo."""
+    polis, sentido = [], None
+    for anel, a in aneis:
+        if sentido is None:
+            sentido = a > 0
+        if (a > 0) == sentido or not polis:
+            polis.append([anel])
+        else:
+            polis[-1].append(anel)
+    return polis
+
+
+def _convexo(pts):
+    """Anel sem "dentes" (a maioria dos prédios): vira leque de triângulos
+    direto, sem passar pelo tesselador."""
+    n = len(pts)
+    if n < 3:
+        return False
+    sinal = 0
+    for k in range(n):
+        ax, ay = pts[k - 2]
+        bx, by = pts[k - 1]
+        cx, cy = pts[k]
+        z = (bx - ax) * (cy - by) - (by - ay) * (cx - bx)
+        if z:
+            if sinal == 0:
+                sinal = 1 if z > 0 else -1
+            elif (z > 0) != (sinal > 0):
+                return False
+    return True
+
+
 def _simplificar(pts, tol2):
     """Douglas-Peucker (tolerância ao quadrado), iterativo."""
     if len(pts) < 3:
@@ -195,29 +271,46 @@ def preparar(camadas, dz, tx, ty, rz, origem, escala, densidade):
         k = lado / extent
         bx, by = tx * lado - ox, oy - ty * lado
 
-        def conv(p):
-            return (bx + p[0] * k, by - p[1] * k)
+        def conv(parte):
+            """Parte do mvt (array plano x, y, x, y...) -> [(x, y), ...] locais."""
+            return [(bx + parte[i] * k, by - parte[i + 1] * k) for i in range(0, len(parte) - 1, 2)]
         return conv
 
     tol2 = (0.6 / px_por_local) ** 2                   # simplifica abaixo de ~0,6 px
     areas = {nome: _Malha() for nome in AREAS}
     tess_ok = True
 
+    area_min2 = 2.0 * (1.0 / px_por_local) ** 2        # anel com menos de ~1 px²: invisível
+
     def area(nome_cor, partes, conv):
         nonlocal tess_ok
-        tess = Tesselator()
+        aneis = []
         for parte in partes:
-            pts = _simplificar([conv(p) for p in parte], tol2)
+            pts = _simplificar(conv(parte), tol2)
+            if len(pts) > 3 and pts[0] == pts[-1]:
+                pts = pts[:-1]  # o MVT repete o 1º ponto para fechar
             if len(pts) >= 3:
-                tess.add_contour([c for p in pts for c in p])
-        try:
-            if not tess.tesselate(WINDING_ODD, TYPE_POLYGONS):
-                return
-        except Exception:
-            tess_ok = False
-            return
-        for vertices, indices in tess.meshes:
-            areas[nome_cor].triangulos(list(vertices), list(indices))
+                a = _area2(pts)
+                if abs(a) >= area_min2:
+                    aneis.append((pts, a))
+        malha = areas[nome_cor]
+        for poli in _poligonos(aneis):
+            _respirar()
+            if len(poli) == 1 and _convexo(poli[0]):
+                pts = poli[0]
+                malha.triangulos([v for x, y in pts for v in (x, y, 0, 0)], list(range(len(pts))))
+                continue
+            tess = Tesselator()
+            for anel in poli:
+                tess.add_contour([c for q in anel for c in q])
+            try:
+                if not tess.tesselate(WINDING_ODD, TYPE_POLYGONS):
+                    continue
+            except Exception:
+                tess_ok = False
+                continue
+            for vertices, indices in tess.meshes:
+                malha.triangulos(list(vertices), list(indices))
 
     for nome_camada, alvo in (("landuse", None), ("park", "verde"), ("landcover", "verde"),
                               ("water", "agua"), ("building", "predio")):
@@ -226,6 +319,7 @@ def preparar(camadas, dz, tx, ty, rz, origem, escala, densidade):
         extent, feicoes = camadas[nome_camada]
         conv = conversor(extent)
         for tipo, props, partes in feicoes:
+            _respirar()
             if tipo != 3:
                 continue
             cor = alvo
@@ -244,6 +338,7 @@ def preparar(camadas, dz, tx, ty, rz, origem, escala, densidade):
         extent, feicoes = camadas["transportation"]
         conv = conversor(extent)
         for tipo, props, partes in feicoes:
+            _respirar()
             if tipo != 2:
                 continue
             estilo = _CLASSE_RUA.get(props.get("class"))
@@ -258,11 +353,13 @@ def preparar(camadas, dz, tx, ty, rz, origem, escala, densidade):
             # juntas redondas só onde a rua é grossa o bastante para o canto aparecer
             lados = 0 if largura_px < 3 else (6 if largura_px < 10 else 8)
             for parte in partes:
-                pts = _simplificar([conv(p) for p in parte], tol2)
+                pts = _simplificar(conv(parte), tol2)
                 ruas[estilo].faixa(pts, meia, lados)
     if "transportation_name" in camadas and rz >= 14:
         extent, feicoes = camadas["transportation_name"]
         conv = conversor(extent)
+        # trecho curto demais para o nome caber nem no zoom mais aberto deste nível
+        letra_local = 13.5 * densidade * 0.4 / (px_por_local * 0.6)
         for tipo, props, partes in feicoes:
             nome = props.get("name")
             if tipo != 2 or not nome:
@@ -271,16 +368,18 @@ def preparar(camadas, dz, tx, ty, rz, origem, escala, densidade):
             if rz < RUAS.get(estilo, (0, 0, 13))[2] + 1:
                 continue
             for parte in partes:
-                pts = [conv(p) for p in parte]
+                pts = conv(parte)
                 if len(pts) < 2:
                     continue
                 # trecho mais longo e reto da parte: onde o nome cabe melhor
                 melhor = max(range(len(pts) - 1),
                              key=lambda k: math.hypot(pts[k + 1][0] - pts[k][0], pts[k + 1][1] - pts[k][1]))
                 (ax, ay), (bx, by) = pts[melhor], pts[melhor + 1]
+                comp = math.hypot(bx - ax, by - ay)
+                if comp < len(nome) * letra_local:
+                    continue
                 rotulos.append({"texto": nome, "x": (ax + bx) / 2, "y": (ay + by) / 2,
-                                "ang": math.atan2(by - ay, bx - ax),
-                                "comp": math.hypot(bx - ax, by - ay),
+                                "ang": math.atan2(by - ay, bx - ax), "comp": comp,
                                 "peso": _IMPORTANCIA.get(estilo, 1), "tipo": "rua"})
     if "place" in camadas and rz <= 16:
         extent, feicoes = camadas["place"]
@@ -291,7 +390,7 @@ def preparar(camadas, dz, tx, ty, rz, origem, escala, densidade):
                 continue
             if classe in ("neighbourhood", "quarter") and rz < 14:
                 continue
-            x, y = conv(partes[0][0])
+            x, y = conv(partes[0])[0]
             rotulos.append({"texto": nome, "x": x, "y": y, "ang": 0.0, "comp": 0,
                             "peso": 9 if classe in ("city", "town") else 8, "tipo": "lugar"})
     if "poi" in camadas and rz >= 15:
@@ -303,13 +402,19 @@ def preparar(camadas, dz, tx, ty, rz, origem, escala, densidade):
                     or props.get("class") in _POI_IGNORAR or props.get("subclass") == "bus_stop"
                     or nome.strip().isdigit()):
                 continue
-            x, y = conv(partes[0][0])
+            x, y = conv(partes[0])[0]
             rotulos.append({"texto": nome, "x": x, "y": y, "ang": 0.0, "comp": 0,
                             "peso": 0.5 - props.get("rank", 99) / 100.0, "tipo": "poi"})
+    celula = lado / GRADE
+    grade = {}
+    for r in rotulos:
+        grade.setdefault((int(r["x"] // celula), int(r["y"] // celula)), []).append(r)
     return {
         "areas": [(nome, m.listas()) for nome, m in areas.items()],
         "ruas": [(nome, cor_rua(nome, rz), m.listas()) for nome, m in ruas.items()],
         "rotulos": rotulos,
+        "grade": grade,          # (gx, gy) -> nomes naquele quadrado (coord. locais / celula)
+        "celula": celula,
         "ok": tess_ok,
     }
 
@@ -407,7 +512,8 @@ class FonteVetorial:
             if dados is None:
                 return None
             camadas = mvt.ler(dados, ("landuse", "park", "landcover", "water", "building",
-                                      "transportation", "transportation_name", "place", "poi"))
+                                      "transportation", "transportation_name", "place", "poi"),
+                              respirar=_respirar)
             with self._trava:
                 self._decodificados[base] = camadas
                 while len(self._decodificados) > MAX_DECODIFICADOS:

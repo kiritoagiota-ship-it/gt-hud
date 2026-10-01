@@ -1,13 +1,15 @@
 """GT-HUD: navegação de bike (mapa, rota, curva a curva, subidas, voz) e
 velocímetro GPS com registro de viagens, para a Ouxi GT20."""
+import gc
 import json
 import os
+import sys
 import time
 
 from kivy.app import App
 from kivy.clock import Clock
 from kivy.core.window import Window
-from kivy.uix.screenmanager import FadeTransition, ScreenManager
+from kivy.uix.screenmanager import NoTransition, ScreenManager
 
 import android_utils
 import rede
@@ -44,6 +46,10 @@ RUMO_VALIDO_S = 6.0         # rumo mais velho que isso não vai no pedido de rot
 GPS_PERDIDO_FALA_S = 10     # navegando sem sinal por isso: o assistente avisa
 RECALCULO_ESPERA_S = 12     # depois de falhar, espera antes de tentar de novo
 MAX_RECENTES = 8
+
+# O mapa é preparado numa thread; no Python só uma roda por vez (GIL). Trocar
+# de vez a cada 2 ms (o padrão é 5) deixa a tela esperar menos: menos tranco.
+sys.setswitchinterval(0.002)
 
 
 class GTHudApp(App):
@@ -93,7 +99,9 @@ class GTHudApp(App):
         self._caminho_recentes = os.path.join(pasta, "recentes.json")
         self.recentes = self._ler_recentes()
 
-        self.sm = ScreenManager(transition=FadeTransition(duration=0.18))
+        # sem animação de troca: o esmaecer desenhava o mapa 2x por quadro
+        # (pesado no celular) e a troca instantânea parece mais rápida
+        self.sm = ScreenManager(transition=NoTransition())
         self.sm.add_widget(TelaBoot(name="boot"))
         self.sm.add_widget(TelaMapa(name="mapa"))
         self.sm.add_widget(TelaBusca(name="busca"))
@@ -109,6 +117,11 @@ class GTHudApp(App):
         self.aplicar_tela_ligada()
         self.aplicar_orientacao()
         self.solicitar_gps()
+        # telas, botões e módulos vivem até o app fechar: "congelados", o
+        # coletor de lixo para de varrê-los a cada passada (cada varredura
+        # para o app inteiro; quanto menos objetos, menor o tranco)
+        gc.collect()
+        gc.freeze()
 
     def on_pause(self):
         return True  # não fecha o app ao trocar de tela no celular

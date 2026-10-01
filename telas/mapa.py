@@ -223,11 +223,13 @@ class TelaMapa(Screen):
         self._atualizar_viagem()
         if self._ev_tique is None:
             self._ev_tique = Clock.schedule_interval(self._tique, 1.0)
+        self.mapa.retomar()
 
     def on_leave(self, *a):
         if self._ev_tique is not None:
             self._ev_tique.cancel()
             self._ev_tique = None
+        self.mapa.pausar()  # fora de vista o mapa não anima (bateria e fluidez)
 
     # --- modos (chamados pelo app) -----------------------------------------------
     def modo_livre(self, mensagem=None, cor=None):
@@ -279,6 +281,7 @@ class TelaMapa(Screen):
         self.mapa.definir_rota(rota.pontos)
         self.mapa.definir_destino(rota.pontos[-1])
         self.mapa.modo_navegacao(True)
+        self.mapa.prever = App.get_running_app().nav.prever  # seta anda em cima da rota
         self._montar()
 
     def trocar_rota(self, rota):

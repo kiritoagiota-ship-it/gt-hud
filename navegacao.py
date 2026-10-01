@@ -21,6 +21,7 @@ AVISO_PERTO_S = 6.0          # o aviso "na hora" sai uns 6 s antes da curva
 AVISO_PERTO_MIN_M = 35
 AVISO_SUBIDA_M = 220
 DEPOIS_M = 120               # manobra logo depois da próxima: mostra "Depois"
+SEGUE_LINHA_M = 20           # até isso da rota, a seta anda EM CIMA da linha
 _M_POR_GRAU = 111320.0
 
 # prioridade das falas (a mais alta passa na frente da fila)
@@ -43,6 +44,7 @@ class Navegacao:
         self.falar = falar  # falar(pedaços, prioridade[, texto pronto])
         self.avisar_subidas = avisar_subidas
         self.chegou = False
+        self._vel_ms = 0.0
         self._iniciar_rota(rota)
         primeira = self._proxima_manobra()
         pedacos = ["rota_calculada"]
@@ -101,6 +103,7 @@ class Navegacao:
         if len(rota.pontos) < 2:
             return self._estado(None)
         d, i, t = self._projetar(lat, lon)
+        self._vel_ms = max(0.0, vel_kmh or 0.0) / 3.6
         self.seg = i
         self.dist_feita = rota.acumulado[i] + t * (rota.acumulado[i + 1] - rota.acumulado[i])
         self.dist_da_linha = d
@@ -174,6 +177,15 @@ class Navegacao:
             if self.dist_feita >= fim:
                 self.falar(["fim_subida"], P_INFO)
         self._subida_atual = atual
+
+    def prever(self, segundos):
+        """Onde a seta deve estar `segundos` depois da última leitura do GPS,
+        andando pela rota na velocidade atual: (lat, lon, rumo), ou None se
+        está fora da linha. O GPS dá 1 posição por segundo; com isso a seta
+        desliza entre uma e outra (e faz as curvas da rota) como no Waze."""
+        if self.chegou or self.dist_da_linha > SEGUE_LINHA_M or len(self.rota.pontos) < 2:
+            return None
+        return self.rota.ponto_em(self.dist_feita + self._vel_ms * segundos, self.seg)
 
     # --- o que a tela mostra ---------------------------------------------------
     def _estado(self, proxima):

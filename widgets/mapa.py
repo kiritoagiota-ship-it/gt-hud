@@ -12,6 +12,11 @@ de quem está pedalando.
   pé mesmo com o mapa girando, escolhidos para não se sobreporem.
 - Toque: arrastar com inércia, pinça (zoom no ponto entre os dedos), duplo
   toque e rodinha do mouse com zoom suave.
+- Fluidez: o GPS dá 1 posição por segundo. A seta não espera a próxima: anda
+  sozinha pela velocidade (navegando, EM CIMA da rota: Navegacao.prever) e
+  corrige suave quando a leitura chega; a câmera vai junto, sem atraso.
+  Trabalho pesado na thread da tela (montar tiles, desenhar nomes) tem
+  limite por quadro: o resto fica para os quadros seguintes.
 
 A 1ª versão usava imagens prontas do OpenStreetMap pintadas por shader:
 ficava ilegível no celular (nome pequeno, embaçado no zoom).
@@ -30,7 +35,8 @@ from kivy.uix.label import Label
 from kivy.uix.widget import Widget
 
 import tema
-from mapa_vetor import AREAS, FUNDO, RUAS, FonteVetorial, tiles_do_retangulo, z_dados
+from mapa_vetor import (AREAS, FUNDO, RUAS, FonteVetorial, tela_animando, tiles_do_retangulo,
+                        z_dados)
 
 ZOOM_MIN, ZOOM_MAX = 4.0, 19.0
 TAM = 256.0
@@ -42,6 +48,16 @@ INERCIA = 3.5              # quanto maior, mais rápido o deslize para
 BONUS_JA_NA_TELA = 1.5     # nome já mostrado tem preferência: não fica trocando
 MAX_TEXTURAS = 400
 VOLTA_A_SEGUIR_S = 10.0    # navegando: depois de mexer no mapa, volta a seguir sozinho
+MAX_PREVER_S = 1.5         # sem leitura nova do GPS, a seta para de andar sozinha depois disso
+SUAVE_POS = 10.0           # rapidez da seta corrigindo para a posição nova (1/s)
+SUAVE_CAMERA = 12.0        # rapidez da câmera indo atrás da seta (1/s)
+SUAVE_GIRO = 4.0           # rapidez do mapa girando com a direção (1/s)
+# zoom automático navegando: perto devagar, longe rápido. Fica dentro de UM
+# nível de desenho (17): trocar de nível refaz o mapa inteiro da tela
+ZOOM_NAV_PERTO, ZOOM_NAV_LONGE = 17.4, 16.6
+HISTERESE_ZOOM = 0.75      # só troca o nível de desenho com essa folga
+ORCAMENTO_TILES_S = 0.006  # por quadro, no máximo isso montando tiles
+MAX_TEXTURAS_NOVAS = 8     # por escolha de nomes, no máximo tantos nomes novos desenhados
 
 
 def mundo(lat, lon, z):
@@ -125,7 +141,13 @@ class MapaHUD(Widget):
         self._ev_rotulos = None
         self._larg_usada = None
         self._quadro = None
-        self._alvo = None
+        self._fix = None                    # última leitura: (lat, lon, rumo, m/s, hora)
+        self._vista = None                  # onde a seta está desenhada: (lat, lon, rumo)
+        self.prever = None                  # navegando: Navegacao.prever (seta na linha)
+        self.ativo = True                   # False quando a tela do mapa não está à vista
+        self._em_lote = False
+        self._rz = None
+        self._novas_texturas = 0
         self._alvo_zoom = None
         self._ev_anim = None
         self._toques = []
@@ -164,31 +186,40 @@ class MapaHUD(Widget):
                              color=tema.CIANO_FRACO, size_hint=(None, None), size=(dp(170), dp(16)))
         self.add_widget(self.credito)
         self.credito_margem = (dp(6), dp(4))
-        self.bind(pos=self._aplicar, size=self._aplicar, zoom=self._aplicar, rotacao=self._aplicar)
+        self.bind(pos=self._aplicar, size=self._aplicar, zoom=self._ao_mudar, rotacao=self._ao_mudar)
+
+    def _ao_mudar(self, *a):
+        if not self._em_lote:  # na animação, _aplicar roda uma vez só no fim do quadro
+            self._aplicar()
 
     # --- API usada pelas telas ---------------------------------------------
     def mostrar_eu(self, lat, lon, rumo=None, precisao=None, vel_kmh=None):
         self.eu = (lat, lon, rumo, precisao)
+        self._fix = (lat, lon, rumo, max(0.0, vel_kmh or 0.0) / 3.6, time.monotonic())
         if (self._navegando and not self.seguindo and not self._toques
                 and time.time() - self._t_mexeu > VOLTA_A_SEGUIR_S):
             self.seguindo = True  # olhou o mapa e largou: volta para a seta
-        if self.seguindo:
-            rot = self.rotacao
-            if self._navegando and self.girar and rumo is not None:
-                rot = rumo
-            elif not (self._navegando and self.girar):
-                rot = 0.0
-            if self._navegando and vel_kmh is not None:
-                # zoom automático: mais longe quando anda rápido
-                self._alvo_zoom = 17.2 - max(0.0, min(1.0, (vel_kmh - 12.0) / 23.0)) * 1.0
-            self._animar_para(lat, lon, rot)
-        else:
-            self._desenhar_tela()
+        if self.seguindo and self._navegando and vel_kmh is not None:
+            # zoom automático: mais longe quando anda rápido
+            f = max(0.0, min(1.0, (vel_kmh - 12.0) / 23.0))
+            self._alvo_zoom = ZOOM_NAV_PERTO - f * (ZOOM_NAV_PERTO - ZOOM_NAV_LONGE)
+        self._ligar_animacao()
 
     def recentralizar(self):
         self.seguindo = True
-        if self.eu:
-            self.mostrar_eu(*self.eu)
+        self._ligar_animacao()
+
+    def pausar(self):
+        """Tela do mapa saiu de vista: nada de animar à toa."""
+        self.ativo = False
+        if self._ev_anim is not None:
+            self._ev_anim.cancel()
+            self._ev_anim = None
+
+    def retomar(self):
+        self.ativo = True
+        self._aplicar()
+        self._ligar_animacao()
 
     def modo_navegacao(self, ligado):
         self._navegando = ligado
@@ -196,13 +227,12 @@ class MapaHUD(Widget):
         self.ancora = (0.5, 0.30) if (ligado and self.girar) else (0.5, 0.5)
         if ligado:
             self.seguindo = True
-            self._alvo_zoom = 17.0
+            self._alvo_zoom = ZOOM_NAV_PERTO
         else:
             self._alvo_zoom = None
-        if self.eu:
-            self.mostrar_eu(*self.eu)
-        else:
-            self._aplicar()
+            self.prever = None
+        self._aplicar()
+        self._ligar_animacao()
 
     def definir_rota(self, pontos):
         self._rota = list(pontos)
@@ -324,8 +354,15 @@ class MapaHUD(Widget):
         self._desenhar_tela()
         self._pedir_rotulos()
 
+    def _nivel_desenho(self):
+        """Zoom inteiro de desenho, com folga: na pinça ou no zoom automático
+        o mapa não fica sendo refeito a cada vez que passa de x,5."""
+        if self._rz is None or abs(self.zoom - self._rz) > HISTERESE_ZOOM:
+            self._rz = int(max(ZOOM_MIN, min(ZOOM_MAX, round(self.zoom))))
+        return self._rz
+
     def _atualizar_tiles(self):
-        rz = int(max(ZOOM_MIN, min(ZOOM_MAX, round(self.zoom))))
+        rz = self._nivel_desenho()
         dz = z_dados(rz)
         nivel = (dz, rz)
         # na animação isto roda 60x/s: só refaz a conta quando a vista andou
@@ -346,16 +383,25 @@ class MapaHUD(Widget):
             xs.append(lx + self._origem[0])
             ys.append(self._origem[1] - ly)
         precisa = {(dz, tx, ty, rz) for tx, ty in tiles_do_retangulo(min(xs), min(ys), max(xs), max(ys), dz)}
-        faltando = False
-        for chave in precisa:
+        # do centro para fora: o que está no meio da tela chega primeiro
+        lado = 256.0 * 2 ** (14 - dz)
+        mx, my = (cx + self._origem[0]) / lado, (self._origem[1] - cy) / lado
+        faltando = adiado = False
+        t0 = time.perf_counter()
+        for chave in sorted(precisa, key=lambda c: (c[1] + 0.5 - mx) ** 2 + (c[2] + 0.5 - my) ** 2):
             if chave in self._desenhados:
                 continue
             preparado = self.fonte.pronto(chave)
             if preparado is None:
                 self.fonte.pedir(chave)
                 faltando = True
+            elif time.perf_counter() - t0 > ORCAMENTO_TILES_S:
+                faltando = adiado = True  # monta no próximo quadro (sem tranco)
             else:
                 self._desenhar_tile(chave, preparado)
+        if adiado:
+            self._tiles_sujo = True
+            Clock.schedule_once(lambda dt: self._aplicar(), 0)
         for chave in list(self._desenhados):
             mesmo_nivel = (chave[0], chave[3]) == nivel
             # desenho de outro zoom só sai quando o novo já cobriu a tela
@@ -366,34 +412,33 @@ class MapaHUD(Widget):
             self._t_rotulos = 0.0
 
     def _desenhar_tile(self, chave, preparado):
+        """Cada camada do tile vira UM subgrupo: tirar o tile depois é tirar
+        poucos itens (antes eram centenas de malhas, cada uma procurada na
+        lista inteira da camada)."""
         itens = []
+        sub = InstructionGroup()
         for nome, listas in preparado["areas"]:
-            if not listas:
-                continue
-            cor = Color(*AREAS[nome])
-            self._g_areas.add(cor)
-            itens.append((self._g_areas, cor))
-            for vertices, indices in listas:
-                malha = Mesh(vertices=vertices, indices=indices, mode="triangles")
-                self._g_areas.add(malha)
-                itens.append((self._g_areas, malha))
+            if listas:
+                sub.add(Color(*AREAS[nome]))
+                for vertices, indices in listas:
+                    sub.add(Mesh(vertices=vertices, indices=indices, mode="triangles"))
+        self._g_areas.add(sub)
+        itens.append((self._g_areas, sub))
         for nome, cor_rua, listas in preparado["ruas"]:
             if not listas:
                 continue
-            grupo = self._g_ruas[nome]
-            cor = Color(*cor_rua)
-            grupo.add(cor)
-            itens.append((grupo, cor))
+            sub = InstructionGroup()
+            sub.add(Color(*cor_rua))
             for vertices, indices in listas:
-                malha = Mesh(vertices=vertices, indices=indices, mode="triangles")
-                grupo.add(malha)
-                itens.append((grupo, malha))
+                sub.add(Mesh(vertices=vertices, indices=indices, mode="triangles"))
+            self._g_ruas[nome].add(sub)
+            itens.append((self._g_ruas[nome], sub))
         self._desenhados[chave] = itens
         self._t_rotulos = 0.0  # nomes novos disponíveis
 
     def _apagar_tile(self, chave):
-        for grupo, item in self._desenhados.pop(chave, []):
-            grupo.remove(item)
+        for grupo, sub in self._desenhados.pop(chave, []):
+            grupo.remove(sub)
 
     def _tile_pronto(self, chave):
         if (chave[0], chave[3]) == self._nivel:
@@ -402,10 +447,15 @@ class MapaHUD(Widget):
 
     # --- nomes --------------------------------------------------------------------
     def _textura(self, texto, tamanho, cor, negrito=True):
+        """Textura do nome (guardada). None = passou do limite de nomes novos
+        desta vez (desenhar texto é caro): fica para a próxima escolha."""
         cor = tuple(cor)
         chave = (texto, tamanho, cor, negrito)
         tex = self._texturas.get(chave)
         if tex is None:
+            if self._novas_texturas >= MAX_TEXTURAS_NOVAS:
+                return None
+            self._novas_texturas += 1
             rotulo = CoreLabel(text=texto, font_size=tamanho, bold=negrito, color=cor,
                                outline_width=max(1, int(dp(1.6))), outline_color=FUNDO[:3])
             rotulo.refresh()
@@ -428,9 +478,15 @@ class MapaHUD(Widget):
         ficarem piscando com o mapa andando/girando)."""
         self._ev_rotulos = None
         self._t_rotulos = time.time()
+        self._novas_texturas = 0
+        faltou_textura = False
         cx, cy, s, ax, ay, c0, s0 = self._medir_quadro()
         x0, y0, x1, y1 = self.x + dp(8), self.y + dp(8), self.right - dp(8), self.top - dp(8)
         antigos = {id(rot.info): rot for rot in self._rotulos}
+        # retângulo (coord. locais) que contém a tela, mesmo girada
+        cantos = [self._tela_para_local(px, py) for px, py in ((x0, y0), (x1, y0), (x0, y1), (x1, y1))]
+        lx0, lx1 = min(c[0] for c in cantos), max(c[0] for c in cantos)
+        ly0, ly1 = min(c[1] for c in cantos), max(c[1] for c in cantos)
         candidatos = []
         for chave in self._desenhados:
             if (chave[0], chave[3]) != self._nivel:
@@ -438,12 +494,15 @@ class MapaHUD(Widget):
             preparado = self.fonte.pronto(chave)
             if not preparado:
                 continue
-            for r in preparado["rotulos"]:  # só os que caem dentro da tela
-                dx, dy = (r["x"] - cx) * s, (r["y"] - cy) * s
-                sx, sy = ax + dx * c0 - dy * s0, ay + dx * s0 + dy * c0
-                if x0 < sx < x1 and y0 < sy < y1:
-                    peso = r["peso"] + (BONUS_JA_NA_TELA if id(r) in antigos else 0.0)
-                    candidatos.append((peso, sx, sy, r))
+            grade, cel = preparado["grade"], preparado["celula"]
+            for gx in range(int(lx0 // cel), int(lx1 // cel) + 1):
+                for gy in range(int(ly0 // cel), int(ly1 // cel) + 1):
+                    for r in grade.get((gx, gy), ()):  # só os quadrados à vista
+                        dx, dy = (r["x"] - cx) * s, (r["y"] - cy) * s
+                        sx, sy = ax + dx * c0 - dy * s0, ay + dx * s0 + dy * c0
+                        if x0 < sx < x1 and y0 < sy < y1:
+                            peso = r["peso"] + (BONUS_JA_NA_TELA if id(r) in antigos else 0.0)
+                            candidatos.append((peso, sx, sy, r))
         candidatos.sort(key=lambda t: -t[0])
         cr = self.credito
         ocupados = list(self.areas_cobertas) + [(cr.x, cr.y, cr.right, cr.top)]
@@ -459,6 +518,9 @@ class MapaHUD(Widget):
                 if r["comp"] * s < len(r["texto"]) * tamanho * 0.4:
                     continue  # nem precisa desenhar: o nome não cabe no trecho
                 tex = self._textura(r["texto"], tamanho, tema.BRANCO)
+                if tex is None:
+                    faltou_textura = True
+                    continue
                 if r["comp"] * s < tex.width * 0.85:
                     continue  # o nome não cabe no trecho
                 ang = math.degrees(r["ang"]) + self.rotacao
@@ -470,6 +532,9 @@ class MapaHUD(Widget):
             else:
                 tex = self._textura(r["texto"], sp(12.5), (1.0, 0.80, 0.58, 1), negrito=False)
                 ang, ponto = 0.0, tema.LARANJA
+            if tex is None:
+                faltou_textura = True
+                continue
             w, h = tex.size
             c, sn = abs(math.cos(math.radians(ang))), abs(math.sin(math.radians(ang)))
             bw, bh = w * c + h * sn + dp(6), w * sn + h * c + dp(6)
@@ -494,6 +559,9 @@ class MapaHUD(Widget):
             self._rotulos.append(rot)
             self._g_rotulos.add(rot.grupo)
         self._mover_rotulos()
+        if faltou_textura and self._ev_rotulos is None:
+            # ainda há nomes para desenhar: continua logo (não espera 0,45 s)
+            self._ev_rotulos = Clock.schedule_once(self._escolher_rotulos, 0.05)
 
     def _mover_rotulos(self):
         for rot in self._rotulos:
@@ -583,7 +651,8 @@ class MapaHUD(Widget):
                 e.pos = (x - e.size[0] / 2.0, y - e.size[1] / 2.0)
             quais.append(self._m_dest)
         if self.eu:
-            lat, lon, rumo, precisao = self.eu
+            precisao = self.eu[3]
+            lat, lon, rumo = self._vista or self.eu[:3]
             x, y = self._para_tela(lat, lon)
             if precisao:
                 r = precisao / metros_por_px(lat, self.zoom) * self._escala
@@ -610,53 +679,97 @@ class MapaHUD(Widget):
                 quais.append(self._m_seta)
         self._mostrar_marcas(quais)
 
-    # --- animação (câmera seguindo, zoom suave, inércia) -----------------------------
-    def _animar_para(self, lat, lon, rot):
-        self._alvo = (lat, lon, rot)
-        self._ligar_animacao()
-
+    # --- animação (seta andando, câmera seguindo, zoom suave, inércia) ---------------
     def _ligar_animacao(self):
-        if self._ev_anim is None:
-            self._ev_anim = Clock.schedule_interval(self._passo_animacao, 1 / 60.0)
+        if self._ev_anim is None and self.ativo:
+            # a cada quadro (0), não 1/60: sem quadro pulado nem repetido
+            self._ev_anim = Clock.schedule_interval(self._passo_animacao, 0)
 
     def _parar_animacao(self):
         if self._ev_anim is not None:
             self._ev_anim.cancel()
             self._ev_anim = None
-        self._alvo = None
         self._velocidade = (0.0, 0.0)
 
+    def _posicao_prevista(self, agora):
+        """(lat, lon, rumo, andando) de onde a seta deve estar agora."""
+        lat, lon, rumo, vel, t = self._fix
+        idade = min(max(0.0, agora - t), MAX_PREVER_S)
+        andando = vel > 0.5 and agora - t < MAX_PREVER_S
+        if self.prever is not None:
+            p = self.prever(idade)  # navegando: anda em cima da rota
+            if p is not None:
+                return p[0], p[1], p[2], andando
+        if not andando or rumo is None:
+            return lat, lon, rumo, False
+        d = vel * idade
+        a = math.radians(rumo)
+        return (lat + d * math.cos(a) / 111320.0,
+                lon + d * math.sin(a) / (111320.0 * math.cos(math.radians(lat))), rumo, True)
+
     def _passo_animacao(self, dt):
+        if not self.ativo:
+            self._ev_anim = None
+            return False
         dt = min(dt, 0.1)
-        k = 1.0 - math.exp(-dt * 5.0)
+        tela_animando()  # a thread do mapa dá a vez para a tela
         mexeu = False
-        if self._alvo is not None and self.seguindo:
-            lat, lon, rot = self._alvo
-            clat, clon = self.centro
-            self.centro = (clat + (lat - clat) * k, clon + (lon - clon) * k)
-            d_rot = _dif_angulo(self.rotacao, rot)
-            self.rotacao = (self.rotacao + d_rot * k) % 360.0
-            if abs(lat - clat) < 1e-7 and abs(lon - clon) < 1e-7 and abs(d_rot) < 0.2:
-                self.centro = (lat, lon)
-                self._alvo = None
-            mexeu = True
-        vx, vy = self._velocidade
-        if not self.seguindo and math.hypot(vx, vy) > dp(8):
-            self._arrastar(vx * dt, vy * dt)
-            queda = math.exp(-dt * INERCIA)
-            self._velocidade = (vx * queda, vy * queda)
-            mexeu = True
-        else:
-            self._velocidade = (0.0, 0.0)
-        if self._alvo_zoom is not None:
-            dz = self._alvo_zoom - self.zoom
-            if abs(dz) < 0.005:
-                self.zoom = self._alvo_zoom
-                if not self._navegando:
-                    self._alvo_zoom = None
-            else:
-                self.zoom += dz * (1.0 - math.exp(-dt * 8.0))
+        self._em_lote = True
+        try:
+            if self._fix is not None:
+                lat, lon, rumo, andando = self._posicao_prevista(time.monotonic())
+                v = self._vista
+                if v is None or abs(lat - v[0]) + abs(lon - v[1]) > 0.003:  # ~300 m: pula
+                    nova = (lat, lon, rumo)
+                else:
+                    k = 1.0 - math.exp(-dt * SUAVE_POS)
+                    r = v[2]
+                    if rumo is not None:
+                        r = rumo if r is None else (r + _dif_angulo(r, rumo) * k) % 360.0
+                    nova = (v[0] + (lat - v[0]) * k, v[1] + (lon - v[1]) * k, r)
+                parado = (abs(nova[0] - lat) < 1e-7 and abs(nova[1] - lon) < 1e-7
+                          and (rumo is None or abs(_dif_angulo(nova[2], rumo)) < 0.2))
+                self._vista = nova
+                mexeu = mexeu or andando or not parado
+            if self.seguindo and self._vista is not None:
+                lat, lon, rumo = self._vista
+                clat, clon = self.centro
+                if abs(lat - clat) < 1e-7 and abs(lon - clon) < 1e-7:
+                    self.centro = (lat, lon)
+                else:
+                    k = 1.0 - math.exp(-dt * SUAVE_CAMERA)
+                    self.centro = (clat + (lat - clat) * k, clon + (lon - clon) * k)
+                    mexeu = True
+                girando = self._navegando and self.girar
+                if girando and rumo is not None:
+                    alvo_rot = rumo
+                else:
+                    alvo_rot = self.rotacao if girando else 0.0
+                d_rot = _dif_angulo(self.rotacao, alvo_rot)
+                if abs(d_rot) > 0.1:
+                    self.rotacao = (self.rotacao + d_rot * (1.0 - math.exp(-dt * SUAVE_GIRO))) % 360.0
+                    mexeu = True
+                elif d_rot:
+                    self.rotacao = alvo_rot % 360.0
+            vx, vy = self._velocidade
+            if not self.seguindo and math.hypot(vx, vy) > dp(8):
+                self._arrastar(vx * dt, vy * dt)
+                queda = math.exp(-dt * INERCIA)
+                self._velocidade = (vx * queda, vy * queda)
                 mexeu = True
+            else:
+                self._velocidade = (0.0, 0.0)
+            if self._alvo_zoom is not None:
+                dz = self._alvo_zoom - self.zoom
+                if abs(dz) < 0.005:
+                    self.zoom = self._alvo_zoom
+                    if not self._navegando:
+                        self._alvo_zoom = None
+                else:
+                    self.zoom += dz * (1.0 - math.exp(-dt * 8.0))
+                    mexeu = True
+        finally:
+            self._em_lote = False
         self._aplicar()
         if not mexeu:
             self._ev_anim = None
@@ -672,7 +785,11 @@ class MapaHUD(Widget):
     def _zoom_no_ponto(self, novo_zoom, sx, sy):
         """Muda o zoom mantendo parado o ponto da tela (sx, sy) (sob os dedos)."""
         antes = self._tela_para_local(sx, sy)
-        self.zoom = max(ZOOM_MIN, min(ZOOM_MAX, novo_zoom))
+        self._em_lote = True  # quem chamou faz o _aplicar (uma vez só)
+        try:
+            self.zoom = max(ZOOM_MIN, min(ZOOM_MAX, novo_zoom))
+        finally:
+            self._em_lote = False
         depois = self._tela_para_local(sx, sy)
         cx, cy = self._local(*self.centro)
         self.centro = self._local_para_geo(cx + antes[0] - depois[0], cy + antes[1] - depois[1])
@@ -680,7 +797,6 @@ class MapaHUD(Widget):
     def _sair_do_seguir(self):
         if self.seguindo:
             self.seguindo = False
-        self._alvo = None
         if not self._navegando:
             self._alvo_zoom = None
 
@@ -711,6 +827,7 @@ class MapaHUD(Widget):
         if touch.grab_current is not self:
             return False
         self._t_mexeu = time.time()
+        tela_animando()
         if len(self._toques) >= 2:
             a, b = self._toques[0], self._toques[1]
             outro = b if touch is a else a

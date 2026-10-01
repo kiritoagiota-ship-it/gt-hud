@@ -135,6 +135,23 @@ class Rota:
         return cls(pontos, manobras, trecho.get("elevation") or [],
                    dados["trip"]["summary"].get("time", 0), destino_nome)
 
+    def ponto_em(self, dist_m, perto_de=0):
+        """(lat, lon, rumo em graus) no ponto da rota a dist_m do começo;
+        `perto_de` = índice de onde começar a procurar (a seta anda pouco)."""
+        ac, pts = self.acumulado, self.pontos
+        d = max(0.0, min(self.total_m, dist_m))
+        i = max(0, min(perto_de, len(pts) - 2))
+        while i > 0 and ac[i] > d:
+            i -= 1
+        while i < len(pts) - 2 and ac[i + 1] < d:
+            i += 1
+        a, b = pts[i], pts[i + 1]
+        comp = ac[i + 1] - ac[i]
+        f = (d - ac[i]) / comp if comp > 0 else 0.0
+        rumo = math.degrees(math.atan2((b[1] - a[1]) * math.cos(math.radians(a[0])),
+                                       b[0] - a[0])) % 360.0
+        return a[0] + (b[0] - a[0]) * f, a[1] + (b[1] - a[1]) * f, rumo
+
     def subida_restante_m(self, dist_feita):
         """Quanto ainda falta subir a partir de dist_feita (soma das subidas)."""
         i0 = int(dist_feita // ELEVACAO_PASSO_M)
