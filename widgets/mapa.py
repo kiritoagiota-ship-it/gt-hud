@@ -62,7 +62,7 @@ ZOOM_NAV_PERTO, ZOOM_NAV_LONGE = 17.4, 16.6
 HISTERESE_ZOOM = 0.75      # só troca o nível de desenho com essa folga
 ORCAMENTO_TILES_S = 0.006  # por quadro, no máximo isso montando tiles
 MAX_TEXTURAS_NOVAS = 8     # por escolha de nomes, no máximo tantos nomes novos desenhados
-ZOOM_SINAIS = 16.0         # fora da navegação, semáforos e lombadas a partir desse zoom
+ZOOM_SINAIS = 17.0         # fora da navegação, semáforos e lombadas a partir desse zoom
 MAX_SINAIS = 40
 
 

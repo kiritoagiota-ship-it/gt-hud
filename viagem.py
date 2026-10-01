@@ -128,7 +128,11 @@ class Viagem:
             if 0 < dt < 10:
                 implicita = d / dt * 3.6
                 if vel_kmh >= LIMIAR_MOVIMENTO_KMH and implicita < VELOCIDADE_IMPOSSIVEL_KMH:
-                    self.distancia_m += d
+                    # salto do GPS (a posição "pula" uns metros) inflava a
+                    # distância e a média (chegou a dar média > máxima): o
+                    # trecho vale no máximo 1,5x o que a velocidade do GPS
+                    # (Doppler, bem mais estável) diz que dava para andar
+                    self.distancia_m += min(d, vel_kmh / 3.6 * dt * 1.5 + 2.0)
                     self.tempo_mov_s += dt
         self.vel_max_kmh = max(self.vel_max_kmh, vel_kmh)
         self.pontos.append((lat, lon, vel_kmh, t))
@@ -146,4 +150,4 @@ class Viagem:
     def vel_media_kmh(self):
         if self.tempo_mov_s <= 0:
             return 0.0
-        return self.distancia_m / self.tempo_mov_s * 3.6
+        return min(self.distancia_m / self.tempo_mov_s * 3.6, self.vel_max_kmh)

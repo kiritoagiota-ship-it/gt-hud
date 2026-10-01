@@ -77,5 +77,20 @@ class TesteNavegacao(unittest.TestCase):
         self.assertTrue(nav.recalcular_pedido)
 
 
+
+class TesteViagem(unittest.TestCase):
+    def test_salto_do_gps_nao_infla_distancia_nem_media(self):
+        from viagem import Viagem
+        relogio = [0.0]
+        v = Viagem(relogio=lambda: relogio[0])
+        v.iniciar()
+        lat = -16.68
+        for k in range(10):          # 20 km/h = 5,6 m/s, 1 leitura por segundo
+            relogio[0] = float(k)
+            salto = 40 / M_GRAU if k == 5 else 0.0   # GPS pula 40 m numa leitura
+            v.registrar(lat + k * 5.6 / M_GRAU + salto, -49.25, 20.0)
+        self.assertLess(v.distancia_m, 9 * 5.6 * 1.5 + 30)
+        self.assertLessEqual(v.vel_media_kmh, v.vel_max_kmh)
+
 if __name__ == "__main__":
     unittest.main()

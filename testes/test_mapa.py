@@ -48,6 +48,18 @@ class TesteGeometria(unittest.TestCase):
         self.assertTrue(400 < len(tiles) < 600, len(tiles))
 
 
+class TesteNomesDeRua(unittest.TestCase):
+    def test_trecho_quase_reto_junta_os_pedacos(self):
+        # rua "picotada": 10 pedacinhos com leve zigue-zague (2 graus)
+        pts = [(k * 10.0, (k % 2) * 0.3) for k in range(11)]
+        trechos = mapa_vetor._trechos_retos(pts)
+        self.assertEqual(len(trechos), 1)
+        self.assertAlmostEqual(trechos[0][0], 100, delta=1)
+        # curva de 90 graus: dois trechos
+        canto = [(0, 0), (50, 0), (100, 0), (100, 50), (100, 100)]
+        self.assertEqual(len(mapa_vetor._trechos_retos(canto)), 2)
+
+
 class TesteMemoriaELimites(unittest.TestCase):
     def test_malha_em_array_e_dentro_dos_limites_do_kivy(self):
         m = mapa_vetor._Malha()

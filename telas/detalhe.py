@@ -102,7 +102,8 @@ class TelaDetalhe(Screen):
         self.b["dur"].valor = fmt_tempo(resumo["duracao_s"])
         self.b["mov"].valor = fmt_tempo(resumo["tempo_mov_s"])
         self.b["max"].valor = fmt_vel(resumo["vel_max_kmh"])
-        self.b["med"].valor = fmt_vel(resumo["vel_media_kmh"])
+        # viagens antigas podiam ter média > máxima (saltos do GPS): nunca mostra isso
+        self.b["med"].valor = fmt_vel(min(resumo["vel_media_kmh"] or 0, resumo["vel_max_kmh"] or 0))
         self.b["pts"].valor = str(len(pontos))
 
     def _apagar(self):

@@ -70,15 +70,18 @@ AREAS = {
     "predio": (0.060, 0.088, 0.118, 1),
 }
 # (largura dp no z16, cor, zoom mínimo)
+# Hierarquia (o dono achou o mapa de longe uma "teia" branca): rua comum só
+# a partir do zoom 14; avenidas e vias expressas num tom areia que se
+# destaca de longe (como os mapas de navegação), o resto em cinza-azulado.
 RUAS = collections.OrderedDict([
     ("servico", (2.2, (0.22, 0.27, 0.33, 1), 15)),
     ("caminho", (1.8, (0.20, 0.26, 0.30, 1), 15)),
     ("ciclovia", (2.6, (0.20, 0.66, 0.46, 1), 14)),
-    ("rua", (4.0, (0.36, 0.42, 0.49, 1), 13)),
-    ("terciaria", (5.2, (0.50, 0.56, 0.63, 1), 12)),
-    ("secundaria", (6.2, (0.60, 0.66, 0.73, 1), 10)),
-    ("primaria", (6.8, (0.67, 0.72, 0.79, 1), 8)),
-    ("expressa", (7.6, (0.78, 0.82, 0.88, 1), 6)),
+    ("rua", (4.0, (0.36, 0.42, 0.49, 1), 14)),
+    ("terciaria", (5.2, (0.50, 0.56, 0.63, 1), 13)),
+    ("secundaria", (6.2, (0.64, 0.69, 0.76, 1), 10)),
+    ("primaria", (6.8, (0.80, 0.74, 0.58, 1), 8)),
+    ("expressa", (7.6, (0.93, 0.78, 0.48, 1), 6)),
 ])
 _CLASSE_RUA = {
     "motorway": "expressa", "trunk": "expressa", "primary": "primaria",
@@ -108,6 +111,8 @@ def cor_rua(nome, rz):
     if nome in ("rua", "servico", "caminho") and rz <= 14:
         f = 0.62 if rz <= 13 else 0.75
         return (r * f, g * f, b * f, a)
+    if nome == "terciaria" and rz <= 13:
+        return (r * 0.7, g * 0.7, b * 0.7, a)
     return RUAS[nome][1]
 
 
@@ -271,6 +276,34 @@ class _Malha:
         return [(array("f", v), array("H", i)) for v, i in self.pedacos if i]
 
 
+QUASE_RETO = math.radians(12)   # trecho de rua que desvia menos que isso ainda é "reto"
+
+
+def _trechos_retos(pts):
+    """Trechos quase retos da rua: [(comprimento, i0, i1)]. A rua vem
+    picotada (cada curvinha, cada cruzamento quebra a linha); exigir UM
+    segmento reto onde o nome inteiro coubesse deixava o mapa sem nomes de
+    rua no zoom médio (só 14 candidatos de rua contra 484 de lugar)."""
+    trechos, i0, n = [], 0, len(pts)
+    while i0 < n - 1:
+        ax, ay = pts[i0]
+        dir0 = math.atan2(pts[i0 + 1][1] - ay, pts[i0 + 1][0] - ax)
+        i1 = i0 + 1
+        while i1 < n - 1:
+            bx, by = pts[i1]
+            cx, cy = pts[i1 + 1]
+            seg = math.atan2(cy - by, cx - bx)
+            corda = math.atan2(cy - ay, cx - ax)
+            if (abs((seg - dir0 + math.pi) % (2 * math.pi) - math.pi) > QUASE_RETO
+                    or abs((corda - dir0 + math.pi) % (2 * math.pi) - math.pi) > QUASE_RETO / 2):
+                break
+            i1 += 1
+        bx, by = pts[i1]
+        trechos.append((math.hypot(bx - ax, by - ay), i0, i1))
+        i0 = i1
+    return trechos
+
+
 def preparar(camadas, dz, tx, ty, rz, origem, escala, densidade):
     """Geometria pronta (listas) do tile para desenhar no zoom rz."""
     lado = 256.0 * 2 ** (14 - dz)
@@ -381,16 +414,15 @@ def preparar(camadas, dz, tx, ty, rz, origem, escala, densidade):
                 pts = conv(parte)
                 if len(pts) < 2:
                     continue
-                # trecho mais longo e reto da parte: onde o nome cabe melhor
-                melhor = max(range(len(pts) - 1),
-                             key=lambda k: math.hypot(pts[k + 1][0] - pts[k][0], pts[k + 1][1] - pts[k][1]))
-                (ax, ay), (bx, by) = pts[melhor], pts[melhor + 1]
-                comp = math.hypot(bx - ax, by - ay)
-                if comp < len(nome) * letra_local:
-                    continue
-                rotulos.append({"texto": nome, "x": (ax + bx) / 2, "y": (ay + by) / 2,
-                                "ang": math.atan2(by - ay, bx - ax), "comp": comp,
-                                "peso": _IMPORTANCIA.get(estilo, 1), "tipo": "rua"})
+                # os 2 trechos quase retos mais longos da parte: onde o nome cabe
+                # (o mesmo nome não se repete perto na tela: ver widgets/mapa.py)
+                for comp, i0, i1 in sorted(_trechos_retos(pts), reverse=True)[:2]:
+                    if comp < len(nome) * letra_local:
+                        break
+                    (ax, ay), (bx, by) = pts[i0], pts[i1]
+                    rotulos.append({"texto": nome, "x": (ax + bx) / 2, "y": (ay + by) / 2,
+                                    "ang": math.atan2(by - ay, bx - ax), "comp": comp,
+                                    "peso": _IMPORTANCIA.get(estilo, 1), "tipo": "rua"})
     if "place" in camadas and rz <= 16:
         extent, feicoes = camadas["place"]
         conv = conversor(extent)
