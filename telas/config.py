@@ -93,6 +93,26 @@ class TelaConfig(Screen):
                                "Fala as curvas, as subidas e os avisos da navegacao.",
                                self._centralizar(self.alt_voz)))
 
+        self.sel_qual_voz = Seletor("%s", self._mudar_qual_voz)
+        lista.add_widget(Linha("Qual voz",
+                               "Vozes do seu celular. Escolha a mais parecida com o Jarvis.",
+                               self.sel_qual_voz))
+
+        self.sel_tom = Seletor("%.2f", self._mudar_tom)
+        lista.add_widget(Linha("Tom da voz",
+                               "Menor: mais grave e calma. Maior: mais aguda.",
+                               self.sel_tom))
+
+        self.alt_efeito = Alternar(lambda v: self._mudar_voz_config("voz_efeito", self.alt_efeito, v))
+        lista.add_widget(Linha("Efeito de IA",
+                               "Tratamento estilo assistente (Jarvis) na voz.",
+                               self._centralizar(self.alt_efeito)))
+
+        lista.add_widget(Linha("Testar a voz",
+                               "Fala uma frase de exemplo com a voz escolhida.",
+                               self._centralizar(BotaoHUD(text="Testar", size_hint_x=None, width=dp(130),
+                                                          on_release=lambda *a: self._testar_voz()))))
+
         self.alt_subidas = Alternar(self._mudar_subidas)
         lista.add_widget(Linha("Avisar subidas",
                                "Na navegacao, avisa antes de cada subida da rota.",
@@ -152,6 +172,9 @@ class TelaConfig(Screen):
     def on_pre_enter(self, *a):
         aj = App.get_running_app().ajustes
         self.alt_voz.mostrar(aj["voz"])
+        self._mostrar_qual_voz()
+        self.sel_tom.mostrar(aj["voz_tom"])
+        self.alt_efeito.mostrar(aj["voz_efeito"])
         self.alt_subidas.mostrar(aj["avisar_subidas"])
         self.alt_girar.mostrar(aj["girar_mapa"])
         self.sel_limite.mostrar(aj["limite_kmh"])
@@ -179,6 +202,48 @@ class TelaConfig(Screen):
         if not ligado:
             app.voz.calar()
         self.alt_voz.mostrar(ligado)
+
+    def _mostrar_qual_voz(self):
+        app = App.get_running_app()
+        n = len(app.voz.nomes_vozes())
+        i = app.ajustes["voz_indice"]
+        if n == 0:
+            self.sel_qual_voz.mostrar("gravada")
+        else:
+            self.sel_qual_voz.mostrar("padrao" if i < 0 or i >= n else "%d de %d" % (i + 1, n))
+
+    def _mudar_qual_voz(self, d):
+        app = App.get_running_app()
+        n = len(app.voz.nomes_vozes())
+        if n == 0:
+            return  # sem motor de voz em português: fica a voz gravada
+        atual = app.ajustes["voz_indice"]   # -1 = padrão do celular (só no começo)
+        app.ajustes["voz_indice"] = (0 if d > 0 else n - 1) if atual < 0 else (atual + d) % n
+        self._aplicar_voz(testar=True)
+        self._mostrar_qual_voz()
+
+    def _mudar_tom(self, d):
+        app = App.get_running_app()
+        app.ajustes["voz_tom"] = round(max(0.70, min(1.20, app.ajustes["voz_tom"] + d * 0.04)), 2)
+        self.sel_tom.mostrar(app.ajustes["voz_tom"])
+        self._aplicar_voz(testar=True)
+
+    def _mudar_voz_config(self, chave, botao, ligado):
+        App.get_running_app().ajustes[chave] = ligado
+        botao.mostrar(ligado)
+        self._aplicar_voz(testar=True)
+
+    def _aplicar_voz(self, testar=False):
+        app = App.get_running_app()
+        aj = app.ajustes
+        app.voz.configurar(aj["voz_indice"], aj["voz_tom"], aj["voz_efeito"])
+        if testar:
+            self._testar_voz()
+
+    def _testar_voz(self):
+        app = App.get_running_app()
+        app.voz.calar()
+        app.voz.testar()
 
     def _mudar_subidas(self, ligado):
         app = App.get_running_app()

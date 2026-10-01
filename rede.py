@@ -38,6 +38,16 @@ def baixar_json(url, timeout=20):
     return json.loads(baixar(url, timeout).decode("utf-8"))
 
 
+def enviar_json(url, corpo, cabecalhos=None, timeout=20):
+    """POST com corpo JSON; devolve a resposta (JSON). Use numa thread."""
+    pedido = urllib.request.Request(url, data=json.dumps(corpo).encode("utf-8"), method="POST",
+                                    headers={"User-Agent": USER_AGENT,
+                                             "Content-Type": "application/json",
+                                             **(cabecalhos or {})})
+    with urllib.request.urlopen(pedido, context=_CTX, timeout=timeout) as resposta:
+        return json.loads(resposta.read().decode("utf-8"))
+
+
 def em_segundo_plano(tarefa, ao_terminar, ao_falhar=None):
     """Roda tarefa() numa thread; ao_terminar(resultado) ou ao_falhar(erro)
     são chamados depois na thread do Kivy (onde pode mexer na tela)."""

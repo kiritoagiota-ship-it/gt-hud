@@ -4,3 +4,4 @@ __pycache__/
 *.pyc
 build.log
 versao.json
+chaves.json

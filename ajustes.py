@@ -13,6 +13,9 @@ PADRAO = {
     "voz": True,
     "girar_mapa": True,
     "avisar_subidas": True,
+    "voz_indice": -1,        # -1 = a voz padrão do motor do celular
+    "voz_tom": 0.88,         # abaixo de 1 = mais grave
+    "voz_efeito": True,      # tratamento estilo assistente de IA
 }
 
 

@@ -61,6 +61,29 @@ FALAS.update({
 })
 
 
+def frase(pedacos):
+    """Pedaços -> uma frase só, para o motor de voz do celular falar de uma
+    vez (fluida), ex.: "Senhor, em duzentos metros, vire à direita." """
+    partes = []
+    for i, p in enumerate(pedacos):
+        t = FALAS[p]
+        if i and t[:1].isupper() and not t.startswith("GPS"):
+            t = t[:1].lower() + t[1:]
+        partes.append(t)
+    texto = " ".join(partes)
+    return texto[:1].upper() + texto[1:]
+
+
+def resumo_rota(total_m, tempo_s, subida_m):
+    """O que o assistente fala ao começar a navegação (só no motor do celular)."""
+    km = ("%.1f" % (total_m / 1000.0)).replace(".", ",").replace(",0", "")
+    minutos = max(1, int(round(tempo_s / 60.0)))
+    texto = "Rota calculada, senhor. São %s quilômetros, cerca de %d minutos" % (km, minutos)
+    if subida_m >= 15:
+        texto += ", com %d metros de subida" % int(round(subida_m))
+    return texto + ". Vamos lá."
+
+
 def distancia_falada(metros):
     """A distância da lista mais perto de `metros` (para "Em X, ...")."""
     return min(DISTANCIAS, key=lambda m: abs(m - metros))

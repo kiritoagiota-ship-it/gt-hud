@@ -86,8 +86,9 @@ class TelaBusca(Screen):
     def _resultados(self, lugares):
         self._buscando = False
         n = len(lugares)
-        self.lbl_status.text = ("%d %s" % (n, "resultado" if n == 1 else "resultados")) if n else \
-            "Nada encontrado. Tente com o bairro ou a cidade."
+        fonte = lugares[0].get("fonte", "") if lugares else ""
+        self.lbl_status.text = ("%d %s (%s)" % (n, "resultado" if n == 1 else "resultados", fonte)) \
+            if n else "Nada encontrado. Tente com o bairro ou a cidade."
         self._listar(lugares)
 
     def _falhou(self, erro):

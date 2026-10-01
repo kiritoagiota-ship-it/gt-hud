@@ -118,6 +118,20 @@ jobs:
             echo "::warning::Sem DEBUG_KEYSTORE_B64: o APK sai com chave temporaria (vai exigir desinstalar para atualizar)"
           fi
 
+      # Chaves de servicos pagos/limitados (ex.: Google Places) ficam nos
+      # secrets do GitHub e entram so no APK, num chaves.json (fora do git:
+      # o repositorio e publico). Sem o secret, o app usa so servicos sem conta.
+      - name: Chaves dos servicos
+        env:
+          GOOGLE_PLACES_KEY: ${{ secrets.GOOGLE_PLACES_KEY }}
+        run: |
+          python - <<'PY'
+          import json, os
+          chave = os.environ.get("GOOGLE_PLACES_KEY", "").strip()
+          json.dump({"google_places": chave}, open("chaves.json", "w"))
+          print("Google Places:", "configurado" if chave else "sem chave (busca so no mapa aberto)")
+          PY
+
       - name: Build
         run: |
           yes | buildozer -v android debug > build.log 2>&1 || (tail -n 300 build.log; exit 1)

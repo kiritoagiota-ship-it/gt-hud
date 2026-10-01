@@ -61,6 +61,8 @@ class GTHudApp(App):
         self.gps = ServicoGPS(self._ao_receber_gps, self._ao_status_gps)
         self.voz = Voz(pasta)
         self.voz.ligada = self.ajustes["voz"]
+        self.voz.configurar(self.ajustes["voz_indice"], self.ajustes["voz_tom"],
+                            self.ajustes["voz_efeito"])
 
         self.precisao = None         # da última leitura boa (m)
         self.precisao_ultima = None  # da última leitura, boa ou não

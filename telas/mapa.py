@@ -407,7 +407,8 @@ class TelaMapa(Screen):
             self.disco.velo.velocidade = vel
             self.disco.velo.alerta = vel > app.ajustes["limite_kmh"]
         if app.posicao is not None and vel is not None:
-            self.mapa.mostrar_eu(app.posicao[0], app.posicao[1], app.rumo_para_mapa(), app.precisao)
+            self.mapa.mostrar_eu(app.posicao[0], app.posicao[1], app.rumo_para_mapa(),
+                                 app.precisao, vel)
         if self.estado == NAVEGANDO and app.estado_nav:
             self._atualizar_navegacao(app.estado_nav)
         elif self.estado == LIVRE and app.viagem.estado != Viagem.PARADA:

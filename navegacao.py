@@ -40,15 +40,17 @@ def _projecao(p, a, b):
 
 class Navegacao:
     def __init__(self, rota, falar, avisar_subidas=True):
-        self.falar = falar  # falar(pedaços, prioridade)
+        self.falar = falar  # falar(pedaços, prioridade[, texto pronto])
         self.avisar_subidas = avisar_subidas
         self.chegou = False
         self._iniciar_rota(rota)
         primeira = self._proxima_manobra()
         pedacos = ["rota_calculada"]
+        texto = falas.resumo_rota(rota.total_m, rota.tempo_s, rota.subida_total_m)
         if primeira is None or primeira[1]["dist_m"] > AVISO_LONGE_M[1]:
             pedacos.append("em_frente")
-        self.falar(pedacos, P_INFO)
+            texto += " Siga em frente."
+        self.falar(pedacos, P_INFO, texto)
 
     def _iniciar_rota(self, rota):
         self.rota = rota
