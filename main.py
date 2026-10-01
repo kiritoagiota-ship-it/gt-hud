@@ -560,9 +560,17 @@ class GTHudApp(App):
         self.salvos.insert(0, {"nome": nome, "endereco": endereco, "lat": lat, "lon": lon})
         self._gravar_json(self._caminho_salvos, self.salvos)
 
-    def apagar_salvo(self, lugar):
-        self.salvos = [s for s in self.salvos if s is not lugar and s != lugar]
+    @staticmethod
+    def mesmo_lugar(a, b):
+        return (round(a["lat"], 4), round(a["lon"], 4)) == (round(b["lat"], 4), round(b["lon"], 4))
+
+    def apagar_lugar(self, lugar):
+        """Some dos salvos E dos recentes (todo destino escolhido também vira
+        recente: apagar só o salvo deixava ele lá, parecendo que não apagou)."""
+        self.salvos = [s for s in self.salvos if not self.mesmo_lugar(s, lugar)]
+        self.recentes = [r for r in self.recentes if not self.mesmo_lugar(r, lugar)]
         self._gravar_json(self._caminho_salvos, self.salvos)
+        self._gravar_json(self._caminho_recentes, self.recentes)
 
     def _guardar_recente(self, lugar):
         item = {k: lugar[k] for k in ("nome", "endereco", "lat", "lon") if k in lugar}

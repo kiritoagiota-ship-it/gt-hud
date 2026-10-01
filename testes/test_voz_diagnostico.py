@@ -86,5 +86,29 @@ class TesteDiagnostico(unittest.TestCase):
         self.assertTrue(os.path.getsize(os.path.join(pasta, "diagnostico.txt")) < diagnostico.MAX_BYTES)
 
 
+class TesteRedeDeSeguranca(unittest.TestCase):
+    def setUp(self):
+        self.stdout, self.stderr, self.hook = sys.stdout, sys.stderr, sys.excepthook
+
+    def tearDown(self):
+        sys.stdout, sys.stderr, sys.excepthook = self.stdout, self.stderr, self.hook
+
+    def test_erro_contornado_nao_fecha_e_nao_marca_fechamento(self):
+        pasta = tempfile.mkdtemp()
+        diagnostico.iniciar(pasta, "teste")
+
+        @diagnostico.seguro
+        def desenhar():
+            raise ZeroDivisionError("conta do mapa")
+        for _ in range(50):           # o mesmo erro 50x seguidas
+            self.assertIsNone(desenhar())
+        texto = diagnostico.texto_para_enviar()
+        self.assertEqual(texto.count("ZeroDivisionError: conta do mapa"), 1)   # anotado 1x
+        self.assertIn("o app seguiu aberto", texto)
+        sys.stdout, sys.stderr = self.stdout, self.stderr
+        diagnostico.iniciar(pasta, "teste")
+        self.assertFalse(diagnostico.fechou_com_erro())
+
+
 if __name__ == "__main__":
     unittest.main()

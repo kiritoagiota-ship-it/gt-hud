@@ -37,6 +37,7 @@ from kivy.uix.widget import Widget
 import goiania
 import sinais
 import tema
+from diagnostico import seguro
 from mapa_vetor import (AREAS, FUNDO, RUAS, FonteVetorial, tela_animando, tiles_do_retangulo,
                         z_dados)
 
@@ -360,6 +361,7 @@ class MapaHUD(Widget):
         return geo(lx + self._origem[0], self._origem[1] - ly, 14)
 
     # --- desenho ----------------------------------------------------------------
+    @seguro  # erro no desenho do mapa nunca fecha o app (fica no diagnóstico)
     def _aplicar(self, *a):
         if self.width < 2 or self.height < 2:
             return
@@ -499,6 +501,7 @@ class MapaHUD(Widget):
             espera = max(0.0, REPOSICIONAR_S - (time.time() - self._t_rotulos))
             self._ev_rotulos = Clock.schedule_once(self._escolher_rotulos, espera)
 
+    @seguro
     def _escolher_rotulos(self, *a):
         """Escolhe quais nomes cabem na tela sem se encostar (mais importante
         primeiro; quem já está na tela tem preferência, para os nomes não
@@ -810,6 +813,16 @@ class MapaHUD(Widget):
                 lon + d * math.sin(a) / (111320.0 * math.cos(math.radians(lat))), rumo, True)
 
     def _passo_animacao(self, dt):
+        try:
+            return self._passo_animacao_seguro(dt)
+        except Exception as e:  # a animação não pode morrer presa (_ev_anim nunca mais religaria)
+            import diagnostico
+            diagnostico.registrar_contornado(type(e), e, e.__traceback__, "erro na animação do mapa")
+            self._ev_anim = None
+            self._em_lote = False
+            return False
+
+    def _passo_animacao_seguro(self, dt):
         if not self.ativo:
             self._ev_anim = None
             return False

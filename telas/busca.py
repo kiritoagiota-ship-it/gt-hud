@@ -66,13 +66,14 @@ class TelaBusca(Screen):
         self.lista.clear_widgets()
         for lugar in app.salvos:
             self._adicionar(dict(lugar, fonte="salvo"), apagavel=True)
-        for lugar in app.recentes:
-            self._adicionar(lugar)
+        for lugar in app.recentes:  # o que já está nos salvos não repete
+            if not any(app.mesmo_lugar(lugar, s) for s in app.salvos):
+                self._adicionar(lugar, apagavel=True)
 
     def _listar(self, lugares):
         self.lista.clear_widgets()
         for lugar in lugares:
-            self._adicionar(lugar)
+            self._adicionar(lugar, apagavel=lugar.get("fonte") == "salvo")
 
     def _adicionar(self, lugar, apagavel=False):
         partes = ["Salvo por você" if lugar.get("fonte") == "salvo" else "",
@@ -91,9 +92,11 @@ class TelaBusca(Screen):
         self.lista.add_widget(linha)
 
     def _apagar(self, lugar):
-        app = App.get_running_app()
-        app.apagar_salvo({k: lugar[k] for k in ("nome", "endereco", "lat", "lon") if k in lugar})
-        self._mostrar_recentes()
+        App.get_running_app().apagar_lugar(lugar)
+        if self.campo.text.strip():
+            self._buscar()          # estava numa busca: refaz sem o apagado
+        else:
+            self._mostrar_recentes()
 
     def _buscar(self):
         texto = self.campo.text.strip()

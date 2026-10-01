@@ -6,9 +6,13 @@ quando algo der errado no celular (sem cabo nem programa de computador).
   com hora. O arquivo é cortado para não crescer sem fim.
 - Se o app fechou com ERRO da última vez, fechou_com_erro() avisa (a tela
   do mapa mostra a mensagem).
+- Rede de segurança: erro numa tarefa do Kivy (Clock, toque, desenho) é
+  registrado e o app SEGUE ABERTO (antes, qualquer erro no mapa fechava o
+  app no meio da pedalada). O mesmo erro repetido é anotado 1x a cada 10 s.
 - texto_para_enviar(): cabeçalho (versão, celular, Android) + o fim do
   registro; os Ajustes mandam pelo "Compartilhar" do Android (WhatsApp...).
 """
+import functools
 import io
 import os
 import sys
@@ -23,6 +27,8 @@ INICIO = "===== app aberto "
 _caminho = None
 _trava = threading.Lock()
 _fechou_com_erro = False
+_contornados = {}   # mensagem do erro -> (hora da última anotação, vezes)
+CONTORNADO_A_CADA_S = 10.0
 
 
 def _escrever(texto):
@@ -70,6 +76,49 @@ def registrar_erro(tipo, valor, tb, onde="erro"):
                                   "".join(traceback.format_exception(tipo, valor, tb))))
 
 
+def registrar_contornado(tipo, valor, tb, onde="erro contornado"):
+    """Erro que NÃO fechou o app (sem o "!!! " que marca fechamento)."""
+    chave = "%s: %s" % (getattr(tipo, "__name__", tipo), valor)
+    agora = time.monotonic()
+    ultima, vezes = _contornados.get(chave, (-1e9, 0))
+    _contornados[chave] = (ultima, vezes + 1)
+    if agora - ultima < CONTORNADO_A_CADA_S:
+        return
+    _contornados[chave] = (agora, 0)
+    _escrever("%s !! %s (o app seguiu aberto%s):\n%s" % (
+        time.strftime("%H:%M:%S"), onde, ", repetiu %d vezes" % vezes if vezes else "",
+        "".join(traceback.format_exception(tipo, valor, tb))))
+
+
+def seguro(funcao):
+    """Decorador: erro dentro da função é registrado e engolido (para partes
+    cosméticas, como o desenho do mapa, nunca fecharem o app)."""
+    @functools.wraps(funcao)
+    def embrulho(*a, **k):
+        try:
+            return funcao(*a, **k)
+        except Exception as e:
+            registrar_contornado(type(e), e, e.__traceback__, "erro em %s" % funcao.__name__)
+            return None
+    return embrulho
+
+
+def _instalar_no_kivy():
+    """Erro não tratado no laço do Kivy: registra e continua (em vez de fechar)."""
+    try:
+        from kivy.base import ExceptionHandler, ExceptionManager
+    except Exception:
+        return
+
+    class Contornar(ExceptionHandler):
+        def handle_exception(self, inst):
+            if isinstance(inst, (KeyboardInterrupt, SystemExit)):
+                return ExceptionManager.RAISE
+            registrar_contornado(type(inst), inst, inst.__traceback__, "erro no laço do app")
+            return ExceptionManager.PASS
+    ExceptionManager.add_handler(Contornar())
+
+
 def iniciar(pasta, versao=""):
     """Chamar o quanto antes (no build do app)."""
     global _caminho, _fechou_com_erro
@@ -96,9 +145,10 @@ def iniciar(pasta, versao=""):
     sys.excepthook = gancho
 
     def gancho_thread(args):
-        registrar_erro(args.exc_type, args.exc_value, args.exc_traceback,
-                       "erro numa thread (%s)" % getattr(args.thread, "name", "?"))
+        registrar_contornado(args.exc_type, args.exc_value, args.exc_traceback,
+                             "erro numa thread (%s)" % getattr(args.thread, "name", "?"))
     threading.excepthook = gancho_thread
+    _instalar_no_kivy()
 
 
 def _ultima_sessao():

@@ -23,6 +23,7 @@ fixa, com Y para cima (como no Kivy).
 """
 import collections
 import math
+from array import array
 import os
 import threading
 import time
@@ -40,10 +41,15 @@ URL_PADRAO = "https://tiles.openfreemap.org/planet/20260927_080001_pt/{z}/{x}/{y
 Z_DADOS_MAX = 14
 VALIDADE_S = 30 * 86400
 TRABALHADORES = 1          # mais threads = a tela espera mais pela vez (GIL)
-MAX_PREPARADOS = 64
-MAX_DECODIFICADOS = 24
+# Memória (o dono relatou o app fechando no zoom, 01/10/2026): um tile
+# preparado ocupava ~8,5 MB em listas de float do Python e cabiam 64 (fora os
+# decodificados) -> centenas de MB no celular. Agora os vértices vão em
+# array (4 bytes por número, ~8x menos) e cabem menos tiles.
+MAX_PREPARADOS = 40
+MAX_DECODIFICADOS = 12
 LIMITE_DISCO_MB = 200
 MAX_VERTICES_MESH = 60000  # índices do Mesh são de 16 bits
+MAX_INDICES_MESH = 60000   # e o Kivy recusa (erro!) Mesh com mais de 65535 índices
 # os nomes candidatos do tile ficam numa grade de GRADE x GRADE quadrados: a
 # tela olha só os quadrados à vista (no zoom de navegação um tile é ~10x a
 # tela; olhar os milhares de candidatos do tile a cada 0,45 s custava caro)
@@ -208,19 +214,20 @@ def _simplificar(pts, tol2):
 
 
 class _Malha:
-    """Acumula triângulos e corta em pedaços de até MAX_VERTICES_MESH."""
+    """Acumula triângulos e corta em pedaços de até MAX_VERTICES_MESH
+    vértices e MAX_INDICES_MESH índices."""
 
     def __init__(self):
         self.pedacos = [([], [])]
 
-    def _atual(self, novos):
+    def _atual(self, novos, novos_indices):
         v, i = self.pedacos[-1]
-        if len(v) // 4 + novos > MAX_VERTICES_MESH:
+        if len(v) // 4 + novos > MAX_VERTICES_MESH or len(i) + novos_indices > MAX_INDICES_MESH:
             self.pedacos.append(([], []))
         return self.pedacos[-1]
 
     def leque(self, cx, cy, r, lados=7):
-        v, ind = self._atual(lados + 1)
+        v, ind = self._atual(lados + 1, 3 * lados)
         base = len(v) // 4
         v += [cx, cy, 0, 0]
         for k in range(lados):
@@ -233,7 +240,7 @@ class _Malha:
         """Rua de largura 2*meia; lados_junta > 0 arredonda curvas e pontas."""
         if len(pts) < 2:
             return
-        v, ind = self._atual(len(pts) * 4)
+        v, ind = self._atual(len(pts) * 4, len(pts) * 6)
         base = len(v) // 4
         n_quad = 0
         for (ax, ay), (bx, by) in zip(pts, pts[1:]):
@@ -252,14 +259,16 @@ class _Malha:
                 self.leque(pts[k][0], pts[k][1], meia, lados_junta)
 
     def triangulos(self, vertices, indices_leque):
-        v, ind = self._atual(len(vertices) // 4)
+        v, ind = self._atual(len(vertices) // 4, 3 * max(0, len(indices_leque) - 2))
         base = len(v) // 4
         v += vertices
         for k in range(1, len(indices_leque) - 1):
             ind += [base + indices_leque[0], base + indices_leque[k], base + indices_leque[k + 1]]
 
     def listas(self):
-        return [(v, i) for v, i in self.pedacos if i]
+        """[(vértices, índices)] em array compacto ('f' e 'H'), que o Mesh do
+        Kivy usa direto, sem copiar para lista."""
+        return [(array("f", v), array("H", i)) for v, i in self.pedacos if i]
 
 
 def preparar(camadas, dz, tx, ty, rz, origem, escala, densidade):

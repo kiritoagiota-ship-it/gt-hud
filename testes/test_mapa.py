@@ -48,5 +48,19 @@ class TesteGeometria(unittest.TestCase):
         self.assertTrue(400 < len(tiles) < 600, len(tiles))
 
 
+class TesteMemoriaELimites(unittest.TestCase):
+    def test_malha_em_array_e_dentro_dos_limites_do_kivy(self):
+        m = mapa_vetor._Malha()
+        for k in range(30000):  # muitos leques: muitos índices por vértice
+            m.leque(float(k), 0.0, 1.0, 8)
+        listas = m.listas()
+        self.assertGreater(len(listas), 1)   # teve que dividir
+        for v, i in listas:
+            self.assertEqual((v.typecode, i.typecode), ("f", "H"))
+            self.assertLessEqual(len(i), mapa_vetor.MAX_INDICES_MESH)
+            self.assertLessEqual(len(v) // 4, mapa_vetor.MAX_VERTICES_MESH)
+            self.assertLess(max(i), len(v) // 4)
+
+
 if __name__ == "__main__":
     unittest.main()
