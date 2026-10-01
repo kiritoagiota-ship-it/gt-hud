@@ -179,7 +179,7 @@ class GTHudApp(App):
             return tema.LARANJA, "Simulador  %d m" % (self.precisao or 0)
         if self.sinal_ok():
             prec = self.precisao or 0
-            texto = "GPS  %d m" % prec + ("  |  %d sat" % sat[1] if sat and sat[1] else "")
+            texto = "GPS  %d m" % prec + ("\n%d satelites" % sat[1] if sat and sat[1] else "")
             return (tema.VERDE if prec <= 10 else tema.LARANJA), texto
         if self.sinal_fraco():
             return tema.LARANJA, "Sinal fraco: %d m" % (self.precisao_ultima or 0)

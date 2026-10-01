@@ -14,6 +14,7 @@ import os
 from kivy.clock import Clock
 from kivy.graphics import (Color, Ellipse, InstructionGroup, Line, Mesh, PopMatrix,
                            PushMatrix, Rectangle, RenderContext, Rotate, Scale, Translate)
+from kivy.graphics.texture import Texture
 from kivy.metrics import Metrics, dp
 from kivy.properties import BooleanProperty, NumericProperty
 from kivy.uix.label import Label
@@ -25,21 +26,39 @@ from mapa_tiles import Tiles
 TAM = 256
 ZOOM_MIN, ZOOM_MAX = 4.0, 19.0
 
-# Tile claro do OpenStreetMap -> escuro no tema do app: inverte a luz, tira a
-# cor e pinta de azul-petróleo (ruas claras viram ciano apagado).
+# Tile claro do OpenStreetMap -> "modo noturno" no tema do app, separando o
+# que é cada coisa pela cor original (e não só invertendo a luz: a 1ª versão
+# invertia, e as ruas, que são BRANCAS no OSM, viravam preto sobre preto -
+# ilegível no celular):
+#   fundo bege -> quase preto; prédios -> um tom acima; água/verde -> escuros
+#   ruas brancas -> cinza-azulado; avenidas (amarelo/laranja/rosa) -> mais claras
+#   letras (escuras no OSM) -> brancas
+# A rota (ciano) fica por cima e continua se destacando das ruas.
 SHADER_TILES = """$HEADER$
 void main(void) {
-    vec4 c = texture2D(texture0, tex_coord0);
-    float l = 1.0 - dot(c.rgb, vec3(0.299, 0.587, 0.114));
-    l = clamp((l - 0.5) * 1.35 + 0.5, 0.0, 1.0);
-    vec3 escura = vec3(0.016, 0.027, 0.043);
-    vec3 media = vec3(0.051, 0.204, 0.251);
-    vec3 clara = vec3(0.55, 0.88, 0.94);
-    vec3 cor = l < 0.588 ? mix(escura, media, l / 0.588)
-                         : mix(media, clara, (l - 0.588) / 0.412);
+    vec3 c = texture2D(texture0, tex_coord0).rgb;
+    float l = dot(c, vec3(0.299, 0.587, 0.114));
+    float sat = max(c.r, max(c.g, c.b)) - min(c.r, min(c.g, c.b));
+    float inv = 1.0 - l;
+    vec3 cor = vec3(0.016, 0.027, 0.043);
+    cor = mix(cor, vec3(0.045, 0.075, 0.10),
+              smoothstep(0.10, 0.20, inv) * (1.0 - smoothstep(0.30, 0.50, inv)));
+    float agua = step(c.r + 0.08, c.b) * step(0.55, l);
+    float verde = step(c.r + 0.04, c.g) * step(c.b + 0.02, c.g) * step(0.55, l);
+    cor = mix(cor, vec3(0.03, 0.15, 0.27), agua * 0.9);
+    cor = mix(cor, vec3(0.03, 0.14, 0.10), verde * 0.9);
+    float rua = smoothstep(0.962, 0.992, l) * (1.0 - smoothstep(0.03, 0.07, sat));
+    cor = mix(cor, vec3(0.27, 0.33, 0.39), rua);
+    float avenida = smoothstep(0.19, 0.23, sat) * smoothstep(0.60, 0.70, l)
+                    * step(c.b, c.r) * (1.0 - verde);
+    cor = mix(cor, vec3(0.52, 0.58, 0.64), avenida);
+    cor = mix(cor, vec3(0.93, 0.98, 1.0), smoothstep(0.30, 0.62, inv));
     gl_FragColor = vec4(cor, 1.0) * frag_color;
 }
 """
+# cor do fundo do OSM: tile ainda não baixado aparece como fundo (escuro),
+# e não como rua (a textura padrão do Kivy é branca = "rua" no filtro)
+_BEGE_OSM = bytes((242, 239, 233))
 
 
 def mundo(lat, lon, z):
@@ -93,7 +112,11 @@ class MapaHUD(Widget):
         self._alvo = None                   # (lat, lon, rotação, zoom) para a animação
         self._ev_anim = None
         self._toques = []
-        self._escala_tile = max(1.0, Metrics.density * 0.5)  # tile um pouco maior no celular
+        # 1 pixel do tile = 1 dp: as letras do OSM ficam num tamanho legível no
+        # celular (a 1ª versão usava metade disso e ficava ilegível)
+        self._escala_tile = Metrics.density
+        self._tex_vazia = Texture.create(size=(1, 1), colorfmt="rgb")
+        self._tex_vazia.blit_buffer(_BEGE_OSM, colorfmt="rgb", bufferfmt="ubyte")
         self._larg_usada = None
         self.tiles = Tiles(pasta_cache, self._tile_chegou)
 
@@ -269,7 +292,8 @@ class MapaHUD(Widget):
                 self._sem_imagem.discard(chave)
         for tx, ty in precisa:
             if (tx, ty) not in self._rects:
-                ret = Rectangle(pos=(tx * TAM - ox, -((ty + 1) * TAM - oy)), size=(TAM, TAM))
+                ret = Rectangle(pos=(tx * TAM - ox, -((ty + 1) * TAM - oy)), size=(TAM, TAM),
+                                texture=self._tex_vazia)
                 self._rc.add(ret)
                 self._rects[(tx, ty)] = ret
                 self._sem_imagem.add((tx, ty))

@@ -16,6 +16,7 @@ def _poligono(x, y, w, h, c):
 class BotaoHUD(Button):
     destaque = BooleanProperty(False)
     cor = ListProperty(tema.CIANO)
+    opaco = BooleanProperty(False)  # por cima do mapa: fundo escuro, senão some na rua clara
 
     def __init__(self, **kw):
         kw.setdefault("font_size", tema.T_BOTAO)
@@ -25,7 +26,7 @@ class BotaoHUD(Button):
         self.background_down = ""
         self.background_color = (0, 0, 0, 0)
         self.bind(pos=self._desenhar, size=self._desenhar, state=self._desenhar,
-                  destaque=self._desenhar, cor=self._desenhar)
+                  destaque=self._desenhar, cor=self._desenhar, opaco=self._desenhar)
         self._desenhar()
 
     def _desenhar(self, *a):
@@ -35,6 +36,12 @@ class BotaoHUD(Button):
         self.canvas.before.clear()
         with self.canvas.before:
             pressionado = self.state == "down"
+            if self.opaco and not self.destaque:
+                Color(*tema.com_alfa(tema.PAINEL, 0.94))
+                vert = []
+                for px, py in pts:
+                    vert += [px, py, 0, 0]
+                Mesh(vertices=vert, indices=list(range(len(pts))), mode="triangle_fan")
             if self.destaque or pressionado:
                 alfa = 1.0 if self.destaque else 0.25
                 if self.destaque and pressionado:

@@ -91,21 +91,21 @@ class TelaMapa(Screen):
                               on_release=lambda *a: app.abrir("busca"))
         self.status = BoxLayout(size_hint=(None, None), spacing=dp(8))
         self.ponto = Ponto(pos_hint={"center_y": 0.5})
-        self.lbl_gps = Texto(text="Buscando GPS", font_size=tema.T_ROTULO, color=tema.CIANO_FRACO)
+        self.lbl_gps = Texto(text="Buscando GPS", font_size=tema.T_ROTULO + 1, color=tema.BRANCO)
         self.status.add_widget(self.ponto)
         self.status.add_widget(self.lbl_gps)
         self.menu = BoxLayout(size_hint=(None, None), spacing=dp(6))
         for texto, tela in (("Painel", "hud"), ("Viagens", "viagens"), ("Ajustes", "config")):
-            self.menu.add_widget(BotaoHUD(text=texto, font_size=tema.T_ROTULO + 1,
+            self.menu.add_widget(BotaoHUD(text=texto, font_size=tema.T_ROTULO + 1, opaco=True,
                                           on_release=lambda *a, t=tela: app.abrir(t)))
 
         # --- navegando: faixa da manobra, "depois", subida ---
         self.faixa = PainelHUD(size_hint=(None, None))
-        self.icone = IconeManobra(size_hint_x=None, width=dp(72))
+        self.icone = IconeManobra(size_hint_x=None, width=dp(84))
         textos = BoxLayout(orientation="vertical", spacing=dp(2))
-        self.lbl_dist = Texto(text="", font_size=sp(34), bold=True, size_hint_y=1.3)
-        self.lbl_instr = Texto(text="", font_size=tema.T_ROTULO + 2, color=tema.CIANO_FRACO)
-        self.lbl_rua = Texto(text="", font_size=tema.T_BOTAO, bold=True, color=tema.CIANO)
+        self.lbl_dist = Texto(text="", font_size=sp(38), bold=True, size_hint_y=1.35)
+        self.lbl_instr = Texto(text="", font_size=sp(18), color=tema.BRANCO)
+        self.lbl_rua = Texto(text="", font_size=sp(19), bold=True, color=tema.CIANO)
         for w in (self.lbl_dist, self.lbl_instr, self.lbl_rua):
             textos.add_widget(w)
         self.faixa.add_widget(self.icone)
@@ -121,11 +121,11 @@ class TelaMapa(Screen):
 
         # --- velocímetro e botões do mapa ---
         self.disco = DiscoVelocimetro()
-        self.btn_centro = BotaoHUD(text="Centralizar", font_size=tema.T_ROTULO + 1,
+        self.btn_centro = BotaoHUD(text="Centralizar", font_size=tema.T_ROTULO + 1, opaco=True,
                                    size_hint=(None, None), on_release=lambda *a: self.mapa.recentralizar())
-        self.btn_mais = BotaoHUD(text="+", size_hint=(None, None),
+        self.btn_mais = BotaoHUD(text="+", size_hint=(None, None), opaco=True,
                                  on_release=lambda *a: self.mapa.mudar_zoom(1))
-        self.btn_menos = BotaoHUD(text="-", size_hint=(None, None),
+        self.btn_menos = BotaoHUD(text="-", size_hint=(None, None), opaco=True,
                                   on_release=lambda *a: self.mapa.mudar_zoom(-1))
         self.lbl_msg = Texto(text="", font_size=tema.T_ROTULO + 1, halign="center",
                              size_hint=(None, None))
@@ -302,14 +302,14 @@ class TelaMapa(Screen):
         # topo
         larg_topo = min(W - 2 * m, dp(480))
         self.busca.pos, self.busca.size = (m, topo - dp(54)), (larg_topo, dp(54))
-        larg_menu = 3 * dp(84) + 2 * dp(6)
+        larg_menu = 3 * dp(80) + 2 * dp(6)
         self.menu.pos, self.menu.size = (W - m - larg_menu, topo - dp(54) - m - dp(40)), (larg_menu, dp(40))
         self.status.size = (max(dp(120), W - 3 * m - larg_menu), dp(40))
         self.status.pos = (m, topo - dp(54) - m - dp(40))
-        self.faixa.pos, self.faixa.size = (m, topo - dp(116)), (larg_topo, dp(116))
-        self.depois.pos, self.depois.size = (m, topo - dp(116) - dp(6) - dp(38)), (dp(118), dp(38))
+        self.faixa.pos, self.faixa.size = (m, topo - dp(132)), (larg_topo, dp(132))
+        self.depois.pos, self.depois.size = (m, topo - dp(132) - dp(6) - dp(38)), (dp(118), dp(38))
         larg_chip = min(larg_topo, dp(330))
-        y_chip = topo - dp(116) - dp(6) - dp(44)
+        y_chip = topo - dp(132) - dp(6) - dp(44)
         if self._tem_depois:
             y_chip -= dp(44)
         self.chip_subida.pos, self.chip_subida.size = (m, y_chip), (larg_chip, dp(44))
@@ -337,7 +337,8 @@ class TelaMapa(Screen):
         else:
             self.lbl_msg.pos = (m + tam_velo + m, m + alt_barra + m)
             self.lbl_msg.size = (W - tam_velo - 3 * m - dp(60), dp(44))
-        self.mapa.credito_margem = (m, alt_barra + 2 * m if self.estado != PREVIA else m)
+        # crédito do OpenStreetMap: à esquerda da coluna de botões (não por baixo dela)
+        self.mapa.credito_margem = (W - x_btn + m, base + dp(2) if self.estado != PREVIA else m)
         self.mapa._aplicar()
 
     # --- viagem (modo livre) --------------------------------------------------------
