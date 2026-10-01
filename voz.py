@@ -25,6 +25,10 @@ RESPIRO_S = 0.09
 VALIDADE_NA_FILA_S = 7.0
 ESPERA_MOTOR_S = 4.0     # ao abrir o app, espera o motor de voz ficar pronto
 RITMO = 0.95             # um pouco mais pausada: soa mais "assistente"
+# o motor de voz às vezes não avisa que terminou (ex.: o sistema matou o
+# serviço de voz): passado esse tempo, a fala é cortada e a fila anda
+TRAVADA_BASE_S = 6.0
+TRAVADA_POR_LETRA_S = 0.12
 FRASE_TESTE = ("Sistemas online, senhor. Em duzentos metros, vire à direita. "
                "Subida de oito por cento à frente.")
 
@@ -42,6 +46,7 @@ class Voz:
         self._config = None
         self._config_aplicada = False
         self._fala = None          # classe Java Fala (motor do celular)
+        self._limite_fala = 0.0    # time.monotonic() em que a fala atual "travou"
         if platform == "android":
             try:
                 from jnius import autoclass
@@ -58,6 +63,12 @@ class Voz:
     def _motor_iniciando(self):
         return (self._fala is not None and self._fala.estado == 0
                 and time.monotonic() - self._t_inicio < ESPERA_MOTOR_S)
+
+    def estado_motor(self):
+        """"pronto", "iniciando" ou "sem" (sem motor: voz gravada)."""
+        if self._fala is None or self._fala.estado == -1:
+            return "sem"
+        return "pronto" if self._fala.estado == 1 else "iniciando"
 
     def nomes_vozes(self):
         if not self.motor_pronto():
@@ -116,7 +127,12 @@ class Voz:
 
     def _tentar(self, *a):
         agora = time.monotonic()
-        if agora < self._livre_em or (self._fala is not None and self._fala.ocupada):
+        ocupada = self._fala is not None and self._fala.ocupada
+        if ocupada and agora > self._limite_fala:
+            print("[voz] o motor de voz nao terminou a fala: cortando")
+            self._fala.parar()
+            ocupada = False
+        if agora < self._livre_em or ocupada:
             self._agendar(max(0.15, self._livre_em - agora))
             return
         if self._motor_iniciando():
@@ -131,6 +147,7 @@ class Voz:
             frase = texto or falas.frase(pedacos)
             if self._fala.falar(frase):
                 self._livre_em = agora + 0.3  # depois, "ocupada" diz quando terminou
+                self._limite_fala = agora + TRAVADA_BASE_S + TRAVADA_POR_LETRA_S * len(frase)
                 self._agendar(0.3)
                 return
         self._tocar_gravada([p for p in pedacos if os.path.exists(self._arquivo(p))], agora)

@@ -16,6 +16,7 @@ de quem está pedalando.
 A 1ª versão usava imagens prontas do OpenStreetMap pintadas por shader:
 ficava ilegível no celular (nome pequeno, embaçado no zoom).
 """
+import collections
 import math
 import time
 
@@ -38,6 +39,9 @@ MAX_ROTULOS_LUGAR = 8
 MAX_ROTULOS_POI = 10
 REPOSICIONAR_S = 0.45      # refaz a escolha dos nomes no máximo a cada isso
 INERCIA = 3.5              # quanto maior, mais rápido o deslize para
+BONUS_JA_NA_TELA = 1.5     # nome já mostrado tem preferência: não fica trocando
+MAX_TEXTURAS = 400
+VOLTA_A_SEGUIR_S = 10.0    # navegando: depois de mexer no mapa, volta a seguir sozinho
 
 
 def mundo(lat, lon, z):
@@ -74,6 +78,7 @@ class _Rotulo:
 
     def __init__(self, info, textura, ponto=None):
         self.info = info
+        self.textura = textura
         self.grupo = InstructionGroup()
         if ponto is not None:
             self.grupo.add(Color(*ponto))
@@ -111,7 +116,11 @@ class MapaHUD(Widget):
         self._desenhados = {}               # (dz, tx, ty, rz) -> [(grupo, instrução), ...]
         self._nivel = None                  # (dz, rz) atual
         self._rotulos = []
-        self._texturas = {}
+        self._texturas = collections.OrderedDict()
+        self._chave_tiles = None            # vista da última conta de tiles
+        self._tiles_sujo = True
+        self._t_mexeu = 0.0                 # time.time() do último toque no mapa
+        self.areas_cobertas = []            # (x0, y0, x1, y1) tapados por painéis da tela
         self._t_rotulos = 0.0
         self._ev_rotulos = None
         self._larg_usada = None
@@ -148,6 +157,7 @@ class MapaHUD(Widget):
         self.canvas.add(self._g_rotulos)
         self._g_tela = InstructionGroup()     # seta e destino
         self.canvas.add(self._g_tela)
+        self._montar_marcas()
 
         # crédito exigido pelos dados
         self.credito = Label(text="(c) OpenStreetMap, OpenFreeMap", font_size=dp(10),
@@ -159,6 +169,9 @@ class MapaHUD(Widget):
     # --- API usada pelas telas ---------------------------------------------
     def mostrar_eu(self, lat, lon, rumo=None, precisao=None, vel_kmh=None):
         self.eu = (lat, lon, rumo, precisao)
+        if (self._navegando and not self.seguindo and not self._toques
+                and time.time() - self._t_mexeu > VOLTA_A_SEGUIR_S):
+            self.seguindo = True  # olhou o mapa e largou: volta para a seta
         if self.seguindo:
             rot = self.rotacao
             if self._navegando and self.girar and rumo is not None:
@@ -229,6 +242,16 @@ class MapaHUD(Widget):
         self.centro = meio
         self.rotacao = 0.0
         self.zoom = max(ZOOM_MIN, min(17.0, z))
+        self._aplicar()
+
+    def ao_voltar(self):
+        """App voltou do segundo plano: no Android as texturas dos nomes podem
+        ter se perdido junto com o contexto gráfico; refaz."""
+        self._texturas.clear()
+        self._g_rotulos.clear()
+        self._rotulos = []
+        self._tiles_sujo = True
+        self._t_rotulos = 0.0
         self._aplicar()
 
     def mudar_zoom(self, delta, animado=True):
@@ -305,6 +328,16 @@ class MapaHUD(Widget):
         rz = int(max(ZOOM_MIN, min(ZOOM_MAX, round(self.zoom))))
         dz = z_dados(rz)
         nivel = (dz, rz)
+        # na animação isto roda 60x/s: só refaz a conta quando a vista andou
+        # um pedaço (menos que a margem de dp(40) além da borda da tela)
+        cx, cy = self._local(*self.centro)
+        s = self._escala_tela()
+        passo = dp(24)
+        vista = (nivel, int(cx * s // passo), int(cy * s // passo), int(self.zoom * 20),
+                 int(self.rotacao // 3), self.x, self.y, self.width, self.height, self.ancora)
+        if vista == self._chave_tiles and not self._tiles_sujo:
+            return
+        self._chave_tiles, self._tiles_sujo = vista, False
         xs, ys = [], []
         margem = dp(40)
         for px, py in ((self.x - margem, self.y - margem), (self.right + margem, self.y - margem),
@@ -364,6 +397,7 @@ class MapaHUD(Widget):
 
     def _tile_pronto(self, chave):
         if (chave[0], chave[3]) == self._nivel:
+            self._tiles_sujo = True
             self._aplicar()
 
     # --- nomes --------------------------------------------------------------------
@@ -376,9 +410,11 @@ class MapaHUD(Widget):
                                outline_width=max(1, int(dp(1.6))), outline_color=FUNDO[:3])
             rotulo.refresh()
             tex = rotulo.texture
-            if len(self._texturas) > 400:
-                self._texturas.clear()
             self._texturas[chave] = tex
+            while len(self._texturas) > MAX_TEXTURAS:
+                self._texturas.popitem(last=False)  # a usada há mais tempo
+        else:
+            self._texturas.move_to_end(chave)
         return tex
 
     def _pedir_rotulos(self):
@@ -387,31 +423,42 @@ class MapaHUD(Widget):
             self._ev_rotulos = Clock.schedule_once(self._escolher_rotulos, espera)
 
     def _escolher_rotulos(self, *a):
-        """Escolhe quais nomes cabem na tela sem se encostar (mais importante primeiro)."""
+        """Escolhe quais nomes cabem na tela sem se encostar (mais importante
+        primeiro; quem já está na tela tem preferência, para os nomes não
+        ficarem piscando com o mapa andando/girando)."""
         self._ev_rotulos = None
         self._t_rotulos = time.time()
+        cx, cy, s, ax, ay, c0, s0 = self._medir_quadro()
+        x0, y0, x1, y1 = self.x + dp(8), self.y + dp(8), self.right - dp(8), self.top - dp(8)
+        antigos = {id(rot.info): rot for rot in self._rotulos}
         candidatos = []
         for chave in self._desenhados:
             if (chave[0], chave[3]) != self._nivel:
                 continue
             preparado = self.fonte.pronto(chave)
-            if preparado:
-                candidatos.extend(preparado["rotulos"])
-        candidatos.sort(key=lambda r: -r["peso"])
-        s = self._escala_tela()
-        ocupados, usados_texto, novos = [], {}, []
+            if not preparado:
+                continue
+            for r in preparado["rotulos"]:  # só os que caem dentro da tela
+                dx, dy = (r["x"] - cx) * s, (r["y"] - cy) * s
+                sx, sy = ax + dx * c0 - dy * s0, ay + dx * s0 + dy * c0
+                if x0 < sx < x1 and y0 < sy < y1:
+                    peso = r["peso"] + (BONUS_JA_NA_TELA if id(r) in antigos else 0.0)
+                    candidatos.append((peso, sx, sy, r))
+        candidatos.sort(key=lambda t: -t[0])
+        cr = self.credito
+        ocupados = list(self.areas_cobertas) + [(cr.x, cr.y, cr.right, cr.top)]
+        usados_texto, novos = {}, []
         conta = {"rua": 0, "lugar": 0, "poi": 0}
         limite = {"rua": MAX_ROTULOS_RUA, "lugar": MAX_ROTULOS_LUGAR, "poi": MAX_ROTULOS_POI}
-        x0, y0, x1, y1 = self.x + dp(8), self.y + dp(8), self.right - dp(8), self.top - dp(8)
-        for r in candidatos:
+        for _, sx, sy, r in candidatos:
             tipo = r["tipo"]
             if conta[tipo] >= limite[tipo]:
                 continue
-            sx, sy = self._local_para_tela(r["x"], r["y"])
-            if not (x0 < sx < x1 and y0 < sy < y1):
-                continue
             if tipo == "rua":
-                tex = self._textura(r["texto"], sp(13.5) if r["peso"] < 4 else sp(14.5), tema.BRANCO)
+                tamanho = sp(13.5) if r["peso"] < 4 else sp(14.5)
+                if r["comp"] * s < len(r["texto"]) * tamanho * 0.4:
+                    continue  # nem precisa desenhar: o nome não cabe no trecho
+                tex = self._textura(r["texto"], tamanho, tema.BRANCO)
                 if r["comp"] * s < tex.width * 0.85:
                     continue  # o nome não cabe no trecho
                 ang = math.degrees(r["ang"]) + self.rotacao
@@ -441,7 +488,9 @@ class MapaHUD(Widget):
         self._g_rotulos.clear()
         self._rotulos = []
         for r, tex, ponto in novos:
-            rot = _Rotulo(r, tex, ponto)
+            rot = antigos.get(id(r))
+            if rot is None or rot.textura is not tex:
+                rot = _Rotulo(r, tex, ponto)
             self._rotulos.append(rot)
             self._g_rotulos.add(rot.grupo)
         self._mover_rotulos()
@@ -492,48 +541,74 @@ class MapaHUD(Widget):
         for linha in (i for i in self._g_trilha.children if isinstance(i, Line)):
             linha.width = dp(2.6) / s
 
+    def _montar_marcas(self):
+        """Destino, círculo de precisão, seta e bolinha: criados uma vez; a
+        cada quadro só mudam de lugar (antes eram refeitos 60x/s)."""
+        def grupo(*itens):
+            g = InstructionGroup()
+            for i in itens:
+                g.add(i)
+            return g
+        self._e_dest = [Ellipse(size=(dp(32), dp(32))), Ellipse(size=(dp(18), dp(18))),
+                        Ellipse(size=(dp(8), dp(8)))]
+        self._m_dest = grupo(Color(*tema.com_alfa(tema.LARANJA, 0.3)), self._e_dest[0],
+                             Color(*tema.LARANJA), self._e_dest[1],
+                             Color(*tema.FUNDO), self._e_dest[2])
+        self._e_prec = Ellipse()
+        self._m_prec = grupo(Color(*tema.com_alfa(tema.CIANO, 0.10)), self._e_prec)
+        self._e_halo = Ellipse(size=(dp(44), dp(44)))
+        self._m_halo = grupo(Color(*tema.com_alfa(tema.CIANO, 0.30)), self._e_halo)
+        self._seta_malha = Mesh(vertices=[0.0] * 16, indices=[0, 1, 2, 3], mode="triangle_fan")
+        self._seta_borda = Line(points=[0.0] * 8, close=True, width=dp(1.4))
+        self._m_seta = grupo(Color(*tema.BRANCO), self._seta_malha,
+                             Color(*tema.CIANO), self._seta_borda)
+        self._e_ponto = [Ellipse(size=(dp(18), dp(18))), Ellipse(size=(dp(12), dp(12)))]
+        self._m_ponto = grupo(Color(*tema.BRANCO), self._e_ponto[0],
+                              Color(*tema.CIANO), self._e_ponto[1])
+        self._visiveis = []
+        self._ultima_seta = None
+
+    def _mostrar_marcas(self, quais):
+        if quais != self._visiveis:
+            self._g_tela.clear()
+            for g in quais:
+                self._g_tela.add(g)
+            self._visiveis = quais
+
     def _desenhar_tela(self):
-        g = self._g_tela
-        g.clear()
+        quais = []
         if self._destino:
             x, y = self._para_tela(*self._destino)
-            g.add(Color(*tema.com_alfa(tema.LARANJA, 0.3)))
-            g.add(Ellipse(pos=(x - dp(16), y - dp(16)), size=(dp(32), dp(32))))
-            g.add(Color(*tema.LARANJA))
-            g.add(Ellipse(pos=(x - dp(9), y - dp(9)), size=(dp(18), dp(18))))
-            g.add(Color(*tema.FUNDO))
-            g.add(Ellipse(pos=(x - dp(4), y - dp(4)), size=(dp(8), dp(8))))
-        if not self.eu:
-            return
-        lat, lon, rumo, precisao = self.eu
-        x, y = self._para_tela(lat, lon)
-        if precisao:
-            r = precisao / metros_por_px(lat, self.zoom) * self._escala
-            if dp(20) < r < max(self.width, self.height):
-                g.add(Color(*tema.com_alfa(tema.CIANO, 0.10)))
-                g.add(Ellipse(pos=(x - r, y - r), size=(2 * r, 2 * r)))
-        g.add(Color(*tema.com_alfa(tema.CIANO, 0.30)))
-        g.add(Ellipse(pos=(x - dp(22), y - dp(22)), size=(dp(44), dp(44))))
-        if rumo is None:
-            g.add(Color(*tema.BRANCO))
-            g.add(Ellipse(pos=(x - dp(9), y - dp(9)), size=(dp(18), dp(18))))
-            g.add(Color(*tema.CIANO))
-            g.add(Ellipse(pos=(x - dp(6), y - dp(6)), size=(dp(12), dp(12))))
-            return
-        # seta: ângulo na tela = rumo - rotação do mapa (horário a partir de cima)
-        ang = -(rumo - self.rotacao)
-        forma = [(0, dp(19)), (dp(13), -dp(13)), (0, -dp(5)), (-dp(13), -dp(13))]
-        pts = []
-        for px, py in forma:
-            rx, ry = _girar(px, py, ang)
-            pts.append((x + rx, y + ry))
-        vert = []
-        for px, py in pts:
-            vert += [px, py, 0, 0]
-        g.add(Color(*tema.BRANCO))
-        g.add(Mesh(vertices=vert, indices=[0, 1, 2, 3], mode="triangle_fan"))
-        g.add(Color(*tema.CIANO))
-        g.add(Line(points=[c for p in pts for c in p], close=True, width=dp(1.4)))
+            for e in self._e_dest:
+                e.pos = (x - e.size[0] / 2.0, y - e.size[1] / 2.0)
+            quais.append(self._m_dest)
+        if self.eu:
+            lat, lon, rumo, precisao = self.eu
+            x, y = self._para_tela(lat, lon)
+            if precisao:
+                r = precisao / metros_por_px(lat, self.zoom) * self._escala
+                if dp(20) < r < max(self.width, self.height):
+                    self._e_prec.pos, self._e_prec.size = (x - r, y - r), (2 * r, 2 * r)
+                    quais.append(self._m_prec)
+            self._e_halo.pos = (x - dp(22), y - dp(22))
+            quais.append(self._m_halo)
+            if rumo is None:
+                for e in self._e_ponto:
+                    e.pos = (x - e.size[0] / 2.0, y - e.size[1] / 2.0)
+                quais.append(self._m_ponto)
+            else:
+                # seta: ângulo na tela = rumo - rotação do mapa (horário a partir de cima)
+                ang = -(rumo - self.rotacao)
+                if self._ultima_seta != (x, y, ang):
+                    self._ultima_seta = (x, y, ang)
+                    pts = []
+                    for px, py in ((0, dp(19)), (dp(13), -dp(13)), (0, -dp(5)), (-dp(13), -dp(13))):
+                        rx, ry = _girar(px, py, ang)
+                        pts.append((x + rx, y + ry))
+                    self._seta_malha.vertices = [v for px, py in pts for v in (px, py, 0, 0)]
+                    self._seta_borda.points = [c for p in pts for c in p]
+                quais.append(self._m_seta)
+        self._mostrar_marcas(quais)
 
     # --- animação (câmera seguindo, zoom suave, inércia) -----------------------------
     def _animar_para(self, lat, lon, rot):
@@ -614,11 +689,10 @@ class MapaHUD(Widget):
             return False
         if super().on_touch_down(touch):
             return True
+        self._t_mexeu = time.time()
         if getattr(touch, "is_mouse_scrolling", False):
             self._alvo_zoom = None
             self._zoom_no_ponto(self.zoom + (0.5 if touch.button == "scrolldown" else -0.5), *touch.pos)
-            if not self.seguindo:
-                pass
             self._aplicar()
             return True
         self._velocidade = (0.0, 0.0)
@@ -636,6 +710,7 @@ class MapaHUD(Widget):
     def on_touch_move(self, touch):
         if touch.grab_current is not self:
             return False
+        self._t_mexeu = time.time()
         if len(self._toques) >= 2:
             a, b = self._toques[0], self._toques[1]
             outro = b if touch is a else a
@@ -661,6 +736,7 @@ class MapaHUD(Widget):
         if touch.grab_current is not self:
             return False
         touch.ungrab(self)
+        self._t_mexeu = time.time()
         if touch in self._toques:
             self._toques.remove(touch)
         # inércia: continua deslizando na velocidade dos últimos movimentos

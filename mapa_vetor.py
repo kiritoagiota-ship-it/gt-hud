@@ -19,6 +19,7 @@ import math
 import os
 import threading
 import time
+import urllib.error
 
 from kivy.clock import Clock
 from kivy.graphics.tesselator import TYPE_POLYGONS, WINDING_ODD, Tesselator
@@ -35,6 +36,7 @@ MAX_PREPARADOS = 64
 MAX_DECODIFICADOS = 24
 LIMITE_DISCO_MB = 200
 MAX_VERTICES_MESH = 60000  # índices do Mesh são de 16 bits
+REDESCOBRIR_S = 120        # no máximo uma nova consulta da versão a cada isso
 
 # --- estilo (cores RGBA; larguras em dp no zoom 16) ---------------------------
 FUNDO = (0.016, 0.027, 0.043, 1)
@@ -320,6 +322,7 @@ class FonteVetorial:
         self.origem, self.escala, self.densidade = origem, escala, densidade
         self.ao_ficar_pronto = ao_ficar_pronto   # chamada na thread do Kivy com a chave
         self._url = URL_PADRAO
+        self._t_descoberta = 0.0
         self._prontos = collections.OrderedDict()       # (dz, tx, ty, rz) -> preparado
         self._decodificados = collections.OrderedDict()  # (dz, tx, ty) -> camadas
         self._pedidos = collections.deque()
@@ -353,11 +356,22 @@ class FonteVetorial:
 
     # ------------------------------------------------------------------------
     def _descobrir_versao(self):
-        """O endereço dos tiles muda a cada atualização dos dados."""
+        """O endereço dos tiles muda a cada atualização dos dados (as versões
+        velhas saem do ar depois de um tempo)."""
+        self._t_descoberta = time.time()
         try:
             self._url = rede.baixar_json(TILEJSON, timeout=15)["tiles"][0]
         except Exception as e:
             print("[mapa] usando a versao conhecida dos tiles:", e)
+
+    def _versao_saiu_do_ar(self):
+        """Tile não encontrado (404) ou o app abriu sem internet: a versão
+        guardada pode ser velha. Consulta de novo (sem exagero)."""
+        with self._trava:
+            if time.time() - self._t_descoberta < REDESCOBRIR_S:
+                return
+            self._t_descoberta = time.time()
+        self._descobrir_versao()
 
     def _trabalhar(self):
         while True:
@@ -413,15 +427,27 @@ class FonteVetorial:
             pass
         try:
             dados = rede.baixar(self._url.format(z=z, x=x, y=y), timeout=20)
-        except Exception:
+        except Exception as e:
+            if isinstance(e, urllib.error.HTTPError) and e.code in (403, 404, 410):
+                url_velha = self._url
+                self._versao_saiu_do_ar()
+                if self._url != url_velha:
+                    try:
+                        dados = rede.baixar(self._url.format(z=z, x=x, y=y), timeout=20)
+                        return self._gravar(caminho, dados)
+                    except Exception:
+                        pass
             try:  # sem internet: o velho do disco serve
                 with open(caminho, "rb") as f:
                     return f.read()
             except OSError:
                 return None
+        return self._gravar(caminho, dados)
+
+    def _gravar(self, caminho, dados):
         try:
             os.makedirs(os.path.dirname(caminho), exist_ok=True)
-            temporario = caminho + ".tmp"
+            temporario = "%s.%d.tmp" % (caminho, threading.get_ident())
             with open(temporario, "wb") as f:
                 f.write(dados)
             os.replace(temporario, caminho)

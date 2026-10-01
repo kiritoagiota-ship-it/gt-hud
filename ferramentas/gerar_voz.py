@@ -2,7 +2,8 @@
 
 Roda no PC com o Kokoro já instalado para o TraveteFocus (fica fora do APK):
   C:\\Users\\kirit\\travetefocus\\ferramentas\\voz\\venv\\Scripts\\python.exe ferramentas\\gerar_voz.py B
-  (com AMOSTRAS <pasta> no lugar do B: grava uma amostra de cada voz para comparar)
+  (com AMOSTRAS <pasta> no lugar do B: grava uma amostra de cada voz para comparar;
+  com "B novas": grava só as falas que ainda não têm arquivo)
 
 A letra escolhe a voz (amostras mandadas ao dono em 30/09/2026):
   A = pm_alex (brasileira)
@@ -115,8 +116,12 @@ def main():
     for velho in os.listdir(SAIDA):
         if velho.endswith(".wav") and velho[:-4] not in FALAS:
             os.remove(os.path.join(SAIDA, velho))
+    so_novas = len(sys.argv) > 2 and sys.argv[2].lower() == "novas"
     total = 0.0
     for chave, texto in FALAS.items():
+        if so_novas and os.path.exists(os.path.join(SAIDA, chave + ".wav")):
+            continue
+        print("gravando", chave)
         audio = gerar_fala(k, estilo, texto)
         sf.write(os.path.join(SAIDA, chave + ".wav"), audio.astype(np.float32), TAXA,
                  subtype="PCM_16")

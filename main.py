@@ -40,6 +40,7 @@ VIBRA_TEMPOS = [0, 250, 150, 250]  # dois pulsos fortes: dá para sentir no guid
 VIBRA_FORCAS = [0, 255, 0, 255]
 
 RUMO_MIN_KMH = 3.0          # parado, o rumo do GPS é ruído: fica o último
+RUMO_VALIDO_S = 6.0         # rumo mais velho que isso não vai no pedido de rota
 GPS_PERDIDO_FALA_S = 10     # navegando sem sinal por isso: o assistente avisa
 RECALCULO_ESPERA_S = 12     # depois de falhar, espera antes de tentar de novo
 MAX_RECENTES = 8
@@ -78,6 +79,7 @@ class GTHudApp(App):
 
         self.posicao = None          # (lat, lon) da última leitura boa
         self.rumo = None             # direção do movimento (graus) quando andando
+        self._t_rumo = -RUMO_VALIDO_S
         self.nav = None              # Navegacao durante a navegação
         self.estado_nav = None       # o que a navegação mostra na tela
         self.rota_previa = None
@@ -114,6 +116,7 @@ class GTHudApp(App):
     def on_resume(self):
         self.aplicar_tela_ligada()
         self.aplicar_orientacao()
+        self.sm.get_screen("mapa").mapa.ao_voltar()
 
     def on_stop(self):
         self.salvar_viagem_atual()  # não perde a viagem se o app fechar
@@ -173,10 +176,11 @@ class GTHudApp(App):
         return time.monotonic() - max(self._t_valida, self._t_gps_inicio)
 
     def resumo_gps(self):
-        """(cor, texto) curtos do GPS para o canto do mapa."""
+        """(cor, texto) curtos do GPS para o canto do mapa (cabe ao lado do
+        menu: no máximo ~15 letras por linha)."""
         sat = self.gps.satelites()
         if self.gps_desligado:
-            return tema.VERMELHO, "Localizacao do\ncelular desligada"
+            return tema.VERMELHO, "GPS do celular\ndesligado"
         if self.gps.modo == "SIM":
             return tema.LARANJA, "Simulador  %d m" % (self.precisao or 0)
         if self.sinal_ok():
@@ -184,14 +188,23 @@ class GTHudApp(App):
             texto = "GPS  %d m" % prec + ("\n%d satelites" % sat[1] if sat and sat[1] else "")
             return (tema.VERDE if prec <= 10 else tema.LARANJA), texto
         if self.sinal_fraco():
-            return tema.LARANJA, "Sinal fraco: %d m" % (self.precisao_ultima or 0)
-        texto = "Sem sinal do GPS" if self.ja_teve_sinal else "Buscando GPS"
+            return tema.LARANJA, "Sinal fraco\n%d m" % (self.precisao_ultima or 0)
+        texto = "Sem sinal" if self.ja_teve_sinal else "Buscando GPS"
         if sat and sat[0]:
-            texto += "\n%d vistos, %d em uso" % sat
+            texto += "\n%d de %d satelites" % (sat[1], sat[0])
         return (tema.VERMELHO if self.ja_teve_sinal else tema.LARANJA), texto
+
+    @property
+    def recalculando(self):
+        return self._recalculando
 
     def rumo_para_mapa(self):
         return self.rumo
+
+    def rumo_recente(self):
+        """Rumo só se estava andando agora há pouco. Para a rota: um rumo
+        velho (parou, virou a bike) faria a rota começar com meia-volta."""
+        return self.rumo if time.monotonic() - self._t_rumo <= RUMO_VALIDO_S else None
 
     def _ao_receber_gps(self, d):
         self.gps_desligado = False
@@ -212,6 +225,7 @@ class GTHudApp(App):
         self.posicao = (d["lat"], d["lon"])
         if d.get("bearing") is not None and vel >= RUMO_MIN_KMH:
             self.rumo = d["bearing"]
+            self._t_rumo = agora
         if not self._saudou:
             self._saudou = True
             self.voz.falar(["bem_vindo"], P_INFO)
@@ -266,7 +280,7 @@ class GTHudApp(App):
         if self.posicao is None:
             tela.previa_erro("Esperando o sinal do GPS para calcular a rota.")
             return
-        origem, rumo = self.posicao, self.rumo
+        origem, rumo = self.posicao, self.rumo_recente()
         rede.em_segundo_plano(
             lambda: rotas.pedir_rota(origem, (lugar["lat"], lugar["lon"]), rumo, lugar["nome"]),
             self._rota_pronta, self._rota_falhou)
@@ -280,8 +294,13 @@ class GTHudApp(App):
     def _rota_falhou(self, erro):
         if self.destino is None:
             return
-        self.sm.get_screen("mapa").previa_erro("Nao consegui calcular a rota. Confira a internet.")
-        self.voz.falar(["sem_internet"], P_INFO)
+        tela = self.sm.get_screen("mapa")
+        if isinstance(erro, rotas.SemRota):
+            tela.previa_erro(str(erro))
+            self.voz.falar(["sem_rota"], P_INFO)
+        else:
+            tela.previa_erro("Nao consegui calcular a rota. Confira a internet.")
+            self.voz.falar(["sem_internet"], P_INFO)
 
     def cancelar_previa(self):
         self.rota_previa = None
@@ -331,7 +350,7 @@ class GTHudApp(App):
             return
         self._recalculando = True
         self.voz.falar(["recalculando"], 2)
-        origem, rumo, destino = self.posicao, self.rumo, self.destino
+        origem, rumo, destino = self.posicao, self.rumo_recente(), self.destino
         rede.em_segundo_plano(
             lambda: rotas.pedir_rota(origem, (destino["lat"], destino["lon"]), rumo, destino["nome"]),
             self._recalculou, self._recalculo_falhou)
@@ -349,7 +368,10 @@ class GTHudApp(App):
         self._t_falha_recalculo = time.monotonic()
         if self.nav is not None:
             self.nav.desistir_de_recalcular()
-            self.voz.falar(["sem_internet"], P_INFO)
+            # sem caminho a partir daqui (ex.: dentro de um parque): não é falta
+            # de internet; o "recalculando" já foi dito, tenta de novo depois
+            if not isinstance(erro, rotas.SemRota):
+                self.voz.falar(["sem_internet"], P_INFO)
 
     # --- destinos recentes ----------------------------------------------------
     def _ler_recentes(self):

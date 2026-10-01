@@ -4,6 +4,7 @@ import json
 import os
 
 from kivy.app import App
+from kivy.clock import Clock
 from kivy.metrics import dp
 from kivy.uix.boxlayout import BoxLayout
 from kivy.uix.gridlayout import GridLayout
@@ -29,6 +30,7 @@ class Linha(BoxLayout):
         textos.add_widget(Texto(text=explicacao, font_size=tema.T_ROTULO, color=tema.CIANO_FRACO))
         self.add_widget(textos)
         self.add_widget(controle)
+        self.explicacao = textos.children[0]
 
 
 class Seletor(BoxLayout):
@@ -94,9 +96,8 @@ class TelaConfig(Screen):
                                self._centralizar(self.alt_voz)))
 
         self.sel_qual_voz = Seletor("%s", self._mudar_qual_voz)
-        lista.add_widget(Linha("Qual voz",
-                               "Vozes do seu celular. Escolha a mais parecida com o Jarvis.",
-                               self.sel_qual_voz))
+        self.linha_qual_voz = Linha("Qual voz", "", self.sel_qual_voz)
+        lista.add_widget(self.linha_qual_voz)
 
         self.sel_tom = Seletor("%.2f", self._mudar_tom)
         lista.add_widget(Linha("Tom da voz",
@@ -203,14 +204,28 @@ class TelaConfig(Screen):
             app.voz.calar()
         self.alt_voz.mostrar(ligado)
 
-    def _mostrar_qual_voz(self):
+    def _mostrar_qual_voz(self, *a):
         app = App.get_running_app()
-        n = len(app.voz.nomes_vozes())
+        estado = app.voz.estado_motor()
+        nomes = app.voz.nomes_vozes()
+        n = len(nomes)
         i = app.ajustes["voz_indice"]
-        if n == 0:
+        if estado == "iniciando":
+            self.sel_qual_voz.mostrar("...")
+            explicacao = "Ligando o motor de voz do celular..."
+            if self.manager is not None and self.manager.current == self.name:
+                Clock.schedule_once(self._mostrar_qual_voz, 0.5)
+        elif estado == "sem":
             self.sel_qual_voz.mostrar("gravada")
+            explicacao = "Sem voz em portugues no celular: usando a voz gravada do app."
+        elif n == 0 or i < 0 or i >= n:
+            self.sel_qual_voz.mostrar("padrao")
+            explicacao = ("Voz padrao do celular. Toque em + para ouvir as outras (%d)." % n
+                          if n else "Voz padrao do celular.")
         else:
-            self.sel_qual_voz.mostrar("padrao" if i < 0 or i >= n else "%d de %d" % (i + 1, n))
+            self.sel_qual_voz.mostrar("%d de %d" % (i + 1, n))
+            explicacao = "Voz: %s" % nomes[i]
+        self.linha_qual_voz.explicacao.text = explicacao
 
     def _mudar_qual_voz(self, d):
         app = App.get_running_app()

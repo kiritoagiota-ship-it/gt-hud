@@ -137,11 +137,24 @@ class Navegacao:
             if chegada:
                 return  # a própria chegada já é anunciada
             pedacos = [chave] if falta < 40 else ["em_%d" % falas.distancia_falada(falta), chave]
-            self.falar(pedacos, P_MANOBRA)
+            self.falar(pedacos + self._logo_depois(n), P_MANOBRA)
         elif (AVISO_LONGE_M[0] < falta <= AVISO_LONGE_M[1]
               and (n, "longe") not in self._faladas):
             self._faladas.add((n, "longe"))
-            self.falar(["em_%d" % falas.distancia_falada(falta), chave], P_AVISO)
+            self.falar(["em_%d" % falas.distancia_falada(falta), chave] + self._logo_depois(n),
+                       P_AVISO)
+
+    def _logo_depois(self, n):
+        """Curva colada na próxima (como o Waze): "... E logo depois, vire à
+        esquerda." Ela ainda ganha o próprio aviso na hora."""
+        manobras = self.rota.manobras
+        if n + 1 >= len(manobras):
+            return []
+        seguinte = manobras[n + 1]
+        if seguinte["dist_m"] - manobras[n]["dist_m"] >= DEPOIS_M:
+            return []
+        self._faladas.add((n + 1, "longe"))
+        return ["logo_depois", falas.chave_manobra(seguinte["acao"], seguinte.get("saida"))]
 
     def _avisar_subidas(self):
         atual = None

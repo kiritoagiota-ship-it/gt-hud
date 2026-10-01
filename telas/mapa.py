@@ -12,10 +12,12 @@ widget escondido sai do layout, para não roubar o toque do mapa.
 """
 from kivy.app import App
 from kivy.clock import Clock
-from kivy.graphics import Color, Ellipse, Line
+from kivy.graphics import Color, Ellipse, Line, RoundedRectangle
 from kivy.metrics import dp, sp
+from kivy.properties import NumericProperty
 from kivy.uix.boxlayout import BoxLayout
 from kivy.uix.floatlayout import FloatLayout
+from kivy.uix.label import Label
 from kivy.uix.screenmanager import Screen
 from kivy.uix.widget import Widget
 
@@ -55,6 +57,52 @@ class DiscoVelocimetro(Widget):
             Line(ellipse=(self.x, self.y, self.width, self.height), width=dp(1.2))
 
 
+class ChipStatus(BoxLayout):
+    """Bolinha + texto do GPS num fundo escuro do tamanho do texto (direto
+    sobre o mapa, o texto se misturava com ruas e nomes). Não passa de
+    `largura_max` (os botões do menu ficam ao lado): se o texto não cabe,
+    quebra a linha e o chip cresce para baixo, com o topo em `topo_alvo`."""
+    largura_max = NumericProperty(dp(400))
+    topo_alvo = NumericProperty(0)
+
+    def __init__(self, **kw):
+        kw.setdefault("size_hint", (None, None))
+        kw.setdefault("spacing", dp(6))
+        kw.setdefault("padding", (dp(8), dp(4)))
+        super().__init__(**kw)
+        self.ponto = Ponto(pos_hint={"center_y": 0.5})
+        self.lbl = Label(text="Buscando GPS", font_size=tema.T_ROTULO + 1, color=tema.BRANCO,
+                         size_hint_x=None, halign="left", valign="middle")
+        self.add_widget(self.ponto)
+        self.add_widget(self.lbl)
+        with self.canvas.before:
+            Color(*tema.com_alfa(tema.FUNDO, 0.8))
+            self._fundo = RoundedRectangle(radius=[dp(10)])
+        self.lbl.bind(texture_size=self._ajustar, text=self._medir_de_novo)
+        self.bind(pos=self._d, size=self._d, largura_max=self._medir_de_novo,
+                  topo_alvo=self._ajustar)
+        self._ajustar()
+
+    def _medir_de_novo(self, *a):
+        self.lbl.text_size = (None, None)  # tamanho natural; _ajustar decide se quebra
+        self._ajustar()
+
+    def _ajustar(self, *a):
+        fixo = self.padding[0] + self.padding[2] + self.ponto.width + self.spacing
+        livre = max(dp(40), self.largura_max - fixo)
+        w, h = self.lbl.texture_size
+        if self.lbl.text_size[0] is None and w > livre:
+            self.lbl.text_size = (livre, None)  # quebra a linha (volta aqui com a textura nova)
+            return
+        self.lbl.width = min(w, livre)
+        self.width = fixo + self.lbl.width
+        self.height = max(dp(40), h + self.padding[1] + self.padding[3])
+        self.y = self.topo_alvo - self.height
+
+    def _d(self, *a):
+        self._fundo.pos, self._fundo.size = self.pos, self.size
+
+
 class Coluna(BoxLayout):
     """Número grande com rótulo pequeno embaixo (barras de baixo)."""
 
@@ -89,11 +137,8 @@ class TelaMapa(Screen):
         # --- livre: busca, status do GPS e menu ---
         self.busca = BotaoHUD(text="Para onde, senhor?", destaque=True, size_hint=(None, None),
                               on_release=lambda *a: app.abrir("busca"))
-        self.status = BoxLayout(size_hint=(None, None), spacing=dp(8))
-        self.ponto = Ponto(pos_hint={"center_y": 0.5})
-        self.lbl_gps = Texto(text="Buscando GPS", font_size=tema.T_ROTULO + 1, color=tema.BRANCO)
-        self.status.add_widget(self.ponto)
-        self.status.add_widget(self.lbl_gps)
+        self.status = ChipStatus()
+        self.ponto, self.lbl_gps = self.status.ponto, self.status.lbl
         self.menu = BoxLayout(size_hint=(None, None), spacing=dp(6))
         for texto, tela in (("Painel", "hud"), ("Viagens", "viagens"), ("Ajustes", "config")):
             self.menu.add_widget(BotaoHUD(text=texto, font_size=tema.T_ROTULO + 1, opaco=True,
@@ -302,10 +347,11 @@ class TelaMapa(Screen):
         # topo
         larg_topo = min(W - 2 * m, dp(480))
         self.busca.pos, self.busca.size = (m, topo - dp(54)), (larg_topo, dp(54))
-        larg_menu = 3 * dp(80) + 2 * dp(6)
+        larg_menu = 3 * dp(74) + 2 * dp(6)
         self.menu.pos, self.menu.size = (W - m - larg_menu, topo - dp(54) - m - dp(40)), (larg_menu, dp(40))
-        self.status.size = (max(dp(120), W - 3 * m - larg_menu), dp(40))
-        self.status.pos = (m, topo - dp(54) - m - dp(40))
+        self.status.x = m
+        self.status.topo_alvo = topo - dp(54) - m
+        self.status.largura_max = W - 3 * m - larg_menu
         self.faixa.pos, self.faixa.size = (m, topo - dp(132)), (larg_topo, dp(132))
         self.depois.pos, self.depois.size = (m, topo - dp(132) - dp(6) - dp(38)), (dp(118), dp(38))
         larg_chip = min(larg_topo, dp(330))
@@ -314,7 +360,8 @@ class TelaMapa(Screen):
             y_chip -= dp(44)
         self.chip_subida.pos, self.chip_subida.size = (m, y_chip), (larg_chip, dp(44))
         if self.estado == PREVIA:
-            self.status.pos = (m, topo - dp(40))
+            self.status.topo_alvo = topo
+            self.status.largura_max = W - 2 * m
 
         # prévia
         larg_card = min(W - 2 * m, dp(480))
@@ -339,6 +386,9 @@ class TelaMapa(Screen):
             self.lbl_msg.size = (W - tam_velo - 3 * m - dp(60), dp(44))
         # crédito do OpenStreetMap: à esquerda da coluna de botões (não por baixo dela)
         self.mapa.credito_margem = (W - x_btn + m, base + dp(2) if self.estado != PREVIA else m)
+        # nomes do mapa não vão para baixo dos painéis (ficavam escondidos)
+        self.mapa.areas_cobertas = [(w.x, w.y, w.right, w.top) for w in self.raiz.children
+                                    if w is not self.mapa and w is not self.lbl_msg]
         self.mapa._aplicar()
 
     # --- viagem (modo livre) --------------------------------------------------------
@@ -437,7 +487,8 @@ class TelaMapa(Screen):
             self.lbl_instr.text = texto_manobra(m["acao"], m.get("saida"))
             self.lbl_rua.text = m["ruas"] or ""
         if e["fora_da_rota"]:
-            self.lbl_instr.text = "Fora da rota: recalculando..."
+            app = App.get_running_app()
+            self.lbl_instr.text = "Recalculando a rota..." if app.recalculando else "Fora da rota"
         self.col_tempo_nav.valor.text = fmt_duracao(e["restante_s"])
         self.col_tempo_nav.rotulo.text = "chegada %s" % fmt_hora_chegada(e["restante_s"])
         self.col_falta.valor.text = fmt_dist_nav(e["restante_m"])

@@ -7,9 +7,15 @@ longo da rota; é dela que saem as subidas.
 """
 import json
 import math
+import urllib.error
 import urllib.parse
 
 import rede
+
+
+class SemRota(Exception):
+    """O servidor respondeu, mas não há caminho de bike até lá (não é falta
+    de internet)."""
 
 VALHALLA = "https://valhalla1.openstreetmap.de/route"
 ELEVACAO_PASSO_M = 30
@@ -153,4 +159,16 @@ def pedir_rota(origem, destino, rumo=None, destino_nome=""):
         "elevation_interval": ELEVACAO_PASSO_M,
     }
     url = VALHALLA + "?json=" + urllib.parse.quote(json.dumps(pedido))
-    return Rota.do_valhalla(rede.baixar_json(url, timeout=25), destino_nome)
+    try:
+        dados = rede.baixar_json(url, timeout=25)
+    except urllib.error.HTTPError as e:
+        if e.code == 400:  # ex.: "No path could be found for input" (erro 442)
+            try:
+                codigo = json.loads(e.read().decode("utf-8")).get("error_code")
+            except ValueError:
+                codigo = None
+            if codigo == 154:
+                raise SemRota("Longe demais: rota de bike vai ate 150 km.")
+            raise SemRota("Nao achei um caminho de bike ate esse lugar.")
+        raise
+    return Rota.do_valhalla(dados, destino_nome)

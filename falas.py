@@ -58,6 +58,8 @@ FALAS.update({
     "gps_perdido": "perdi o sinal do GPS.",
     "gps_ok": "Sinal do GPS de volta.",
     "bem_vindo": "Sistemas online. Bem-vindo, senhor.",
+    "logo_depois": "E logo depois,",
+    "sem_rota": "Não encontrei um caminho de bike até esse destino.",
 })
 
 
@@ -65,20 +67,32 @@ def frase(pedacos):
     """Pedaços -> uma frase só, para o motor de voz do celular falar de uma
     vez (fluida), ex.: "Senhor, em duzentos metros, vire à direita." """
     partes = []
-    for i, p in enumerate(pedacos):
+    for p in pedacos:
         t = FALAS[p]
-        if i and t[:1].isupper() and not t.startswith("GPS"):
-            t = t[:1].lower() + t[1:]
+        if not partes or partes[-1].endswith("."):
+            t = t[:1].upper() + t[1:]      # começo de frase
+        elif not t.startswith("GPS"):
+            t = t[:1].lower() + t[1:]      # continuação: "Senhor, perdi o sinal..."
         partes.append(t)
-    texto = " ".join(partes)
-    return texto[:1].upper() + texto[1:]
+    return " ".join(partes)
 
 
 def resumo_rota(total_m, tempo_s, subida_m):
     """O que o assistente fala ao começar a navegação (só no motor do celular)."""
-    km = ("%.1f" % (total_m / 1000.0)).replace(".", ",").replace(",0", "")
+    if total_m < 950:
+        dist = "%d metros" % (int(round(total_m / 10.0)) * 10)
+    else:
+        km = ("%.1f" % (total_m / 1000.0)).replace(".", ",").replace(",0", "")
+        dist = "%s %s" % (km, "quilômetro" if km == "1" else "quilômetros")
     minutos = max(1, int(round(tempo_s / 60.0)))
-    texto = "Rota calculada, senhor. São %s quilômetros, cerca de %d minutos" % (km, minutos)
+    horas, resto = divmod(minutos, 60)
+    if not horas:
+        tempo = "%d %s" % (minutos, "minuto" if minutos == 1 else "minutos")
+    else:
+        tempo = "%d %s" % (horas, "hora" if horas == 1 else "horas")
+        if resto:
+            tempo += " e %d %s" % (resto, "minuto" if resto == 1 else "minutos")
+    texto = "Rota calculada, senhor: %s, cerca de %s" % (dist, tempo)
     if subida_m >= 15:
         texto += ", com %d metros de subida" % int(round(subida_m))
     return texto + ". Vamos lá."

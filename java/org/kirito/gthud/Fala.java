@@ -49,6 +49,10 @@ public class Fala {
     private static boolean tentouPadrao = false;
     private static int contador = 0;
     private static Object pedidoFoco;
+    // fala em andamento: o fim de uma fala antiga (cortada pelo parar()) não
+    // pode liberar a fila no meio da fala seguinte
+    private static volatile String falaAtual = "";
+    private static volatile AudioTrack trilhaAtual;
 
     public static void iniciar(Context c) {
         if (tts != null) {
@@ -132,16 +136,20 @@ public class Fala {
 
                 @Override
                 public void onDone(String id) {
+                    if (!id.equals(falaAtual)) {
+                        new File(ctx.getCacheDir(), id + ".wav").delete();  // fala já cortada
+                        return;
+                    }
                     if (id.startsWith("efeito")) {
                         tocarComEfeito(id);
                     } else {
-                        liberar();
+                        liberar(id);
                     }
                 }
 
                 @Override
                 public void onError(String id) {
-                    liberar();
+                    liberar(id);
                 }
             });
             boolean semIdioma = idioma == TextToSpeech.LANG_MISSING_DATA
@@ -173,33 +181,35 @@ public class Fala {
         if (estado != 1 || tts == null) {
             return false;
         }
+        contador++;
+        String id = (efeito ? "efeito" : "direto") + contador;
+        falaAtual = id;
         ocupada = true;
         try {
             tts.setPitch(tom);
             tts.setSpeechRate(ritmo);
             Bundle params = new Bundle();
-            contador++;
             if (efeito) {
-                String id = "efeito" + contador;
                 File arquivo = new File(ctx.getCacheDir(), id + ".wav");
                 if (tts.synthesizeToFile(texto, params, arquivo, id) == TextToSpeech.SUCCESS) {
                     return true;
                 }
             } else {
                 pegarFoco();
-                if (tts.speak(texto, TextToSpeech.QUEUE_FLUSH, params, "direto" + contador)
-                        == TextToSpeech.SUCCESS) {
+                if (tts.speak(texto, TextToSpeech.QUEUE_FLUSH, params, id) == TextToSpeech.SUCCESS) {
                     return true;
                 }
             }
         } catch (Exception e) {
             // cai no liberar abaixo
         }
-        liberar();
+        liberar(id);
         return false;
     }
 
+    /** Corta a fala atual (inclusive a que já está tocando com efeito). */
     public static void parar() {
+        falaAtual = "";
         try {
             if (tts != null) {
                 tts.stop();
@@ -207,7 +217,17 @@ public class Fala {
         } catch (Exception e) {
             // nada
         }
-        liberar();
+        AudioTrack trilha = trilhaAtual;
+        if (trilha != null) {
+            try {
+                trilha.pause();
+                trilha.flush();
+            } catch (Exception e) {
+                // já tinha terminado
+            }
+        }
+        soltarFoco();
+        ocupada = false;
     }
 
     // --- tratamento estilo assistente de IA -------------------------------------
@@ -219,14 +239,14 @@ public class Fala {
                 try {
                     int[] taxa = new int[1];
                     short[] pcm = lerWav(lerArquivo(arquivo), taxa);
-                    if (pcm != null && pcm.length > 0) {
-                        tocar(processar(pcm, taxa[0]), taxa[0]);
+                    if (pcm != null && pcm.length > 0 && id.equals(falaAtual)) {
+                        tocar(processar(pcm, taxa[0]), taxa[0], id);
                     }
                 } catch (Exception e) {
                     // sem efeito dessa vez: segue a vida
                 } finally {
                     arquivo.delete();
-                    liberar();
+                    liberar(id);
                 }
             }
         }).start();
@@ -376,7 +396,7 @@ public class Fala {
         return z;
     }
 
-    private static void tocar(float[] x, int taxa) throws InterruptedException {
+    private static void tocar(float[] x, int taxa, String id) throws InterruptedException {
         int silencio = taxa / 10;  // 0,1 s antes: o fone Bluetooth "come" o começo
         short[] pcm = new short[x.length + silencio];
         for (int k = 0; k < x.length; k++) {
@@ -392,13 +412,22 @@ public class Fala {
                 .setBufferSizeInBytes(pcm.length * 2)
                 .setTransferMode(AudioTrack.MODE_STATIC)
                 .build();
+        trilhaAtual = trilha;
         try {
             trilha.write(pcm, 0, pcm.length);
+            if (!id.equals(falaAtual)) {
+                return;  // cortada enquanto processava
+            }
             pegarFoco();
             trilha.play();
-            Thread.sleep(pcm.length * 1000L / taxa + 150);
+            // espera tocar, acordando a cada 50 ms para ver se foi cortada
+            long fim = System.currentTimeMillis() + pcm.length * 1000L / taxa + 150;
+            while (System.currentTimeMillis() < fim && id.equals(falaAtual)) {
+                Thread.sleep(50);
+            }
             trilha.stop();
         } finally {
+            trilhaAtual = null;
             trilha.release();
         }
     }
@@ -442,7 +471,12 @@ public class Fala {
         }
     }
 
-    private static void liberar() {
+    /** Fim da fala `id`: só libera se ela ainda for a atual. */
+    private static void liberar(String id) {
+        if (!id.equals(falaAtual)) {
+            return;
+        }
+        falaAtual = "";
         soltarFoco();
         ocupada = false;
     }
