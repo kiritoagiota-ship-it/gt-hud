@@ -656,34 +656,7 @@ class TelaMapa(Screen):
             aviso = Texto(text="Toda rota iniciada\né gravada sozinha", font_size=tema.T_ROTULO,
                           color=tema.CIANO_FRACO, halign="center")
             c.add_widget(aviso)
-        elif v.estado == Viagem.GRAVANDO:
-            c.add_widget(BotaoHUD(text="Pausar", font_size=tema.T_ROTULO + 2,
-                                  on_release=lambda *a: self._viagem("pausar")))
-            c.add_widget(BotaoHUD(text="Fim", cor=tema.LARANJA, font_size=tema.T_ROTULO + 2,
-                                  on_release=lambda *a: self._viagem("finalizar")))
-        else:
-            c.add_widget(BotaoHUD(text="Retomar", destaque=True, font_size=tema.T_ROTULO + 2,
-                                  on_release=lambda *a: self._viagem("retomar")))
-            c.add_widget(BotaoHUD(text="Fim", cor=tema.LARANJA, font_size=tema.T_ROTULO + 2,
-                                  on_release=lambda *a: self._viagem("finalizar")))
         self._estado_viagem = v.estado
-
-    def _viagem(self, acao):
-        app = App.get_running_app()
-        if acao == "pausar":
-            app.viagem.pausar()
-            self.mensagem("Viagem pausada", tema.LARANJA)
-        elif acao == "retomar":
-            app.viagem.retomar()
-            self.mensagem("Gravando viagem", tema.CIANO)
-        else:
-            if app.salvar_viagem_atual():
-                self.mensagem("Viagem salva: %s" % fmt_dist(app.ultima_salva_m))
-            else:
-                self.mensagem("Viagem com menos de 20 m: não foi salva", tema.LARANJA)
-            self.mapa.definir_trilha([])
-        self._montar_controles()
-        self._atualizar_viagem()
 
     def _atualizar_viagem(self):
         app = App.get_running_app()

@@ -310,7 +310,7 @@ def buscar(texto, perto=None, salvos=()):
         colado.update(fonte="colado", nota=100,
                       dist_m=distancia_m(perto, (colado["lat"], colado["lon"])) if perto else None)
         return [colado]
-    lugares = _salvos(texto, salvos) + _offline(texto)
+    lugares = buscar_local(texto, None, salvos, ordenar=False)
     chave = chaves.chave("google_places")
     if chave:
         try:
@@ -324,6 +324,17 @@ def buscar(texto, perto=None, salvos=()):
             print("[busca] Photon falhou:", e)
             if not lugares:
                 raise
+    return _ordenar(lugares, perto)
+
+
+def buscar_local(texto, perto=None, salvos=(), ordenar=True):
+    """Só o que está no celular (lugares salvos + base offline): rápido e sem
+    internet. É o que aparece ENQUANTO a pessoa digita."""
+    lugares = _salvos(texto, salvos) + _offline(texto)
+    return _ordenar(lugares, perto) if ordenar else lugares
+
+
+def _ordenar(lugares, perto):
     for lugar in lugares:
         lugar["dist_m"] = distancia_m(perto, (lugar["lat"], lugar["lon"])) if perto else None
     # melhor nota primeiro; entre parecidos, o mais perto (cada 1 km pesa 1 ponto)

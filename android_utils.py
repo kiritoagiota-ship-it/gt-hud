@@ -32,7 +32,30 @@ if NO_ANDROID:
     @run_on_ui_thread
     def _orientacao(deitada):
         _PythonActivity.mActivity.setRequestedOrientation(_DEITADA if deitada else _EM_PE)
+
+    @run_on_ui_thread
+    def _barras(cor, claro):
+        """Barra de status e de navegação do Android na cor do tema (com o
+        tema claro ficavam pretas em cima de uma tela branca)."""
+        try:
+            sdk = autoclass("android.os.Build$VERSION").SDK_INT
+            janela = _PythonActivity.mActivity.getWindow()
+            argb = (255 << 24) | (int(cor[0] * 255) << 16) | (int(cor[1] * 255) << 8) | int(cor[2] * 255)
+            if argb >= 1 << 31:
+                argb -= 1 << 32   # o Java quer um inteiro com sinal
+            janela.setStatusBarColor(argb)
+            janela.setNavigationBarColor(argb)
+            if sdk >= 23:
+                vista = janela.getDecorView()
+                marcas = vista.getSystemUiVisibility()
+                icones_escuros = 0x2000 | (0x10 if sdk >= 26 else 0)   # status + navegação
+                vista.setSystemUiVisibility(marcas | icones_escuros if claro else marcas & ~icones_escuros)
+        except Exception as e:
+            print("[tema] barras do sistema:", e)
 else:
+    def _barras(cor, claro):
+        pass
+
     def _flag_tela(ligar):
         pass
 
@@ -49,6 +72,10 @@ def manter_tela_ligada(ligar):
 
 def definir_orientacao(deitada):
     _orientacao(bool(deitada))
+
+
+def cores_do_sistema(cor_fundo, claro):
+    _barras(tuple(cor_fundo), bool(claro))
 
 
 _vibrador = None  # (vibrador, VibrationEffect ou None, versão do Android); False = sem

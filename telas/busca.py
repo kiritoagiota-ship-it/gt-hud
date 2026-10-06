@@ -1,6 +1,12 @@
-"""Busca de destino: digita, toca em Buscar, escolhe o lugar. Sem texto,
-mostra os lugares salvos (com botão de apagar) e os destinos recentes."""
+"""Busca de destino. Enquanto a pessoa digita, já aparecem os lugares do
+celular (salvos + base offline de Goiânia); "Buscar" (ou Enter) procura
+também na internet (ruas, links colados). Sem texto, mostra os lugares
+salvos (com botão de apagar) e os destinos recentes.
+
+Em cima, dois atalhos de um toque: Casa e Trabalho. Vazio, o toque define;
+definido, o toque já traça a rota; segurar o dedo troca ou apaga."""
 from kivy.app import App
+from kivy.clock import Clock
 from kivy.metrics import dp
 from kivy.uix.boxlayout import BoxLayout
 from kivy.uix.gridlayout import GridLayout
@@ -13,13 +19,22 @@ import rede
 import tema
 from util import fmt_dist_nav
 from widgets.botao import BotaoHUD
-from widgets.comuns import Cabecalho, ItemViagem, Texto, pedir_nome
+from widgets.comuns import Cabecalho, ItemViagem, Texto, escolher, pedir_nome
+
+DIGITANDO_ESPERA_S = 0.25   # parou de digitar por isso: busca no celular
+SEGURAR_S = 0.6             # dedo parado no atalho: trocar/apagar
+ATALHOS = (("casa", "Casa"), ("trabalho", "Trabalho"))
 
 
 class TelaBusca(Screen):
     def __init__(self, **kw):
         super().__init__(**kw)
         self._buscando = False
+        self._pedido = 0            # cada busca tem um número: resposta velha é ignorada
+        self._ev_digitando = None
+        self._definindo = None      # "casa"/"trabalho": o próximo lugar tocado vira o atalho
+        self._ev_segurar = None
+        self._segurou = False
         raiz = BoxLayout(orientation="vertical", padding=tema.MARGEM, spacing=dp(10))
         raiz.add_widget(Cabecalho("Para onde, senhor?", self._voltar))
 
@@ -36,6 +51,18 @@ class TelaBusca(Screen):
                                   on_release=lambda *a: self._buscar()))
         raiz.add_widget(linha)
 
+        atalhos = BoxLayout(size_hint_y=None, height=dp(48), spacing=dp(8))
+        self.btn_atalho = {}
+        for chave, _ in ATALHOS:
+            b = BotaoHUD(text="", font_size=tema.T_ROTULO + 2, shorten=True, shorten_from="right")
+            b.bind(on_press=lambda w, c=chave: self._atalho_apertou(c),
+                   on_release=lambda w, c=chave: self._atalho_soltou(c),
+                   size=lambda w, s: setattr(w, "text_size", (s[0] - dp(16), None)))
+            b.halign = "center"
+            self.btn_atalho[chave] = b
+            atalhos.add_widget(b)
+        raiz.add_widget(atalhos)
+
         self.lbl_status = Texto(text="", font_size=tema.T_ROTULO + 1, color=tema.CIANO_FRACO,
                                 size_hint_y=None, height=dp(22))
         raiz.add_widget(self.lbl_status)
@@ -47,15 +74,113 @@ class TelaBusca(Screen):
         self.add_widget(raiz)
 
     def on_pre_enter(self, *a):
+        self._definindo = None
         self.campo.text = ""
+        self._pintar_atalhos()
         self._mostrar_recentes()
+
+    # --- atalhos Casa / Trabalho ---------------------------------------------------
+    def _pintar_atalhos(self):
+        guardados = App.get_running_app().ajustes["atalhos"]
+        for chave, nome in ATALHOS:
+            b = self.btn_atalho[chave]
+            definido = chave in guardados
+            b.text = nome if definido else "+ " + nome
+            b.destaque = self._definindo == chave
+            b.cor = tema.CIANO if definido or self._definindo == chave else tema.CIANO_FRACO
+
+    def _atalho_apertou(self, chave):
+        self._segurou = False
+        if self._ev_segurar is not None:
+            self._ev_segurar.cancel()
+        self._ev_segurar = Clock.schedule_once(lambda dt: self._atalho_segurado(chave), SEGURAR_S)
+
+    def _atalho_segurado(self, chave):
+        self._ev_segurar = None
+        self._segurou = True
+        if chave in App.get_running_app().ajustes["atalhos"]:
+            self._opcoes_atalho(chave)
+
+    def _atalho_soltou(self, chave):
+        if self._ev_segurar is not None:
+            self._ev_segurar.cancel()
+            self._ev_segurar = None
+        if self._segurou:
+            return
+        app = App.get_running_app()
+        lugar = app.ajustes["atalhos"].get(chave)
+        if lugar is None:
+            self._opcoes_atalho(chave)
+        else:
+            self.campo.focus = False
+            app.escolher_destino(dict(lugar, fonte="salvo"))
+
+    def _opcoes_atalho(self, chave):
+        app = App.get_running_app()
+        nome = dict(ATALHOS)[chave]
+        definido = chave in app.ajustes["atalhos"]
+        opcoes = []
+        if app.posicao is not None:
+            opcoes.append(("É aqui, onde estou agora", lambda: self._definir_aqui(chave)))
+        opcoes.append(("Escolher na busca", lambda: self._definir_pela_busca(chave)))
+        if definido:
+            opcoes.append(("Apagar", lambda: self._apagar_atalho(chave)))
+        opcoes.append(("Cancelar", None))
+        self.campo.focus = False
+        escolher(("Trocar " if definido else "Definir ") + nome, opcoes)
+
+    def _definir_aqui(self, chave):
+        app = App.get_running_app()
+        nome = dict(ATALHOS)[chave]
+        app.definir_atalho(chave, {"nome": nome, "endereco": "", "lat": app.posicao[0], "lon": app.posicao[1]})
+        self._pintar_atalhos()
+        self.lbl_status.text = "%s definida aqui. Toque nela para traçar a rota." % nome \
+            if chave == "casa" else "%s definido aqui. Toque nele para traçar a rota." % nome
+
+    def _definir_pela_busca(self, chave):
+        self._definindo = chave
+        self._pintar_atalhos()
+        self.lbl_status.text = "Busque e toque no lugar que é: %s" % dict(ATALHOS)[chave]
+        self.campo.focus = True
+
+    def _apagar_atalho(self, chave):
+        App.get_running_app().definir_atalho(chave, None)
+        self._pintar_atalhos()
 
     def on_enter(self, *a):
         self.campo.focus = True  # já abre o teclado
 
     def _texto_mudou(self):
-        if not self.campo.text.strip() and not self._buscando:
+        if self._ev_digitando is not None:
+            self._ev_digitando.cancel()
+            self._ev_digitando = None
+        texto = self.campo.text.strip()
+        if not texto:
+            self._pedido += 1          # resposta que ainda vier não vale mais
+            self._buscando = False
             self._mostrar_recentes()
+        elif len(texto) >= 3 and "http" not in texto:
+            # enquanto digita: só o que está no celular (rápido, sem internet)
+            self._ev_digitando = Clock.schedule_once(lambda dt: self._buscar_local(), DIGITANDO_ESPERA_S)
+
+    def _buscar_local(self):
+        self._ev_digitando = None
+        texto = self.campo.text.strip()
+        if len(texto) < 3 or self._buscando:
+            return
+        app = App.get_running_app()
+        self._pedido += 1
+        pedido, salvos, perto = self._pedido, list(app.salvos), app.posicao
+
+        def pronto(lugares):
+            if pedido != self._pedido:
+                return   # a pessoa já digitou mais
+            n = len(lugares)
+            self.lbl_status.text = ("%d no celular. Toque em Buscar para procurar também na internet." % n) \
+                if n else "Nada no celular com esse nome. Toque em Buscar para procurar na internet."
+            self._listar(lugares)
+        rede.em_segundo_plano(lambda: busca.buscar_local(texto, perto, salvos)[:busca.MAX_RESULTADOS],
+                              pronto, lambda e: None)
 
     def _mostrar_recentes(self):
         app = App.get_running_app()
@@ -102,28 +227,47 @@ class TelaBusca(Screen):
         texto = self.campo.text.strip()
         if len(texto) < 3 or self._buscando:
             return
+        if self._ev_digitando is not None:
+            self._ev_digitando.cancel()
+            self._ev_digitando = None
         app = App.get_running_app()
         self._buscando = True
+        self._pedido += 1
+        pedido = self._pedido
         self.lbl_status.text = "Buscando..."
-        self.lista.clear_widgets()
         salvos = list(app.salvos)
         rede.em_segundo_plano(lambda: busca.buscar(texto, app.posicao, salvos),
-                              self._resultados, self._falhou)
+                              lambda lugares: self._resultados(lugares, pedido),
+                              lambda erro: self._falhou(erro, pedido))
 
-    def _resultados(self, lugares):
+    def _resultados(self, lugares, pedido=None):
+        if pedido is not None and pedido != self._pedido:
+            return
         self._buscando = False
         n = len(lugares)
         self.lbl_status.text = ("%d %s" % (n, "resultado" if n == 1 else "resultados")) if n else \
             "Nada encontrado. Cole o Plus Code ou o link do Google Maps, ou segure o dedo no mapa e salve o ponto."
         self._listar(lugares)
 
-    def _falhou(self, erro):
+    def _falhou(self, erro, pedido=None):
+        if pedido is not None and pedido != self._pedido:
+            return
         self._buscando = False
+        self.lista.clear_widgets()
         self.lbl_status.text = "Nada na base offline e sem internet para buscar ruas."
 
     def _escolher(self, lugar):
         self.campo.focus = False
         app = App.get_running_app()
+        if self._definindo is not None:
+            # estava definindo Casa/Trabalho: este lugar vira o atalho (não traça rota)
+            chave, self._definindo = self._definindo, None
+            app.definir_atalho(chave, lugar)
+            self.campo.text = ""
+            self._pintar_atalhos()
+            self.lbl_status.text = "%s: %s. Toque no atalho para traçar a rota." % (
+                dict(ATALHOS)[chave], lugar["nome"])
+            return
         if lugar.get("fonte") != "colado":
             app.escolher_destino(lugar)
             return

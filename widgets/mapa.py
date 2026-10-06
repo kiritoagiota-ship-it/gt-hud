@@ -76,7 +76,8 @@ MAX_TEXTURAS_NOVAS = 8     # por escolha de nomes, no máximo tantos nomes novos
 ZOOM_LUGARES = 16.5
 CONF_POR_ZOOM = ((18.3, 0.75), (17.5, 0.86), (16.5, 0.94))   # (zoom mínimo, confiança mínima)
 MAX_CELULAS_LUGARES = 24
-ZOOM_SINAIS = 16.0         # fora da navegação, semáforos e lombadas a partir desse zoom
+# (16 enchia a tela de semáforos no centro da cidade, andando livre)
+ZOOM_SINAIS = 17.0         # fora da navegação, semáforos e lombadas a partir desse zoom
 MAX_SINAIS = 40
 
 

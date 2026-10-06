@@ -1,12 +1,14 @@
 """Configurações do usuário salvas em JSON."""
 import json
 import os
+import threading
 
 PADRAO = {
     "limite_kmh": 32,
     "alfa": 0.5,
     "firebase": "",          # endereço do banco do dono para a corrida ao vivo (ao_vivo.py)
     "corridas_abertas": [],  # [banco, código, senha] de corrida ao vivo ainda não encerrada no banco
+    "atalhos": {},           # {"casa": lugar, "trabalho": lugar}: destinos de um toque na busca
     "tema": "auto",          # "auto" (claro de dia, escuro à noite), "claro" ou "escuro"
     "ritmo": 1.0,   # tempo real do dono / tempo previsto pelo servidor de rotas (ritmo.py)
     "tela_ligada": True,
@@ -33,6 +35,7 @@ class Ajustes:
     def __init__(self, pasta):
         os.makedirs(pasta, exist_ok=True)
         self.caminho = os.path.join(pasta, "ajustes.json")
+        self._trava = threading.Lock()
         self.dados = dict(PADRAO)
         try:
             with open(self.caminho, "r") as f:
@@ -48,5 +51,15 @@ class Ajustes:
         self.salvar()
 
     def salvar(self):
-        with open(self.caminho, "w") as f:
-            json.dump(self.dados, f)
+        """Grava num arquivo ao lado e troca de uma vez: se o app for morto no
+        meio, o arquivo antigo continua inteiro (antes podia ficar pela
+        metade e TODOS os ajustes voltavam ao padrão). Com trava: a thread de
+        segundo plano também grava (ritmo, corrida ao vivo)."""
+        with self._trava:
+            temporario = self.caminho + ".tmp"
+            try:
+                with open(temporario, "w") as f:
+                    json.dump(self.dados, f)
+                os.replace(temporario, self.caminho)
+            except OSError as e:
+                print("[ajustes] nao consegui gravar:", e)

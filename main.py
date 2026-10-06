@@ -185,6 +185,8 @@ class GTHudApp(App):
         tema.aplicar(nome)
         mapa_vetor.aplicar_tema(tema.claro())
         Window.clearcolor = tema.FUNDO
+        android_utils.cores_do_sistema(tema.FUNDO, tema.claro())
+        mapa_velho.fonte.fechar()
         self._ouvintes = []
         self.sm = self._montar_telas(atual)
         Window.remove_widget(velha)
@@ -250,6 +252,7 @@ class GTHudApp(App):
             return "de teste (PC)"
 
     def on_start(self):
+        android_utils.cores_do_sistema(tema.FUNDO, tema.claro())
         self.aplicar_tela_ligada()
         self.aplicar_orientacao()
         self.solicitar_gps()
@@ -660,6 +663,16 @@ class GTHudApp(App):
         self.salvos = [s for s in self.salvos if s["nome"] != nome and not self.mesmo_lugar(s, novo)]
         self.salvos.insert(0, novo)
         self._gravar_json(self._caminho_salvos, self.salvos)
+
+    def definir_atalho(self, qual, lugar):
+        """qual: "casa" ou "trabalho"; lugar None apaga."""
+        atalhos = dict(self.ajustes["atalhos"])
+        if lugar is None:
+            atalhos.pop(qual, None)
+        else:
+            atalhos[qual] = {"nome": lugar["nome"], "endereco": lugar.get("endereco", ""),
+                             "lat": lugar["lat"], "lon": lugar["lon"]}
+        self.ajustes["atalhos"] = atalhos
 
     @staticmethod
     def mesmo_lugar(a, b):

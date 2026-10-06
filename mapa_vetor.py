@@ -648,6 +648,7 @@ class FonteVetorial:
         self._falhas = {}
         self._trava = threading.Lock()
         self._aviso = threading.Condition(self._trava)
+        self._fechada = False
         threading.Thread(target=self._descobrir_versao, daemon=True).start()
         for _ in range(TRABALHADORES):
             threading.Thread(target=self._trabalhar, daemon=True).start()
@@ -727,11 +728,23 @@ class FonteVetorial:
             self._t_descoberta = time.time()
         self._descobrir_versao()
 
+    def fechar(self):
+        """O mapa foi remontado (troca de tema): esta fonte para de trabalhar e
+        solta a memória dos tiles."""
+        with self._trava:
+            self._fechada = True
+            self._pedidos.clear()
+            self._aviso.notify_all()
+        self._prontos.clear()
+        self._decodificados.clear()
+
     def _trabalhar(self):
         while True:
             with self._trava:
-                while not self._pedidos:
+                while not self._pedidos and not self._fechada:
                     self._aviso.wait()
+                if self._fechada:
+                    return
                 chave = self._pedidos.pop()   # o mais recente (o que está na tela) primeiro
             try:
                 preparado = self._preparar(chave)

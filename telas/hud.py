@@ -200,38 +200,18 @@ class TelaHUD(Screen):
             # a viagem grava sozinha em toda rota iniciada (e só nelas)
             c.add_widget(Texto(text="Toda rota iniciada é gravada sozinha. Busque um destino no mapa.",
                                font_size=tema.T_ROTULO + 1, color=tema.CIANO_FRACO, halign="center"))
-        elif v.estado == Viagem.GRAVANDO:
-            c.add_widget(BotaoHUD(text="Pausar", on_release=lambda *a: self._pausar()))
-            c.add_widget(BotaoHUD(text="Finalizar", cor=tema.LARANJA,
-                                  on_release=lambda *a: self._finalizar()))
         else:
-            c.add_widget(BotaoHUD(text="Retomar", destaque=True,
-                                  on_release=lambda *a: self._retomar()))
-            c.add_widget(BotaoHUD(text="Finalizar", cor=tema.LARANJA,
-                                  on_release=lambda *a: self._finalizar()))
-
-    def _pausar(self):
-        App.get_running_app().viagem.pausar()
-        self._mensagem("Viagem pausada", tema.LARANJA)
-        self._montar_controles()
-        self._atualizar_numeros()  # acento do Tempo fica laranja na hora
-
-    def _retomar(self):
-        App.get_running_app().viagem.retomar()
-        self._mensagem("Gravando viagem", tema.CIANO)
-        self._montar_controles()
-        self._atualizar_numeros()
-
-    def _finalizar(self):
-        app = App.get_running_app()
-        vid = app.salvar_viagem_atual()
-        if vid:
-            self._mensagem("Viagem salva: %s" % fmt_dist(app.ultima_salva_m), tema.VERDE)
-        else:
-            # antes sumia calada: parecia que o botao nao tinha funcionado
-            self._mensagem("Viagem com menos de 20 m: não foi salva", tema.LARANJA)
-        self._montar_controles()
-        self._atualizar_numeros()
+            # sem Pausar/Finalizar na mão: a viagem é a rota. Ela pausa sozinha
+            # parada (se a pausa automática está ligada) e é salva ao chegar
+            # ou ao encerrar a rota no mapa. (Antes dava para "Finalizar" aqui
+            # no meio da rota e a viagem ficava cortada.)
+            pausada = v.estado == Viagem.PAUSADA
+            c.add_widget(Texto(text="Pausada: você está parado. Volta ao andar." if pausada
+                               else "Gravando esta rota. Salva sozinha ao chegar ou encerrar.",
+                               font_size=tema.T_ROTULO + 1, halign="center",
+                               color=tema.LARANJA if pausada else tema.CIANO_FRACO))
+            c.add_widget(BotaoHUD(text="Ver no mapa", size_hint_x=0.6,
+                                  on_release=lambda *a: self._ir("mapa")))
 
     def _mensagem(self, texto, cor):
         self.lbl_msg.text = texto

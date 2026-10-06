@@ -92,6 +92,70 @@ class Alternar(BotaoHUD):
         self.text = "Ligado" if ligado else "Desligado"
 
 
+# As opções, agrupadas (eram mais de 20 linhas soltas, na ordem em que
+# foram sendo criadas): seção -> títulos das linhas, na ordem da tela.
+SECOES = [
+    ("Voz", ["Voz do assistente", "Qual voz", "Tom da voz", "Efeito de IA", "Testar a voz"]),
+    ("Navegação", ["Avisar subidas e descidas", "Avisar semáforos", "Continuar em segundo plano",
+                   "Bolha flutuante", "Corrida ao vivo"]),
+    ("Mapa e tela", ["Aparência", "Mapa gira com a direção", "Mapa offline de Goiânia",
+                     "Tela deitada", "Manter tela ligada"]),
+    ("Velocímetro e viagem", ["Alerta de velocidade", "Vibrar no limite", "Resposta do velocímetro",
+                              "Pausa automática"]),
+    ("Sistema", ["Diagnóstico", "Modo simulador"]),
+]
+
+
+class Secao(BoxLayout):
+    """Título de um grupo de opções: nome em destaque e um risco até a borda."""
+
+    def __init__(self, titulo, **kw):
+        kw.setdefault("size_hint_y", None)
+        kw.setdefault("height", dp(40))
+        kw.setdefault("padding", (0, dp(14), 0, 0))
+        super().__init__(**kw)
+        self.lbl = Label(text=titulo.upper(), font_size=tema.T_ROTULO, bold=True, color=tema.CIANO,
+                         size_hint_x=None, halign="left", valign="middle")
+        self.lbl.bind(texture_size=lambda l, t: setattr(l, "width", t[0] + dp(10)))
+        self.add_widget(self.lbl)
+        self.add_widget(Widget())
+        self.bind(pos=self._d, size=self._d)
+        self.lbl.bind(width=self._d)
+
+    def _d(self, *a):
+        from kivy.graphics import Color, Line
+        y = self.y + (self.height - dp(14)) / 2.0
+        self.canvas.after.clear()
+        with self.canvas.after:
+            Color(*tema.com_alfa(tema.CIANO, 0.35))
+            Line(points=[self.x + self.lbl.width + dp(4), y, self.right, y], width=dp(1))
+
+
+class _Coletor:
+    """Recebe as linhas na ordem do código e as põe na tela por seção."""
+
+    def __init__(self):
+        self.itens = []
+
+    def add_widget(self, w):
+        self.itens.append(w)
+
+    def arrumar(self, grade):
+        por_titulo = {w.titulo.text: w for w in self.itens if isinstance(w, Linha)}
+        postos = set()
+        for nome, titulos in SECOES:
+            linhas = [por_titulo[t] for t in titulos if t in por_titulo]
+            if not linhas:
+                continue
+            grade.add_widget(Secao(nome))
+            for w in linhas:
+                grade.add_widget(w)
+                postos.add(id(w))
+        for w in self.itens:   # o que não está em nenhuma seção (e o rodapé) vai no fim
+            if id(w) not in postos:
+                grade.add_widget(w)
+
+
 _NOMES_TEMA = {"auto": "Automático", "claro": "Claro", "escuro": "Escuro"}
 
 
@@ -107,10 +171,11 @@ class TelaConfig(Screen):
 
         # rolagem: as opções não cabem numa tela deitada (nem em celular pequeno)
         rolagem = ScrollView(do_scroll_x=False, bar_color=tema.CIANO, bar_width=dp(3))
-        lista = GridLayout(cols=1, size_hint_y=None, spacing=dp(4))
-        lista.bind(minimum_height=lista.setter("height"))
-        rolagem.add_widget(lista)
+        grade = GridLayout(cols=1, size_hint_y=None, spacing=dp(4))
+        grade.bind(minimum_height=grade.setter("height"))
+        rolagem.add_widget(grade)
         raiz.add_widget(rolagem)
+        lista = _Coletor()   # as linhas são criadas abaixo e arrumadas em seções no fim
 
         self.alt_voz = Alternar(self._mudar_voz)
         lista.add_widget(Linha("Voz do assistente",
@@ -228,6 +293,7 @@ class TelaConfig(Screen):
         self.lbl_versao = Texto(text="", font_size=tema.T_ROTULO, color=tema.CIANO_FRACO,
                                 halign="center", size_hint_y=None, height=dp(64))
         lista.add_widget(self.lbl_versao)
+        lista.arrumar(grade)
         self.add_widget(raiz)
 
     @staticmethod
