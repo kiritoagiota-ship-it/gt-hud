@@ -27,9 +27,10 @@ VIBRA_TOQUE_MS = 12
 VIBRA_TOQUE_FORCA = 70
 
 
-def degrade(base=0.72):
+def degrade(base=None):
     """Textura 1x32 de claro (em cima) para escuro (`base` = quanto sobra da
     cor embaixo): multiplicada pela cor do desenho, vira o degradê dela."""
+    base = tema.degrade_base if base is None else base
     tex = _degrade.get(base)
     if tex is None:
         n = 32
@@ -50,7 +51,7 @@ def _poligono(x, y, w, h, c):
             (x + w - c, y), (x, y), (x, y + h - c)]
 
 
-def malha_degrade(pts, y, h, base=0.72):
+def malha_degrade(pts, y, h, base=None):
     """Mesh do polígono com o degradê de cima a baixo."""
     vert = []
     for px, py in pts:

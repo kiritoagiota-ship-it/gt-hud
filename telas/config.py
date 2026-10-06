@@ -92,6 +92,9 @@ class Alternar(BotaoHUD):
         self.text = "Ligado" if ligado else "Desligado"
 
 
+_NOMES_TEMA = {"auto": "Automático", "claro": "Claro", "escuro": "Escuro"}
+
+
 def _versao():
     return App.get_running_app().versao()
 
@@ -210,6 +213,13 @@ class TelaConfig(Screen):
                                BotaoHUD(text="Enviar", size_hint_x=None, width=dp(130),
                                         on_release=lambda *a: self._enviar_diagnostico())))
 
+        self.btn_tema = BotaoHUD(text="", size_hint_x=None, width=dp(130),
+                                 on_release=lambda *a: self._mudar_tema())
+        lista.add_widget(Linha("Aparência",
+                               "Automático: tema claro de dia (lê melhor no sol) e escuro à "
+                               "noite, pelo nascer e pôr do sol. Toque para trocar.",
+                               self._centralizar(self.btn_tema)))
+
         self.alt_sim = Alternar(self._mudar_sim)
         lista.add_widget(Linha("Modo simulador",
                                "Usa GPS falso para testar o app parado.",
@@ -242,6 +252,7 @@ class TelaConfig(Screen):
         self.alt_tela.mostrar(aj["tela_ligada"])
         self.sel_alfa.mostrar(aj["alfa"])
         self.alt_sim.mostrar(aj["simulador"])
+        self.btn_tema.text = _NOMES_TEMA.get(aj["tema"], "Automático")
         self._mostrar_vivo()
         self.lbl_versao.text = ("GT-HUD versão %s\nMapa (c) OpenStreetMap, OpenFreeMap  |  "
                                 "Lugares (c) Overture Maps Foundation" % _versao())
@@ -451,6 +462,16 @@ class TelaConfig(Screen):
                                   lambda e: self._mostrar_vivo("Não consegui testar o banco."))
         pedir_nome(salvar, sugestao=app.ajustes["firebase"], titulo="Endereço do banco (Firebase)",
                    botao="Salvar e testar", dica="https://...firebaseio.com", limite=200)
+
+    def _mudar_tema(self):
+        app = App.get_running_app()
+        ordem = ["auto", "claro", "escuro"]
+        atual = app.ajustes["tema"] if app.ajustes["tema"] in ordem else "auto"
+        novo = ordem[(ordem.index(atual) + 1) % len(ordem)]
+        app.ajustes["tema"] = novo
+        self.btn_tema.text = _NOMES_TEMA[novo]
+        # (se o tema mudar, as telas são remontadas e esta deixa de existir)
+        Clock.schedule_once(lambda dt: app.conferir_tema(), 0.15)
 
     def _enviar_diagnostico(self):
         import diagnostico

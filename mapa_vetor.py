@@ -63,7 +63,7 @@ FATIA_S = 0.003
 PAUSA_S = 0.003
 
 # --- estilo (cores RGBA; larguras em dp no zoom 16) ---------------------------
-FUNDO = (0.016, 0.027, 0.043, 1)
+FUNDO = [0.016, 0.027, 0.043, 1]   # (lista: aplicar_tema troca o conteúdo no lugar)
 # (a ordem é a do desenho: o prédio fica por cima do terreno)
 AREAS = {
     "residencial": (0.030, 0.045, 0.062, 1),
@@ -73,6 +73,20 @@ AREAS = {
     "agua": (0.025, 0.115, 0.205, 1),
     "predio": (0.085, 0.118, 0.155, 1),
 }
+# Tema claro (dia): mapa de fundo cinza-claro com ruas brancas e avenidas
+# amarelas, como os mapas de papel; o escuro são os valores deste arquivo.
+_CLARO = {
+    "fundo": (0.865, 0.890, 0.910, 1),
+    "areas": {"residencial": (0.895, 0.915, 0.930, 1), "comercial": (0.945, 0.915, 0.865, 1),
+              "institucional": (0.870, 0.895, 0.955, 1), "verde": (0.740, 0.885, 0.770, 1),
+              "agua": (0.610, 0.790, 0.945, 1), "predio": (0.790, 0.820, 0.850, 1)},
+    "ruas": {"servico": (0.960, 0.968, 0.975, 1), "caminho": (0.800, 0.830, 0.850, 1),
+             "ciclovia": (0.150, 0.640, 0.420, 1), "rua": (1.0, 1.0, 1.0, 1),
+             "terciaria": (1.0, 1.0, 1.0, 1), "secundaria": (1.0, 0.955, 0.760, 1),
+             "primaria": (1.0, 0.880, 0.560, 1), "expressa": (0.980, 0.740, 0.360, 1)},
+    "setas": {"setas": (0.300, 0.360, 0.420, 0.80), "setas_escuras": (0.280, 0.250, 0.180, 0.80)},
+}
+_ESCURO = None   # guardado na primeira troca
 _USO_DO_SOLO = {
     "residential": "residencial", "suburb": "residencial", "neighbourhood": "residencial",
     "commercial": "comercial", "retail": "comercial",
@@ -199,16 +213,33 @@ def chave_nome(texto):
     return _sem_acento(texto.split(" · ")[0]).strip()
 
 
+def aplicar_tema(claro):
+    """Troca as cores do mapa (no lugar). Vale para os tiles preparados
+    DEPOIS: quem chama remonta o mapa."""
+    global _ESCURO
+    if _ESCURO is None:
+        _ESCURO = {"fundo": tuple(FUNDO), "areas": dict(AREAS),
+                   "ruas": {n: v[1] for n, v in RUAS.items()}, "setas": dict(SETAS)}
+    estilo = _CLARO if claro else _ESCURO
+    FUNDO[:] = estilo["fundo"]
+    AREAS.update(estilo["areas"])
+    SETAS.update(estilo["setas"])
+    for nome, (largura, _, zoom_min) in list(RUAS.items()):
+        RUAS[nome] = (largura, estilo["ruas"][nome], zoom_min)
+
+
 def cor_rua(nome, rz):
-    """De longe, ruas pequenas mais apagadas (senão viram uma teia que
-    compete com as avenidas e com a rota)."""
+    """De longe, ruas pequenas mais apagadas, puxadas para a cor do fundo
+    (senão viram uma teia que compete com as avenidas e com a rota)."""
     r, g, b, a = RUAS[nome][1]
+    f = 1.0
     if nome in ("rua", "servico", "caminho") and rz <= 14:
         f = 0.62 if rz <= 13 else 0.75
-        return (r * f, g * f, b * f, a)
-    if nome == "terciaria" and rz <= 13:
-        return (r * 0.7, g * 0.7, b * 0.7, a)
-    return RUAS[nome][1]
+    elif nome == "terciaria" and rz <= 13:
+        f = 0.7
+    if f == 1.0:
+        return RUAS[nome][1]
+    return (FUNDO[0] + (r - FUNDO[0]) * f, FUNDO[1] + (g - FUNDO[1]) * f, FUNDO[2] + (b - FUNDO[2]) * f, a)
 
 
 def z_dados(rz):

@@ -6,13 +6,13 @@ from kivy.graphics import Color, Line
 from kivy.metrics import dp
 from kivy.properties import NumericProperty
 from kivy.uix.boxlayout import BoxLayout
-from kivy.uix.label import Label
 from kivy.uix.screenmanager import Screen
 from kivy.uix.widget import Widget
 
 import tema
 from widgets.botao import BotaoHUD
 from widgets.comuns import Texto
+from widgets.intro import AnelBoot
 
 LINHAS = [
     "Nucleo do sistema ............ ok",
@@ -59,18 +59,13 @@ class TelaBoot(Screen):
         # em pé: marca em cima e informações embaixo; deitada: lado a lado
         self.raiz = BoxLayout(padding=dp(28), spacing=dp(10))
 
-        self.marca = BoxLayout(orientation="vertical", spacing=dp(10))
-        self._esp_cima = Widget(size_hint_y=0.6)
-        self.marca.add_widget(self._esp_cima)
-        self.titulo = Label(text="GT-HUD", font_size=dp(58), bold=True, color=tema.CIANO,
-                            size_hint_y=None, height=dp(80))
-        self.marca.add_widget(self.titulo)
+        # o "reator" de HUD com o nome no meio (widgets/intro.py) e o risco embaixo
+        self.marca = BoxLayout(orientation="vertical", spacing=dp(4))
+        self.anel = AnelBoot()
+        self.titulo = self.anel.titulo
+        self.marca.add_widget(self.anel)
         self.risco = RiscoBoot()
         self.marca.add_widget(self.risco)
-        self.marca.add_widget(Label(text="Ouxi GT20", font_size=tema.T_BOTAO,
-                                    color=tema.CIANO_FRACO, size_hint_y=None, height=dp(24)))
-        self._esp_baixo = Widget(size_hint_y=0.25)
-        self.marca.add_widget(self._esp_baixo)
 
         self.info = BoxLayout(orientation="vertical", spacing=dp(10))
         self.log = Texto(text="", font_size=tema.T_ROTULO + 1, color=tema.CIANO_FRACO,
@@ -98,23 +93,21 @@ class TelaBoot(Screen):
     def _organizar(self, *a):
         deitada = self.width > self.height
         self.raiz.orientation = "horizontal" if deitada else "vertical"
-        # deitada, o nome fica no meio da altura; em pé, um pouco acima
-        self._esp_cima.size_hint_y = 0.5 if deitada else 0.6
-        self._esp_baixo.size_hint_y = 0.5 if deitada else 0.25
+        self.marca.size_hint = (1, 1) if deitada else (1, 1.25)
 
     # --- sequência de boot -------------------------------------------------
     def on_enter(self, *a):
-        self.titulo.opacity = 0.0
-        Animation(opacity=1.0, d=0.6, t="out_quad").start(self.titulo)
+        self.anel.iniciar()
         self.risco.abrir()
         if not getattr(self, "_ouvindo", False):
             App.get_running_app().ouvir(self._ao_ler)
             self._ouvindo = True
-        self.titulo.opacity = 0
-        Clock.schedule_once(lambda dt: setattr(self.titulo, "opacity", 1), 0.15)
         self._linha = 0
         self.log.text = ""
         self._ev_log = Clock.schedule_interval(self._proxima_linha, 0.35)
+
+    def on_leave(self, *a):
+        self.anel.parar()   # a animação só roda com esta tela à vista
 
     def _proxima_linha(self, dt):
         if self._linha >= len(LINHAS):
@@ -181,6 +174,7 @@ class TelaBoot(Screen):
         prec = app.precisao or 0
         self.status.text = "Sinal adquirido: precisão %d m" % prec
         self.status.color = tema.VERDE
+        self.anel.concluir()   # tudo acende em verde e a onda se abre
         Clock.schedule_once(lambda dt: self._ir_para_mapa(), 0.9)
         self._saiu = True
 

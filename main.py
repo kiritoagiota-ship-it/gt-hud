@@ -14,6 +14,7 @@ from kivy.uix.screenmanager import NoTransition, ScreenManager
 import android_utils
 import diagnostico
 import goiania
+import mapa_vetor
 import rede
 import rota as rotas
 import tema
@@ -63,13 +64,17 @@ class GTHudApp(App):
     title = "GT-HUD"
 
     def build(self):
-        Window.clearcolor = tema.FUNDO
         Window.softinput_mode = "below_target"  # teclado não cobre o campo da busca
         Window.bind(on_keyboard=self._tecla)
 
         pasta = self.user_data_dir
         diagnostico.iniciar(pasta, self.versao())
         self.ajustes = Ajustes(pasta)
+        self.posicao = None
+        # tema ANTES de montar qualquer tela (claro de dia, escuro à noite)
+        tema.aplicar(self.tema_desejado())
+        mapa_vetor.aplicar_tema(tema.claro())
+        Window.clearcolor = tema.FUNDO
         self.banco = Banco(pasta)
         self.filtro = FiltroVelocidade(alfa=self.ajustes["alfa"])
         self.ritmo = Ritmo(self.ajustes["ritmo"])
@@ -89,6 +94,7 @@ class GTHudApp(App):
         self.aplicar_voz()
         Clock.schedule_once(self._voz_automatica, 1.0)
 
+        self.rumo = None
         self.precisao = None         # da última leitura boa (m)
         self.precisao_ultima = None  # da última leitura, boa ou não
         self._t_leitura = 0.0        # time.monotonic() da última leitura
@@ -122,19 +128,85 @@ class GTHudApp(App):
         self._caminho_salvos = os.path.join(pasta, "salvos.json")
         self.salvos = self._ler_json(self._caminho_salvos)
 
-        # sem animação de troca: o esmaecer desenhava o mapa 2x por quadro
-        # (pesado no celular) e a troca instantânea parece mais rápida
-        self.sm = ScreenManager(transition=NoTransition())
-        self.sm.add_widget(TelaBoot(name="boot"))
-        self.sm.add_widget(TelaMapa(name="mapa"))
-        self.sm.add_widget(TelaBusca(name="busca"))
-        self.sm.add_widget(TelaHUD(name="hud"))
-        self.sm.add_widget(TelaViagens(name="viagens"))
-        self.sm.add_widget(TelaDetalhe(name="detalhe"))
-        self.sm.add_widget(TelaConfig(name="config"))
+        self.sm = self._montar_telas("boot")
         Clock.schedule_interval(lambda dt: self.vigiar_gps(), 2.0)
+        Clock.schedule_interval(self.conferir_tema, 60.0)
         self.fundo = SegundoPlano(self)
         return self.sm
+
+    @staticmethod
+    def _montar_telas(primeira):
+        """Todas as telas num ScreenManager novo; `primeira` já fica à vista."""
+        # sem animação de troca: o esmaecer desenhava o mapa 2x por quadro
+        # (pesado no celular) e a troca instantânea parece mais rápida
+        sm = ScreenManager(transition=NoTransition())
+        telas = {"boot": TelaBoot, "mapa": TelaMapa, "busca": TelaBusca, "hud": TelaHUD,
+                 "viagens": TelaViagens, "detalhe": TelaDetalhe, "config": TelaConfig}
+        if primeira not in telas or primeira == "detalhe":   # o detalhe precisa de uma viagem aberta
+            primeira = "mapa"
+        sm.add_widget(telas[primeira](name=primeira))        # a 1ª adicionada é a que aparece
+        for nome, classe in telas.items():
+            if nome != primeira:
+                sm.add_widget(classe(name=nome))
+        return sm
+
+    # --- tema claro/escuro ------------------------------------------------------------
+    def tema_desejado(self):
+        """O tema que deveria estar valendo agora, pelos Ajustes e pela hora."""
+        escolha = self.ajustes["tema"]
+        if escolha in ("claro", "escuro"):
+            return escolha
+        lat, lon = self.posicao or goiania.CENTRO
+        return tema.modo_pela_hora(lat, lon)
+
+    def conferir_tema(self, dt=None):
+        """A cada minuto e ao voltar para o app: amanheceu ou anoiteceu?"""
+        desejado = self.tema_desejado()
+        if desejado == tema.modo or self.fundo.minimizado:
+            return
+        if self.sm.current == "mapa" and self.sm.get_screen("mapa").estado == "previa":
+            return  # escolhendo a rota: troca daqui a pouco, não no meio do toque
+        self.trocar_tema(desejado)
+
+    def trocar_tema(self, nome):
+        """Troca as cores e REMONTA as telas (o que já está desenhado não muda
+        sozinho), mantendo onde a pessoa estava: tela, mapa, rota e navegação."""
+        if nome == tema.modo:
+            return
+        velha = self.sm
+        atual = velha.current
+        mapa_velho = velha.get_screen("mapa").mapa
+        centro, zoom = mapa_velho.centro, mapa_velho.zoom
+        try:
+            velha.current_screen.dispatch("on_leave")   # para relógios e a animação do mapa
+            mapa_velho.pausar()
+        except Exception as e:
+            print("[tema] ao soltar as telas antigas:", e)
+        tema.aplicar(nome)
+        mapa_vetor.aplicar_tema(tema.claro())
+        Window.clearcolor = tema.FUNDO
+        self._ouvintes = []
+        self.sm = self._montar_telas(atual)
+        Window.remove_widget(velha)
+        Window.add_widget(self.sm)
+        self.root = self.sm
+        tela = self.sm.get_screen("mapa")
+        tela.mapa.centro, tela.mapa.zoom = centro, zoom
+        if self.nav is not None:
+            tela.modo_navegando(self.nav.rota)
+        if self.posicao is not None:
+            tela.mapa.mostrar_eu(self.posicao[0], self.posicao[1], self.rumo_para_mapa(), self.precisao, 0)
+        if self.sm.current == "boot":
+            if self.gps.ativo:
+                self.sm.get_screen("boot").aguardando_sinal()
+        elif self.sm.current != "mapa":
+            # a tela do mapa precisa ter entrado uma vez para se registrar no GPS
+            tela.on_pre_enter()
+            tela.on_leave()
+        gc.unfreeze()
+        gc.collect()   # as telas antigas saem da memória
+        gc.freeze()
+        print("[tema] agora:", nome)
 
     # --- voz -------------------------------------------------------------------
     def indice_voz(self):
@@ -202,6 +274,7 @@ class GTHudApp(App):
             self.sm.get_screen("config").on_pre_enter()
         self.aplicar_tela_ligada()
         self.aplicar_orientacao()
+        self.conferir_tema()
         self.sm.get_screen("mapa").mapa.ao_voltar()
 
     def on_stop(self):

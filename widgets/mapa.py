@@ -590,11 +590,13 @@ class MapaHUD(Widget):
                 ang = (ang + 90.0) % 180.0 - 90.0  # sempre de pé
                 ponto = None
             elif tipo == "lugar":
-                tex = self._textura(r["texto"], sp(15), (0.72, 0.84, 0.94, 1))
+                tex = self._textura(r["texto"], sp(15), tema.LUGAR)
                 ang, ponto = 0.0, None
             else:
                 ponto = CORES_POI.get(r.get("grupo"), CORES_POI["outros"])
-                clara = tuple(c + (1.0 - c) * 0.45 for c in ponto[:3]) + (1,)
+                if tema.claro():   # no mapa claro, as cores vivas precisam fechar para aparecer
+                    ponto = (ponto[0] * 0.70, ponto[1] * 0.70, ponto[2] * 0.70, 1)
+                clara = tema.misturar(ponto, tema.BRANCO, 0.45)   # o nome: a cor puxada para a do texto
                 tex = self._textura(r["texto"], sp(12.5), clara, negrito=r.get("grupo") == "praca")
                 ang = 0.0
             if tex is None:
