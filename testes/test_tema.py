@@ -1,4 +1,5 @@
 """Tema claro/escuro pelo horário e cores trocadas no lugar."""
+import datetime
 import time
 import unittest
 
@@ -7,7 +8,9 @@ import tema
 
 
 def hora(h, m=0, mes=10, dia=7):
-    return time.localtime(time.mktime((2026, mes, dia, h, m, 0, 0, 0, -1)))
+    """Hora de Brasília (UTC-3), seja qual for o fuso de quem roda o teste."""
+    dia_do_ano = datetime.date(2026, mes, dia).timetuple().tm_yday
+    return time.struct_time((2026, mes, dia, h, m, 0, 0, dia_do_ano, 0, "-03", -10800))
 
 
 class TesteTema(unittest.TestCase):
