@@ -631,6 +631,7 @@ class TelaMapa(Screen):
         app = App.get_running_app()
         if acao == "iniciar":
             app.viagem.iniciar()
+            app.viagem_mudou()
             self.mensagem("Gravando viagem", tema.CIANO)
         elif acao == "pausar":
             app.viagem.pausar()

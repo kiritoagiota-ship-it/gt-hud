@@ -183,11 +183,20 @@ def _sem_acento(texto):
 def categoria_poi(classe, subclasse, nome=""):
     """(grupo, legenda) do lugar; legenda "" se o nome já diz o que ele é."""
     grupo, legenda = _POI_CATEGORIA.get(classe, ("outros", ""))
-    legenda = _POI_SUBCLASSE.get(subclasse, legenda)
+    return grupo, legenda_se_precisa(nome, _POI_SUBCLASSE.get(subclasse, legenda))
+
+
+def legenda_se_precisa(nome, legenda):
+    """A legenda, ou "" se o nome já diz o que o lugar é."""
     limpo = _sem_acento(nome) + " "
     if legenda and any(p in limpo for p in _JA_DIZ.get(legenda, (_sem_acento(legenda),))):
-        legenda = ""
-    return grupo, legenda
+        return ""
+    return legenda
+
+
+def chave_nome(texto):
+    """Para não mostrar o mesmo lugar duas vezes (mapa + base da busca)."""
+    return _sem_acento(texto.split(" · ")[0]).strip()
 
 
 def cor_rua(nome, rz):

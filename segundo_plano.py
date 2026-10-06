@@ -19,7 +19,7 @@ import time
 
 import rede
 from falas import texto_manobra
-from util import fmt_dist_nav, fmt_duracao, fmt_hora_chegada
+from util import fmt_dist, fmt_dist_nav, fmt_duracao, fmt_hora_chegada, fmt_tempo
 
 INTERVALO_S = 0.2          # a thread confere o GPS 5x/s (o GPS manda 1x/s)
 AVISO_A_CADA_S = 2.0       # notificação/bolha: no máximo 1 atualização a cada isso
@@ -30,7 +30,14 @@ def textos(app):
     """(título da notificação, texto, linha 1 da bolha, linha 2 da bolha)."""
     nav, e = app.nav, app.estado_nav
     if nav is None:
-        return "GT-HUD", "", "", ""
+        v = getattr(app, "viagem", None)
+        if v is None or v.estado == v.PARADA:
+            return "GT-HUD", "", "", ""
+        # só gravando a viagem (sem rota): distância e tempo
+        dist, tempo = fmt_dist(v.distancia_m), fmt_tempo(v.tempo_total_s)
+        if v.estado == v.PAUSADA:
+            return "Viagem pausada  ·  %s" % dist, "Volta a gravar quando você andar.", dist, "pausada"
+        return "Gravando viagem  ·  %s  ·  %s" % (dist, tempo), "GT-HUD segue gravando com a tela apagada.", dist, tempo
     if nav.chegou:
         return "Você chegou!", "GT-HUD: destino alcançado.", "Chegou", ""
     if not e:
@@ -130,21 +137,44 @@ class SegundoPlano:
         self._fila = []                 # respostas da internet chegando com o app minimizado
         self._trava = threading.Lock()
         self._t_aviso = 0.0
+        self._ligado = False            # o serviço Android está no ar
         self.leituras_no_fundo = 0      # (diagnóstico e testes)
 
-    # --- rota começou / acabou ---------------------------------------------------
-    def comecou(self):
-        if self.app.ajustes["segundo_plano"]:
+    # --- rota ou gravação começou / acabou -------------------------------------------
+    def ativo(self):
+        """Há o que manter vivo com o app minimizado: rota ativa OU viagem
+        sendo gravada (pausada também: a pausa automática precisa do GPS
+        para voltar a gravar). Até a 1.0.21 só a rota contava: gravando sem
+        rota, apagar a tela parava a contagem."""
+        v = getattr(self.app, "viagem", None)
+        return self.app.nav is not None or (v is not None and v.estado != v.PARADA)
+
+    def sincronizar(self):
+        """Liga ou desliga o serviço Android conforme o estado do app.
+        Chamar sempre que a rota ou a gravação começar/acabar."""
+        deve = self.ativo() and bool(self.app.ajustes["segundo_plano"])
+        if deve and not self._ligado:
+            self._ligado = True
             self.android.iniciar()
             self.atualizar(forcar=True)
+        elif not deve and self._ligado:
+            self._ligado = False
+            self.android.parar()
+        elif deve:
+            self.atualizar(forcar=True)
+
+    def comecou(self):
+        self.sincronizar()
 
     def terminou(self):
+        """Desliga de vez (app fechando)."""
+        self._ligado = False
         self.android.parar()
 
     def atualizar(self, forcar=False):
         """Notificação (e bolha, se minimizado) com km/minutos/próxima curva."""
         agora = time.monotonic()
-        if not forcar and agora - self._t_aviso < AVISO_A_CADA_S:
+        if not self._ligado or (not forcar and agora - self._t_aviso < AVISO_A_CADA_S):
             return
         self._t_aviso = agora
         titulo, texto, l1, l2 = textos(self.app)
@@ -154,7 +184,8 @@ class SegundoPlano:
 
     # --- app minimizado / de volta -------------------------------------------------
     def ao_pausar(self):
-        if self.app.nav is None or not self.app.ajustes["segundo_plano"]:
+        self.sincronizar()  # garantia: se a gravação começou por um caminho que não avisou
+        if not self._ligado:
             return
         self.minimizado = True
         if self.app.ajustes["bolha"] and self.android.bolha_permitida():

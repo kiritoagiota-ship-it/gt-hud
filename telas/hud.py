@@ -212,6 +212,7 @@ class TelaHUD(Screen):
     def _iniciar(self):
         app = App.get_running_app()
         app.viagem.iniciar()
+        app.viagem_mudou()
         if app.sinal_ok():
             self._mensagem("Gravando viagem", tema.CIANO)
         else:

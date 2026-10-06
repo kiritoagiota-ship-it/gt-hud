@@ -20,6 +20,7 @@ import tema
 from ajustes import Ajustes
 from banco import Banco
 from filtro import FiltroVelocidade
+from ritmo import Ritmo
 from gps_service import ServicoGPS
 from navegacao import P_INFO, Navegacao
 from segundo_plano import SegundoPlano
@@ -68,6 +69,7 @@ class GTHudApp(App):
         self.ajustes = Ajustes(pasta)
         self.banco = Banco(pasta)
         self.filtro = FiltroVelocidade(alfa=self.ajustes["alfa"])
+        self.ritmo = Ritmo(self.ajustes["ritmo"])
         self.viagem = Viagem()
         self.gps = ServicoGPS(self._ao_receber_gps, self._ao_status_gps)
         self.voz = Voz(pasta)
@@ -297,8 +299,7 @@ class GTHudApp(App):
         """Leitura do GPS com o app aberto (Clock): lógica + tela."""
         vel = self.processar_leitura(d)
         self._avisar(vel)
-        if self.nav is not None:
-            self.fundo.atualizar()
+        self.fundo.atualizar()  # (só faz algo com rota ativa ou viagem gravando)
 
     def processar_leitura(self, d):
         """Tudo da leitura que NÃO é tela (filtro, viagem, alerta, navegação).
@@ -438,6 +439,7 @@ class GTHudApp(App):
                              self.ajustes["avisar_semaforos"])
         self.estado_nav = None
         self._fim_agendado = False
+        self.ritmo.comecar()
         if self.viagem.estado == Viagem.PARADA:
             self.viagem.iniciar()  # a navegação grava a viagem sozinha
         self.gps.seguir_rota(rota.pontos)
@@ -451,7 +453,7 @@ class GTHudApp(App):
         self.estado_nav = None
         self.rota_previa = None
         self.destino = None
-        self.fundo.terminou()
+        self.ajustes["ritmo"] = round(self.ritmo.terminar(), 3)
         self.gps.deixar_rota()
         salvou = self.salvar_viagem_atual()
         if not chegou:
@@ -464,6 +466,7 @@ class GTHudApp(App):
     def _navegar(self, lat, lon, vel, agora):
         nav = self.nav
         self.estado_nav = nav.atualizar(lat, lon, vel, agora)
+        self.ritmo.leitura(nav, vel, agora)  # aprende o ritmo do dono (tempo de chegada)
         if nav.chegou and not self._fim_agendado:
             self._fim_agendado = True
             Clock.schedule_once(lambda dt: self.encerrar_navegacao(chegou=True), 5)
@@ -587,6 +590,7 @@ class GTHudApp(App):
     # --- viagem ----------------------------------------------------------
     def salvar_viagem_atual(self):
         resultado = self.viagem.finalizar()
+        self.fundo.sincronizar()
         if not resultado:
             return None
         resumo, pontos = resultado
@@ -596,6 +600,11 @@ class GTHudApp(App):
             return None
         self.ultima_salva_m = resumo["distancia_m"]
         return self.banco.salvar_viagem(resumo, pontos)
+
+    def viagem_mudou(self):
+        """As telas avisam quando a gravação começa, pausa ou termina: o
+        segundo plano liga/desliga junto (gravar com a tela apagada)."""
+        self.fundo.sincronizar()
 
     # --- tela ------------------------------------------------------------
     def aplicar_tela_ligada(self):

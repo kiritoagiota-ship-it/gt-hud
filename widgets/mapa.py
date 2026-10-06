@@ -34,12 +34,14 @@ from kivy.properties import BooleanProperty, NumericProperty
 from kivy.uix.label import Label
 from kivy.uix.widget import Widget
 
+import busca
 import goiania
+import rede
 import sinais
 import tema
 from diagnostico import seguro
-from mapa_vetor import (AREAS, FUNDO, RUAS, SETAS, FonteVetorial, tela_animando, tiles_do_retangulo,
-                        z_dados)
+from mapa_vetor import (AREAS, FUNDO, RUAS, SETAS, FonteVetorial, chave_nome, legenda_se_precisa,
+                        tela_animando, tiles_do_retangulo, z_dados)
 
 ZOOM_MIN, ZOOM_MAX = 11.0, 19.0   # o app é só de Goiânia: de longe, a cidade inteira
 SEGURAR_S = 0.6                  # dedo parado esse tempo = marcar o ponto
@@ -68,6 +70,12 @@ ZOOM_NAV_PERTO, ZOOM_NAV_LONGE = 17.4, 16.6
 HISTERESE_ZOOM = 0.75      # só troca o nível de desenho com essa folga
 ORCAMENTO_TILES_S = 0.006  # por quadro, no máximo isso montando tiles
 MAX_TEXTURAS_NOVAS = 8     # por escolha de nomes, no máximo tantos nomes novos desenhados
+# Lugares da base da busca (69.900 em Goiânia) desenhados no mapa: o mapa do
+# OpenStreetMap tem pouco comércio cadastrado na cidade. Só de perto, e
+# quanto mais perto, mais lugares (pela "confiança" da base).
+ZOOM_LUGARES = 16.5
+CONF_POR_ZOOM = ((18.3, 0.75), (17.5, 0.86), (16.5, 0.94))   # (zoom mínimo, confiança mínima)
+MAX_CELULAS_LUGARES = 24
 ZOOM_SINAIS = 16.0         # fora da navegação, semáforos e lombadas a partir desse zoom
 MAX_SINAIS = 40
 
@@ -150,6 +158,7 @@ class MapaHUD(Widget):
         self._nivel = None                  # (dz, rz) atual
         self._rotulos = []
         self._texturas = collections.OrderedDict()
+        self._lugares = collections.OrderedDict()   # (cx, cy) -> [rótulos] ou None (carregando)
         self._chave_tiles = None            # vista da última conta de tiles
         lat0, lon0, lat1, lon1 = goiania.LIMITES  # Goiânia em px do mundo z14
         x0, y0 = mundo(lat1, lon0, 14)
@@ -494,7 +503,9 @@ class MapaHUD(Widget):
         chave = (texto, tamanho, cor, negrito)
         tex = self._texturas.get(chave)
         if tex is None:
-            if self._novas_texturas >= MAX_TEXTURAS_NOVAS:
+            # navegando, poucos por vez: desenhar texto é o que mais pesa num
+            # quadro, e os lugares da base trazem muitos nomes novos de uma vez
+            if self._novas_texturas >= (3 if self._navegando else MAX_TEXTURAS_NOVAS):
                 return None
             self._novas_texturas += 1
             rotulo = CoreLabel(text=texto, font_size=tamanho, bold=negrito, color=cor,
@@ -545,6 +556,16 @@ class MapaHUD(Widget):
                         if x0 < sx < x1 and y0 < sy < y1:
                             peso = r["peso"] + (BONUS_JA_NA_TELA if id(r) in antigos else 0.0)
                             candidatos.append((peso, sx, sy, r))
+        if self.zoom >= ZOOM_LUGARES:
+            conf_min = next(c for z, c in CONF_POR_ZOOM if self.zoom >= z)
+            for r in self._lugares_a_vista(lx0, ly0, lx1, ly1):
+                if r["conf"] < conf_min:
+                    break  # vêm do mais confiável para o menos
+                dx, dy = (r["x"] - cx) * s, (r["y"] - cy) * s
+                sx, sy = ax + dx * c0 - dy * s0, ay + dx * s0 + dy * c0
+                if x0 < sx < x1 and y0 < sy < y1:
+                    peso = r["peso"] + (BONUS_JA_NA_TELA if id(r) in antigos else 0.0)
+                    candidatos.append((peso, sx, sy, r))
         candidatos.sort(key=lambda t: -t[0])
         cr = self.credito
         ocupados = list(self.areas_cobertas) + [(cr.x, cr.y, cr.right, cr.top)]
@@ -587,11 +608,12 @@ class MapaHUD(Widget):
             if any(caixa[0] < o[2] and o[0] < caixa[2] and caixa[1] < o[3] and o[1] < caixa[3]
                    for o in ocupados):
                 continue
-            visto = usados_texto.get(r["texto"])
+            chave = chave_nome(r["texto"]) if tipo == "poi" else r["texto"]
+            visto = usados_texto.get(chave)
             if visto and math.hypot(visto[0] - sx, visto[1] - sy) < dp(260):
                 continue
             ocupados.append(caixa)
-            usados_texto[r["texto"]] = (sx, sy)
+            usados_texto[chave] = (sx, sy)
             conta[tipo] += 1
             novos.append((r, tex, ponto))
         self._g_rotulos.clear()
@@ -607,6 +629,48 @@ class MapaHUD(Widget):
         if faltou_textura and self._ev_rotulos is None:
             # ainda há nomes para desenhar: continua logo (não espera 0,45 s)
             self._ev_rotulos = Clock.schedule_once(self._escolher_rotulos, 0.05)
+
+    # --- lugares da base da busca -----------------------------------------------------
+    def _lugares_a_vista(self, lx0, ly0, lx1, ly1):
+        """Rótulos dos lugares da base nos quadrados à vista, do mais
+        confiável para o menos. Quadrado ainda não lido: pede numa thread
+        (ler o banco aqui daria um tranco) e os nomes entram quando chegar."""
+        cantos = [self._local_para_geo(x, y) for x, y in ((lx0, ly0), (lx1, ly0), (lx0, ly1), (lx1, ly1))]
+        cel = busca.CELULA_MAPA
+        cx0, cx1 = int(math.floor(min(c[0] for c in cantos) / cel)), int(math.floor(max(c[0] for c in cantos) / cel))
+        cy0, cy1 = int(math.floor(min(c[1] for c in cantos) / cel)), int(math.floor(max(c[1] for c in cantos) / cel))
+        if (cx1 - cx0 + 1) * (cy1 - cy0 + 1) > 9:
+            return []  # tela cobrindo área demais (não acontece nos zooms em que isto liga)
+        listas = []
+        for cx in range(cx0, cx1 + 1):
+            for cy in range(cy0, cy1 + 1):
+                if (cx, cy) not in self._lugares:
+                    self._lugares[(cx, cy)] = None
+                    while len(self._lugares) > MAX_CELULAS_LUGARES:
+                        self._lugares.popitem(last=False)
+                    rede.em_segundo_plano(lambda c=(cx, cy): (c, busca.lugares_da_celula(*c)),
+                                          self._lugares_chegaram, lambda e: None)
+                elif self._lugares[(cx, cy)]:
+                    self._lugares.move_to_end((cx, cy))
+                    listas.append(self._lugares[(cx, cy)])
+        if len(listas) == 1:
+            return listas[0]
+        return sorted((r for lista in listas for r in lista), key=lambda r: -r["conf"])
+
+    def _lugares_chegaram(self, resposta):
+        celula, linhas = resposta
+        if celula not in self._lugares:
+            return
+        rotulos = []
+        for nome, categoria, lat, lon, conf in linhas:
+            x, y = self._local(lat, lon)
+            legenda = legenda_se_precisa(nome, categoria or "")
+            rotulos.append({"texto": "%s · %s" % (nome, legenda) if legenda else nome, "x": x, "y": y,
+                            "ang": 0.0, "comp": 0, "peso": 0.25 + conf * 0.2, "tipo": "poi",
+                            "grupo": busca.grupo_da_categoria(categoria), "conf": conf})
+        self._lugares[celula] = rotulos
+        self._t_rotulos = 0.0
+        self._pedir_rotulos()
 
     # --- semáforos e lombadas -------------------------------------------------------
     @staticmethod

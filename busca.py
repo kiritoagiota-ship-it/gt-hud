@@ -182,6 +182,47 @@ def nome_perto(lat, lon, raio_m=NOME_PERTO_M):
     return min(perto)[1] if perto else ""
 
 
+# --- lugares da base no MAPA (widgets/mapa.py) ---------------------------------------
+CELULA_MAPA = 0.01      # graus (~1,1 km): o mapa pede os lugares por quadrado
+MAX_POR_CELULA = 500
+CONF_MAPA_MIN = 0.75    # abaixo disso a Overture não tem certeza de que o lugar existe
+_GRUPOS = {
+    "comida": "restaurante bar padaria pizzaria lanchonete hamburgueria sorveteria cafeteria café "
+              "doceria sucos churrascaria",
+    "saude": "dentista farmácia hospital consultório laboratório veterinário fisioterapia",
+    "ensino": "escola faculdade creche autoescola",
+    "servico": "imobiliária advogado contador banco órgão posto hotel pousada polícia gráfica oficina "
+               "borracharia lava lavanderia salão barbearia cabeleireiro manicure estética spa tatuagem",
+    "lazer": "igreja academia pilates luta",
+    "praca": "parque",
+}
+_GRUPO_DA_CATEGORIA = {c: g for g, cs in _GRUPOS.items() for c in cs.split()}
+
+
+def grupo_da_categoria(categoria):
+    """Grupo (cor no mapa) da categoria da base; o que não está na lista e
+    tem categoria é comércio; sem categoria, "outros"."""
+    if not categoria:
+        return "outros"
+    return _GRUPO_DA_CATEGORIA.get(categoria, "compras")
+
+
+def lugares_da_celula(cx, cy):
+    """[(nome, categoria, lat, lon, confiança)] do quadrado (cx, cy) de
+    CELULA_MAPA graus, os mais confiáveis primeiro. Use numa thread."""
+    if not os.path.exists(BASE):
+        return []
+    con = sqlite3.connect(BASE)
+    try:
+        return con.execute(
+            "SELECT nome, categoria, lat, lon, conf FROM lugares WHERE lat >= ? AND lat < ? AND lon >= ? "
+            "AND lon < ? AND conf >= ? ORDER BY conf DESC LIMIT ?",
+            (cx * CELULA_MAPA, (cx + 1) * CELULA_MAPA, cy * CELULA_MAPA, (cy + 1) * CELULA_MAPA,
+             CONF_MAPA_MIN, MAX_POR_CELULA)).fetchall()
+    finally:
+        con.close()
+
+
 def _offline(texto):
     termos = _termos(texto)
     if not termos or not os.path.exists(BASE):

@@ -5,6 +5,7 @@ import os
 PADRAO = {
     "limite_kmh": 32,
     "alfa": 0.5,
+    "ritmo": 1.0,   # tempo real do dono / tempo previsto pelo servidor de rotas (ritmo.py)
     "tela_ligada": True,
     "simulador": False,
     "vibrar_limite": True,

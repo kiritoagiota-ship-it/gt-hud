@@ -19,6 +19,14 @@ class SemRota(Exception):
     de internet)."""
 
 VALHALLA = "https://valhalla1.openstreetmap.de/route"
+# Reserva (o principal é gratuito e às vezes recusa ou cai; sem ele o app
+# não recalculava no meio do caminho): OSRM de bicicleta, em outros
+# servidores. Não dá a altimetria (rota sem aviso de subida) nem perfis.
+RESERVA = "https://routing.openstreetmap.de/routed-bike/route/v1/driving/"
+RESERVA_TEMPO = 0.65    # o OSRM calcula a ~15 km/h; medido: o principal (elétrica) dá ~65% desse tempo
+ESPERA_PRINCIPAL_S = 12
+# multiplica o tempo de toda rota: o ritmo real do dono (ver ritmo.py)
+fator_ritmo = 1.0
 ELEVACAO_PASSO_M = 30
 # subida que merece aviso: inclinação média >= SUBIDA_GRAU_MIN em pelo menos
 # SUBIDA_COMPR_MIN_M, ganhando SUBIDA_GANHO_MIN_M ou mais de altura
@@ -128,7 +136,8 @@ class Rota:
         for a, b in zip(pontos, pontos[1:]):
             self.acumulado.append(self.acumulado[-1] + distancia_m(a, b))
         self.total_m = self.acumulado[-1]
-        self.tempo_s = tempo_s
+        self.tempo_base_s = tempo_s      # o que o servidor previu
+        self.reserva = False             # True: veio do servidor reserva
         self.destino_nome = destino_nome
         self.elevacao = elevacao
         self.subidas = achar_subidas(elevacao)
@@ -138,6 +147,27 @@ class Rota:
         for m in manobras:
             m["dist_m"] = self.acumulado[min(m["indice"], len(self.acumulado) - 1)]
         self.manobras = manobras
+
+    @property
+    def tempo_s(self):
+        """Tempo previsto já no ritmo do dono."""
+        return self.tempo_base_s * fator_ritmo
+
+    @classmethod
+    def do_osrm(cls, dados, destino_nome=""):
+        r = dados["routes"][0]
+        pontos = decodificar_polyline(r["geometry"])
+        manobras, indice = [], 0
+        for passo in r["legs"][0]["steps"]:
+            m = passo["maneuver"]
+            acao = _acao_osrm(m.get("type"), m.get("modifier"))
+            if acao is not None:
+                manobras.append({"acao": acao, "indice": min(indice, len(pontos) - 1), "texto": "",
+                                 "ruas": passo.get("name") or "", "saida": m.get("exit")})
+            indice += max(0, len(decodificar_polyline(passo.get("geometry") or "")) - 1)
+        rota = cls(pontos, manobras, [], r.get("duration", 0) * RESERVA_TEMPO, destino_nome)
+        rota.reserva = True
+        return rota
 
     @classmethod
     def do_valhalla(cls, dados, destino_nome=""):
@@ -179,8 +209,65 @@ class Rota:
         return sum(max(0.0, e[i + 1] - e[i]) for i in range(max(0, i0), len(e) - 1))
 
 
+_LADO_OSRM = {"right": "direita", "left": "esquerda", "slight right": "levemente_direita",
+              "slight left": "levemente_esquerda", "sharp right": "acentuada_direita",
+              "sharp left": "acentuada_esquerda", "uturn": "retorno", "straight": "em_frente"}
+
+
+def _acao_osrm(tipo, lado):
+    """Manobra do OSRM -> ação do app; None = não vale um aviso."""
+    if tipo == "depart":
+        return "em_frente"
+    if tipo == "arrive":
+        return {"right": "chegada_direita", "left": "chegada_esquerda"}.get(lado, "chegada")
+    if tipo in ("roundabout", "rotary"):
+        return "rotatoria"
+    if tipo in ("exit roundabout", "exit rotary"):
+        return "sair_rotatoria"
+    if tipo == "fork":
+        return "mantenha_esquerda" if "left" in (lado or "") else "mantenha_direita"
+    if tipo in ("on ramp", "off ramp"):
+        return "saida_esquerda" if "left" in (lado or "") else "saida_direita"
+    if tipo in ("new name", "merge", "notification") or lado in (None, "straight"):
+        return None  # a rua só mudou de nome / segue reto
+    return _LADO_OSRM.get(lado)
+
+
+def _pedir_reserva(origem, destino, destino_nome):
+    url = RESERVA + "%.6f,%.6f;%.6f,%.6f?steps=true&geometries=polyline6&overview=full" % (
+        origem[1], origem[0], destino[1], destino[0])
+    try:
+        dados = rede.baixar_json(url, timeout=20)
+    except urllib.error.HTTPError as e:
+        if e.code == 400:
+            raise SemRota("Não achei um caminho de bike até esse lugar.")
+        raise
+    if dados.get("code") != "Ok" or not dados.get("routes"):
+        raise SemRota("Não achei um caminho de bike até esse lugar.")
+    return Rota.do_osrm(dados, destino_nome)
+
+
 def pedir_rota(origem, destino, rumo=None, destino_nome="", perfil="rapida"):
-    """Chamada que espera a resposta (use rede.em_segundo_plano)."""
+    """Chamada que espera a resposta (use rede.em_segundo_plano). Se o
+    servidor principal não responder, a rota mais rápida vem do reserva."""
+    try:
+        return _pedir_principal(origem, destino, rumo, destino_nome, perfil)
+    except SemRota:
+        raise
+    except Exception as erro:
+        if perfil != "rapida":
+            raise
+        print("[rota] servidor principal falhou (%s): tentando o reserva" % erro)
+        try:
+            return _pedir_reserva(origem, destino, destino_nome)
+        except SemRota:
+            raise
+        except Exception as erro2:
+            print("[rota] reserva tambem falhou:", erro2)
+            raise erro
+
+
+def _pedir_principal(origem, destino, rumo, destino_nome, perfil):
     opcoes = {"bicycle_type": "Hybrid", "cycling_speed": 22}   # bike elétrica na cidade
     opcoes.update(dict((p[0], p[2]) for p in PERFIS)[perfil])
     partida = {"lat": origem[0], "lon": origem[1]}
@@ -198,14 +285,14 @@ def pedir_rota(origem, destino, rumo=None, destino_nome="", perfil="rapida"):
     url = VALHALLA + "?json=" + urllib.parse.quote(json.dumps(pedido))
     try:
         try:
-            dados = rede.baixar_json(url, timeout=25)
+            dados = rede.baixar_json(url, timeout=ESPERA_PRINCIPAL_S)
         except urllib.error.HTTPError as e:
             if e.code not in (429, 503):
                 raise
             # servidor gratuito pedindo calma (ex.: logo depois das rotas
             # alternativas): espera um pouco e tenta de novo uma vez
             time.sleep(1.5)
-            dados = rede.baixar_json(url, timeout=25)
+            dados = rede.baixar_json(url, timeout=ESPERA_PRINCIPAL_S)
     except urllib.error.HTTPError as e:
         if e.code == 400:  # ex.: "No path could be found for input" (erro 442)
             try:

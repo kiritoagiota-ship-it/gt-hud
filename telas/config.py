@@ -144,9 +144,9 @@ class TelaConfig(Screen):
                                self._centralizar(self.alt_semaforos)))
 
         self.alt_fundo = Alternar(lambda v: self._mudar_simples("segundo_plano", self.alt_fundo, v))
-        lista.add_widget(Linha("Navegação em segundo plano",
-                               "Com rota ativa, minimizar o app (ou apagar a tela) não para a "
-                               "navegação: a voz continua e aparece uma notificação.",
+        lista.add_widget(Linha("Continuar em segundo plano",
+                               "Com rota ativa ou viagem gravando, minimizar o app (ou apagar a "
+                               "tela) não para nada: a voz continua e aparece uma notificação.",
                                self._centralizar(self.alt_fundo)))
 
         self.alt_bolha = Alternar(self._mudar_bolha)
