@@ -199,6 +199,11 @@ class TelaConfig(Screen):
                                    self._centralizar(self.btn_offline))
         lista.add_widget(self.linha_offline)
 
+        self.btn_vivo = BotaoHUD(text="Configurar", size_hint_x=None, width=dp(130),
+                                 on_release=lambda *a: self._configurar_vivo())
+        self.linha_vivo = Linha("Corrida ao vivo", "", self._centralizar(self.btn_vivo))
+        lista.add_widget(self.linha_vivo)
+
         lista.add_widget(Linha("Diagnóstico",
                                "Algo deu errado? Envie o registro do app para o Claude "
                                "(pelo WhatsApp, por exemplo). Pode conter sua localização.",
@@ -237,6 +242,7 @@ class TelaConfig(Screen):
         self.alt_tela.mostrar(aj["tela_ligada"])
         self.sel_alfa.mostrar(aj["alfa"])
         self.alt_sim.mostrar(aj["simulador"])
+        self._mostrar_vivo()
         self.lbl_versao.text = ("GT-HUD versão %s\nMapa (c) OpenStreetMap, OpenFreeMap  |  "
                                 "Lugares (c) Overture Maps Foundation" % _versao())
 
@@ -409,6 +415,42 @@ class TelaConfig(Screen):
             else:
                 expl.text = "Pronto: Goiânia inteira no celular (%d partes)." % ok
         fonte.baixar_goiania(progresso, fim)
+
+    # --- corrida ao vivo: o endereço do banco gratuito do dono ------------------------
+    def _mostrar_vivo(self, aviso=None):
+        import ao_vivo
+        pronto = ao_vivo.limpar_endereco(App.get_running_app().ajustes["firebase"]) is not None
+        self.btn_vivo.text = "Trocar" if pronto else "Configurar"
+        self.linha_vivo.explicacao.text = aviso or (
+            "Pronto: na navegação, toque em \"Ao vivo\" para mandar o link no WhatsApp."
+            if pronto else
+            "Mande um link para alguém acompanhar sua rota pela web. Falta colar aqui o "
+            "endereço do seu banco gratuito (Firebase).")
+
+    def _configurar_vivo(self):
+        import ao_vivo
+        import rede
+        from widgets.comuns import pedir_nome
+        app = App.get_running_app()
+
+        def salvar(texto):
+            base = ao_vivo.limpar_endereco(texto)
+            if base is None:
+                self._mostrar_vivo("Esse não parece o endereço do banco. Ele termina em "
+                                   "firebaseio.com ou firebasedatabase.app.")
+                return
+            self._mostrar_vivo("Testando o banco...")
+
+            def resultado(problema):
+                if problema is None:
+                    app.ajustes["firebase"] = base
+                    self._mostrar_vivo("Funcionou! Na navegação, toque em \"Ao vivo\".")
+                else:
+                    self._mostrar_vivo(problema)
+            rede.em_segundo_plano(lambda: ao_vivo.testar(base), resultado,
+                                  lambda e: self._mostrar_vivo("Não consegui testar o banco."))
+        pedir_nome(salvar, sugestao=app.ajustes["firebase"], titulo="Endereço do banco (Firebase)",
+                   botao="Salvar e testar", dica="https://...firebaseio.com", limite=200)
 
     def _enviar_diagnostico(self):
         import diagnostico

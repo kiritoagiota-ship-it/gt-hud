@@ -1,0 +1,242 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="robots" content="noindex, nofollow">
+<meta name="referrer" content="no-referrer">
+<title>Acompanhar corrida · GT-HUD</title>
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"
+      integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY=" crossorigin="">
+<style>
+  :root { --fundo: #04070b; --painel: #0b131c; --borda: #16303f; --ciano: #19e3ff; --texto: #eaf6fb;
+          --fraco: #7fa3b3; --verde: #3be08a; --laranja: #ffa23a; --vermelho: #ff5a66; }
+  * { box-sizing: border-box; }
+  html, body { height: 100%; margin: 0; background: var(--fundo); color: var(--texto);
+               font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; }
+  #mapa { position: absolute; inset: 0; background: var(--fundo); }
+  .leaflet-container { background: #0a1016; font: inherit; }
+  #painel { position: absolute; left: 12px; right: 12px; bottom: calc(12px + env(safe-area-inset-bottom));
+            max-width: 520px; margin: 0 auto; z-index: 1000; background: var(--painel);
+            border: 1px solid var(--borda); border-radius: 14px; padding: 12px 14px;
+            box-shadow: 0 6px 24px rgba(0,0,0,.55); }
+  #estado { display: flex; align-items: center; gap: 8px; font-size: 14px; color: var(--fraco); }
+  #bolinha { width: 10px; height: 10px; border-radius: 50%; background: var(--fraco); flex: none; }
+  #bolinha.indo { background: var(--verde); animation: pulso 1.6s infinite; }
+  #bolinha.atrasado { background: var(--laranja); }
+  #bolinha.fim { background: var(--ciano); }
+  #bolinha.erro { background: var(--vermelho); }
+  @keyframes pulso { 50% { opacity: .35; } }
+  @media (prefers-reduced-motion: reduce) { #bolinha.indo { animation: none; } }
+  #destino { font-size: 18px; font-weight: 700; margin: 6px 0 10px; overflow-wrap: anywhere; }
+  #numeros { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; }
+  #numeros[hidden] { display: none; }
+  .num { background: #0f1b27; border-radius: 10px; padding: 8px 6px; text-align: center; min-width: 0; }
+  .num b { display: block; font-size: 22px; color: var(--ciano); font-variant-numeric: tabular-nums;
+           white-space: nowrap; }
+  .num span { font-size: 12px; color: var(--fraco); }
+  #centralizar { position: absolute; right: 12px; top: calc(12px + env(safe-area-inset-top)); z-index: 1000;
+                 background: var(--painel); color: var(--ciano); border: 1px solid var(--ciano);
+                 border-radius: 10px; padding: 10px 14px; font: inherit; font-weight: 600; cursor: pointer; }
+  #centralizar[hidden] { display: none; }
+  #centralizar:focus-visible { outline: 3px solid #fff; outline-offset: 2px; }
+  .eu { width: 34px; height: 34px; }
+  .eu svg { width: 34px; height: 34px; display: block; filter: drop-shadow(0 0 6px rgba(25,227,255,.8)); }
+  .chegada { width: 22px; height: 22px; border-radius: 50%; background: var(--laranja);
+             border: 3px solid #04070b; box-shadow: 0 0 0 2px var(--laranja); }
+  .leaflet-control-attribution { background: rgba(4,7,11,.75) !important; color: var(--fraco) !important; }
+  .leaflet-control-attribution a { color: var(--ciano) !important; }
+</style>
+</head>
+<body>
+<div id="mapa" role="application" aria-label="Mapa com a posição ao vivo"></div>
+<button id="centralizar" type="button" hidden>Centralizar</button>
+<section id="painel" aria-live="polite">
+  <div id="estado"><span id="bolinha"></span><span id="texto-estado">Carregando…</span></div>
+  <div id="destino"></div>
+  <div id="numeros" hidden>
+    <div class="num"><b id="vel">–</b><span>km/h</span></div>
+    <div class="num"><b id="falta">–</b><span>faltam</span></div>
+    <div class="num"><b id="chega">–</b><span>chegada</span></div>
+  </div>
+</section>
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"
+        integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo=" crossorigin=""></script>
+<script>
+"use strict";
+// Página do "corrida ao vivo" do GT-HUD. O link é .../acompanhar/#<banco>/<código>:
+// o que vem depois do "#" fica só neste navegador. A página lê, a cada
+// LER_A_CADA_MS, a posição que o app mandou para o banco do dono.
+const LER_A_CADA_MS = 4000;
+const ATRASADO_S = 50;        // sem posição nova por isso: avisa (parado, o app manda a cada 20 s)
+const el = (id) => document.getElementById(id);
+
+function lerLink() {
+  const m = /^#?([a-z0-9.:-]+)\/([A-Za-z0-9_-]{16,64})$/.exec(location.hash);
+  if (!m) return null;
+  const banco = m[1], local = /^(localhost|127\.0\.0\.1):\d+$/.test(banco);
+  if (!local && !/^[a-z0-9-]+(\.[a-z0-9-]+)*\.(firebaseio\.com|firebasedatabase\.app)$/.test(banco)) return null;
+  return { base: (local ? "http://" : "https://") + banco + "/corridas/" + m[2] + "/pub" };
+}
+
+function decodificar(texto) {            // "polyline" com 5 casas -> [[lat, lon], ...]
+  const pontos = []; let i = 0, lat = 0, lon = 0;
+  while (i < texto.length) {
+    for (let k = 0; k < 2; k++) {
+      let resultado = 0, desloc = 0, b;
+      do { b = texto.charCodeAt(i++) - 63; resultado |= (b & 31) << desloc; desloc += 5; } while (b >= 32);
+      const d = (resultado & 1) ? ~(resultado >> 1) : (resultado >> 1);
+      if (k === 0) lat += d; else lon += d;
+    }
+    pontos.push([lat / 1e5, lon / 1e5]);
+  }
+  return pontos;
+}
+
+async function ler(caminho) {
+  const r = await fetch(link.base + caminho, { cache: "no-store" });
+  if (!r.ok) throw new Error("HTTP " + r.status);
+  return r.json();
+}
+
+const hora = (segundos) => new Date(segundos * 1000).toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" });
+const distancia = (m) => m >= 1000 ? (m / 1000).toFixed(1).replace(".", ",") + " km" : Math.round(m / 10) * 10 + " m";
+function haTempo(s) {
+  if (s < 60) return "há " + Math.max(1, Math.round(s)) + " s";
+  if (s < 3600) return "há " + Math.round(s / 60) + " min";
+  return "há " + Math.floor(s / 3600) + " h";
+}
+
+function estado(classe, texto) {
+  el("bolinha").className = classe;
+  el("texto-estado").textContent = texto;
+}
+
+const link = lerLink();
+let mapa, eu, linhaRota, linhaFeito, marcaDestino;
+let seguindo = true, pedacos = 0, versaoRota = 0, feito = [], acabou = false;
+let ultimoT = null, vistoEm = 0, ultimaPos = null, enquadrou = false;
+
+function montarMapa() {
+  mapa = L.map("mapa", { zoomControl: false, attributionControl: true }).setView([-16.6799, -49.2550], 13);
+  L.tileLayer("https://tile.openstreetmap.org/{z}/{x}/{y}.png", {
+    maxZoom: 19, attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>'
+  }).addTo(mapa);
+  linhaRota = L.polyline([], { color: "#19e3ff", weight: 5, opacity: 0.55 }).addTo(mapa);
+  linhaFeito = L.polyline([], { color: "#3be08a", weight: 6, opacity: 0.95 }).addTo(mapa);
+  mapa.on("dragstart", () => { seguindo = false; el("centralizar").hidden = false; });
+  el("centralizar").addEventListener("click", () => {
+    seguindo = true; el("centralizar").hidden = true;
+    if (ultimaPos) mapa.setView(ultimaPos, Math.max(mapa.getZoom(), 16));
+  });
+}
+
+function mostrarRota(rota) {
+  if (!rota || !rota.linha) return;
+  versaoRota = rota.rv || 0;
+  const pontos = decodificar(rota.linha);
+  linhaRota.setLatLngs(pontos);
+  if (marcaDestino) marcaDestino.remove();
+  marcaDestino = L.marker([rota.dlat, rota.dlon], {
+    icon: L.divIcon({ className: "", html: '<div class="chegada"></div>', iconSize: [22, 22], iconAnchor: [11, 11] }),
+    keyboard: false, alt: "Destino"
+  }).addTo(mapa);
+  if (!enquadrou && pontos.length > 1) { mapa.fitBounds(L.latLngBounds(pontos), { padding: [40, 160] }); }
+}
+
+function juntarPedacos(tr) {
+  if (!tr) return;
+  for (const chave of Object.keys(tr).sort()) {
+    const n = parseInt(chave, 10);
+    if (n >= pedacos) { feito = feito.concat(decodificar(tr[chave])); pedacos = n + 1; }
+  }
+  linhaFeito.setLatLngs(ultimaPos ? feito.concat([ultimaPos]) : feito);
+}
+
+function mostrarPosicao(pos) {
+  ultimaPos = [pos.lat, pos.lon];
+  const giro = pos.r == null ? 0 : pos.r;
+  const html = '<div class="eu" style="transform: rotate(' + Number(giro) + 'deg)">' +
+    '<svg viewBox="0 0 34 34" aria-hidden="true"><circle cx="17" cy="17" r="15" fill="#04070b" opacity=".85"/>' +
+    '<path d="M17 4 L27 27 L17 21.5 L7 27 Z" fill="#19e3ff"/></svg></div>';
+  const icone = L.divIcon({ className: "", html: html, iconSize: [34, 34], iconAnchor: [17, 17] });
+  if (!eu) eu = L.marker(ultimaPos, { icon: icone, keyboard: false, alt: "Posição atual", zIndexOffset: 500 }).addTo(mapa);
+  else { eu.setLatLng(ultimaPos); eu.setIcon(icone); }
+  linhaFeito.setLatLngs(feito.concat([ultimaPos]));
+  if (seguindo) {
+    if (!enquadrou) { mapa.setView(ultimaPos, 16); enquadrou = true; } else mapa.panTo(ultimaPos);
+  }
+  el("numeros").hidden = false;
+  el("vel").textContent = pos.v;
+  el("falta").textContent = distancia(pos.fm || 0);
+  el("chega").textContent = hora(pos.t + (pos.fs || 0));
+}
+
+function terminou(pos) {
+  acabou = true;
+  el("numeros").hidden = true;
+  if (eu) { eu.remove(); eu = null; }
+  linhaFeito.setLatLngs([]); linhaRota.setLatLngs([]);
+  if (marcaDestino) { marcaDestino.remove(); marcaDestino = null; }
+  el("centralizar").hidden = true;
+  const quando = pos && pos.t ? " às " + hora(pos.t) : "";
+  el("destino").textContent = el("destino").textContent.replace(/^Indo para /, "");
+  estado("fim", pos && pos.e === "chegou" ? "Chegou ao destino" + quando + "." :
+    "Compartilhamento encerrado" + quando + ".");
+}
+
+function tratarPosicao(pos) {
+  if (!pos) return;
+  if (pos.e === "chegou" || pos.e === "encerrou") { terminou(pos); return; }
+  if (typeof pos.lat !== "number" || typeof pos.lon !== "number") return;
+  if (pos.t !== ultimoT) { ultimoT = pos.t; vistoEm = Date.now(); mostrarPosicao(pos); }
+}
+
+function relogio() {
+  if (acabou || ultimoT === null) return;
+  const parado = (Date.now() - vistoEm) / 1000;
+  if (parado > ATRASADO_S) estado("atrasado", "Sem posição nova " + haTempo(parado) + " (pode estar sem sinal).");
+  else estado("indo", "Ao vivo · atualizado " + haTempo(Math.max(1, parado)));
+}
+
+async function ciclo() {
+  if (acabou) return;
+  try {
+    const pos = await ler("/pos.json");
+    if (pos === null && ultimoT === null) estado("", "Esperando a primeira posição…");
+    tratarPosicao(pos);
+    if (!acabou && pos) {
+      if ((pos.rv || 0) !== versaoRota) mostrarRota(await ler("/rota.json"));
+      if ((pos.n || 0) > pedacos) {
+        const desde = String(pedacos).padStart(5, "0");
+        juntarPedacos(await ler('/tr.json?orderBy=' + encodeURIComponent('"$key"') + '&startAt=' + encodeURIComponent('"' + desde + '"')));
+      }
+    }
+    relogio();
+  } catch (e) {
+    if (!acabou) estado("erro", "Sem conexão com o servidor. Tentando de novo…");
+  }
+  if (!acabou) setTimeout(ciclo, document.hidden ? LER_A_CADA_MS * 3 : LER_A_CADA_MS);
+}
+
+async function comecar() {
+  if (!link) { estado("erro", "Link incompleto. Peça para enviarem o link de novo."); return; }
+  montarMapa();
+  try {
+    const tudo = await ler(".json");
+    if (tudo === null) { estado("erro", "Corrida não encontrada. O link pode ser antigo."); return; }
+    el("destino").textContent = tudo.destino ? "Indo para " + tudo.destino : "";
+    mostrarRota(tudo.rota);
+    juntarPedacos(tudo.tr);
+    if (tudo.pos) tratarPosicao(tudo.pos); else estado("", "Esperando a primeira posição…");
+    if (acabou && tudo.destino) el("destino").textContent = tudo.destino;
+  } catch (e) {
+    estado("erro", "Não consegui abrir a corrida. Confira a internet.");
+  }
+  setInterval(relogio, 1000);
+  if (!acabou) setTimeout(ciclo, LER_A_CADA_MS);
+}
+comecar();
+</script>
+</body>
+</html>

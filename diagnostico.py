@@ -185,18 +185,19 @@ def texto_para_enviar():
     return "Diagnóstico do GT-HUD\n%s\n\n%s" % (info_aparelho(), registro)
 
 
-def compartilhar(texto):
-    """Abre o "Compartilhar" do Android com o texto. No PC: copia para a área
-    de transferência. Devolve True se deu."""
+def compartilhar(texto, assunto="Diagnóstico GT-HUD", titulo="Enviar diagnóstico"):
+    """Abre o "Compartilhar" do Android com o texto (a pessoa escolhe o
+    WhatsApp e o contato). No PC: copia para a área de transferência.
+    Devolve True se deu."""
     try:
         from jnius import autoclass, cast
         Intent = autoclass("android.content.Intent")
         String = autoclass("java.lang.String")
         intent = Intent(Intent.ACTION_SEND)
         intent.setType("text/plain")
-        intent.putExtra(Intent.EXTRA_SUBJECT, cast("java.lang.CharSequence", String("Diagnóstico GT-HUD")))
+        intent.putExtra(Intent.EXTRA_SUBJECT, cast("java.lang.CharSequence", String(assunto)))
         intent.putExtra(Intent.EXTRA_TEXT, cast("java.lang.CharSequence", String(texto)))
-        escolha = Intent.createChooser(intent, cast("java.lang.CharSequence", String("Enviar diagnóstico")))
+        escolha = Intent.createChooser(intent, cast("java.lang.CharSequence", String(titulo)))
         atividade = autoclass("org.kivy.android.PythonActivity").mActivity
         from android.runnable import run_on_ui_thread
         run_on_ui_thread(lambda: atividade.startActivity(escolha))()

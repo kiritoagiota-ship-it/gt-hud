@@ -1,0 +1,14 @@
+{
+  "rules": {
+    ".read": false,
+    ".write": false,
+    "corridas": {
+      "$id": {
+        ".write": "$id.length >= 20 && newData.exists() && newData.child('s').isString() && (!data.exists() || data.child('s').val() === newData.child('s').val())",
+        "pub": {
+          ".read": true
+        }
+      }
+    }
+  }
+}

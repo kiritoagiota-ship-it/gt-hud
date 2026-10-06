@@ -56,6 +56,14 @@ def enviar_json(url, corpo, cabecalhos=None, timeout=20):
         return json.loads(resposta.read().decode("utf-8"))
 
 
+def enviar(url, corpo, metodo="PUT", timeout=20):
+    """PUT/PATCH/POST com corpo JSON; devolve a resposta (JSON). Use numa thread."""
+    pedido = urllib.request.Request(url, data=json.dumps(corpo).encode("utf-8"), method=metodo,
+                                    headers={"User-Agent": USER_AGENT, "Content-Type": "application/json"})
+    with urllib.request.urlopen(pedido, context=_CTX, timeout=timeout) as resposta:
+        return json.loads(resposta.read().decode("utf-8") or "null")
+
+
 _desvio = None   # app minimizado: quem recebe as respostas (segundo_plano.py)
 
 

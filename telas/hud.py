@@ -197,8 +197,9 @@ class TelaHUD(Screen):
         c = self.controles
         c.clear_widgets()
         if v.estado == Viagem.PARADA:
-            c.add_widget(BotaoHUD(text="Iniciar viagem", destaque=True,
-                                  on_release=lambda *a: self._iniciar()))
+            # a viagem grava sozinha em toda rota iniciada (e só nelas)
+            c.add_widget(Texto(text="Toda rota iniciada é gravada sozinha. Busque um destino no mapa.",
+                               font_size=tema.T_ROTULO + 1, color=tema.CIANO_FRACO, halign="center"))
         elif v.estado == Viagem.GRAVANDO:
             c.add_widget(BotaoHUD(text="Pausar", on_release=lambda *a: self._pausar()))
             c.add_widget(BotaoHUD(text="Finalizar", cor=tema.LARANJA,
@@ -208,17 +209,6 @@ class TelaHUD(Screen):
                                   on_release=lambda *a: self._retomar()))
             c.add_widget(BotaoHUD(text="Finalizar", cor=tema.LARANJA,
                                   on_release=lambda *a: self._finalizar()))
-
-    def _iniciar(self):
-        app = App.get_running_app()
-        app.viagem.iniciar()
-        app.viagem_mudou()
-        if app.sinal_ok():
-            self._mensagem("Gravando viagem", tema.CIANO)
-        else:
-            self._mensagem("Gravando: a distância começa quando o GPS pegar", tema.LARANJA)
-        self._montar_controles()
-        self._atualizar_numeros()
 
     def _pausar(self):
         App.get_running_app().viagem.pausar()

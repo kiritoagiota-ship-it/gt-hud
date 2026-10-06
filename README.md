@@ -46,3 +46,30 @@ edite falas.py e rode ferramentas/gerar_voz.py (instrucoes no arquivo).
 - viagem.py / banco.py / filtro.py / ajustes.py: viagem, SQLite, suavizacao,
   configuracoes
 - icone/ e ferramentas/: icone, abertura e geradores (nao entram no APK)
+
+## Corrida ao vivo (link para alguém acompanhar pela web)
+
+Na navegação, o botão **Ao vivo** manda um link pelo WhatsApp; quem abre vê a
+posição, a rota, a velocidade e a hora de chegada numa página
+(`docs/acompanhar/`, publicada pelo GitHub Pages). Ao chegar ou encerrar, a
+posição e o caminho são apagados do banco.
+
+A posição passa por um banco gratuito do próprio dono (Firebase Realtime
+Database, plano Spark). Configuração, uma vez só:
+
+1. Em <https://console.firebase.google.com>, criar um projeto (pode desligar o
+   Google Analytics).
+2. No menu, **Criação → Realtime Database → Criar banco de dados** (qualquer
+   região; começar no modo bloqueado).
+3. Na aba **Regras**, apagar o que estiver lá, colar o conteúdo de
+   [`docs/regras-do-banco.json`](docs/regras-do-banco.json) e **Publicar**.
+   Com essas regras: só escreve numa corrida quem tem a senha dela (o app),
+   ninguém lê a senha, ninguém lista as corridas, e só quem tem o link lê a
+   posição.
+4. Na aba **Dados**, copiar o endereço do banco (termina em `firebaseio.com`
+   ou `firebasedatabase.app`).
+5. No app: **Ajustes → Corrida ao vivo → Configurar**, colar o endereço e
+   tocar em **Salvar e testar**.
+
+O endereço fica só no celular (o repositório é público). Para testar a página
+no PC sem Firebase: `python ferramentas/simular_ao_vivo.py`.

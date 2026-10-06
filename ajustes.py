@@ -5,6 +5,8 @@ import os
 PADRAO = {
     "limite_kmh": 32,
     "alfa": 0.5,
+    "firebase": "",          # endereço do banco do dono para a corrida ao vivo (ao_vivo.py)
+    "corridas_abertas": [],  # [banco, código, senha] de corrida ao vivo ainda não encerrada no banco
     "ritmo": 1.0,   # tempo real do dono / tempo previsto pelo servidor de rotas (ritmo.py)
     "tela_ligada": True,
     "simulador": False,

@@ -149,16 +149,49 @@ class ItemViagem(ButtonBehavior, BoxLayout):
                  width=dp(1))
 
 
-def pedir_nome(ao_confirmar, sugestao="", titulo="Nome do lugar", botao="Salvar"):
-    """Janelinha que pergunta o nome de um lugar; ao_confirmar(nome) só é
-    chamado com nome preenchido. O campo já vem com a sugestão, selecionada
-    (digitar por cima troca)."""
+def escolher(titulo, opcoes, texto=""):
+    """Janelinha com um botão por opção: opcoes = [(rótulo, função ou None), ...]
+    (None só fecha). Devolve a janela."""
+    from kivy.uix.popup import Popup
+    from widgets.botao import BotaoHUD
+
+    caixa = BoxLayout(orientation="vertical", spacing=dp(8), padding=dp(4))
+    altura = dp(64) + len(opcoes) * dp(56)
+    if texto:
+        aviso = Texto(text=texto, font_size=tema.T_ROTULO + 2, size_hint_y=None, height=dp(96),
+                      halign="left", valign="top")
+        aviso.bind(size=lambda w, s: setattr(w, "text_size", s))
+        caixa.add_widget(aviso)
+        altura += dp(104)
+    janela = Popup(title=titulo, content=caixa, size_hint=(0.92, None), height=altura,
+                   title_color=tema.CIANO, title_size=tema.T_BOTAO, separator_color=tema.CIANO,
+                   background="", background_color=tema.PAINEL, auto_dismiss=True)
+
+    def tocar(funcao):
+        janela.dismiss()
+        if funcao is not None:
+            funcao()
+    janela.botoes = []
+    for k, (rotulo, funcao) in enumerate(opcoes):
+        b = BotaoHUD(text=rotulo, destaque=(k == 0 and funcao is not None), font_size=tema.T_ROTULO + 2,
+                     size_hint_y=None, height=dp(48), on_release=lambda w, f=funcao: tocar(f))
+        janela.botoes.append(b)
+        caixa.add_widget(b)
+    janela.open()
+    return janela
+
+
+def pedir_nome(ao_confirmar, sugestao="", titulo="Nome do lugar", botao="Salvar",
+               dica="Ex.: Barbearia do amigo", limite=60):
+    """Janelinha que pergunta um texto curto (o nome de um lugar);
+    ao_confirmar(texto) só é chamado com o campo preenchido. O campo já vem
+    com a sugestão, selecionada (digitar por cima troca)."""
     from kivy.uix.popup import Popup
     from kivy.uix.textinput import TextInput
     from widgets.botao import BotaoHUD
 
     caixa = BoxLayout(orientation="vertical", spacing=dp(10), padding=dp(4))
-    campo = TextInput(text=sugestao or "", hint_text="Ex.: Barbearia do amigo", multiline=False,
+    campo = TextInput(text=sugestao or "", hint_text=dica, multiline=False,
                       font_size=tema.T_BOTAO, size_hint_y=None, height=dp(48),
                       background_normal="", background_active="", background_color=tema.FUNDO,
                       foreground_color=tema.BRANCO, hint_text_color=tema.CIANO_FRACO,
@@ -169,7 +202,7 @@ def pedir_nome(ao_confirmar, sugestao="", titulo="Nome do lugar", botao="Salvar"
                    background="", background_color=tema.PAINEL, auto_dismiss=True)
 
     def confirmar(*a):
-        nome = campo.text.strip()[:60]
+        nome = campo.text.strip()[:limite]
         if not nome:
             campo.focus = True
             return

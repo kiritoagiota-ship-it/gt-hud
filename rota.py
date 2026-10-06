@@ -77,6 +77,21 @@ def decodificar_polyline(texto, precisao=1e6):
     return pontos
 
 
+def codificar_polyline(pontos, precisao=1e6):
+    """[(lat, lon), ...] -> texto "polyline" (o contrário de decodificar_polyline)."""
+    saida, ult = [], (0, 0)
+    for lat, lon in pontos:
+        atual = (int(round(lat * precisao)), int(round(lon * precisao)))
+        for v in (atual[0] - ult[0], atual[1] - ult[1]):
+            v = ~(v << 1) if v < 0 else v << 1
+            while v >= 0x20:
+                saida.append(chr((0x20 | (v & 0x1F)) + 63))
+                v >>= 5
+            saida.append(chr(v + 63))
+        ult = atual
+    return "".join(saida)
+
+
 def achar_subidas(elevacao, passo=ELEVACAO_PASSO_M):
     """[{inicio_m, fim_m, ganho_m, grau}] a partir da elevação a cada `passo` m."""
     if len(elevacao) < 3:

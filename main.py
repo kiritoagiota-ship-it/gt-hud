@@ -21,6 +21,8 @@ from ajustes import Ajustes
 from banco import Banco
 from filtro import FiltroVelocidade
 from ritmo import Ritmo
+import ao_vivo
+import diagnostico as registro
 from gps_service import ServicoGPS
 from navegacao import P_INFO, Navegacao
 from segundo_plano import SegundoPlano
@@ -70,6 +72,8 @@ class GTHudApp(App):
         self.banco = Banco(pasta)
         self.filtro = FiltroVelocidade(alfa=self.ajustes["alfa"])
         self.ritmo = Ritmo(self.ajustes["ritmo"])
+        self.corrida = None          # corrida ao vivo em andamento (ao_vivo.AoVivo)
+        self._hoje = None            # (dia, metros, segundos andando) das viagens de hoje
         self.viagem = Viagem()
         self.gps = ServicoGPS(self._ao_receber_gps, self._ao_status_gps)
         self.voz = Voz(pasta)
@@ -185,6 +189,7 @@ class GTHudApp(App):
         # para o app inteiro; quanto menos objetos, menor o tranco)
         gc.collect()
         gc.freeze()
+        Clock.schedule_once(self._fechar_corridas_esquecidas, 8)
 
     def on_pause(self):
         self.fundo.ao_pausar()  # rota ativa: segue navegando minimizado
@@ -199,6 +204,7 @@ class GTHudApp(App):
         self.sm.get_screen("mapa").mapa.ao_voltar()
 
     def on_stop(self):
+        self.parar_corrida()
         self.fundo.terminou()
         self.salvar_viagem_atual()  # não perde a viagem se o app fechar
         self.gps.parar()
@@ -454,6 +460,7 @@ class GTHudApp(App):
         self.rota_previa = None
         self.destino = None
         self.ajustes["ritmo"] = round(self.ritmo.terminar(), 3)
+        self.parar_corrida(chegou)
         self.gps.deixar_rota()
         salvou = self.salvar_viagem_atual()
         if not chegou:
@@ -465,8 +472,10 @@ class GTHudApp(App):
 
     def _navegar(self, lat, lon, vel, agora):
         nav = self.nav
-        self.estado_nav = nav.atualizar(lat, lon, vel, agora)
+        self.estado_nav = e = nav.atualizar(lat, lon, vel, agora)
         self.ritmo.leitura(nav, vel, agora)  # aprende o ritmo do dono (tempo de chegada)
+        if self.corrida is not None and e:
+            self.corrida.leitura(lat, lon, vel, self.rumo, e["restante_m"], e["restante_s"])
         if nav.chegou and not self._fim_agendado:
             self._fim_agendado = True
             Clock.schedule_once(lambda dt: self.encerrar_navegacao(chegou=True), 5)
@@ -504,6 +513,8 @@ class GTHudApp(App):
             return
         self.nav.trocar_rota(rota)
         self.gps.seguir_rota(rota.pontos)
+        if self.corrida is not None:
+            self.corrida.trocar_rota(rota)
         self.sm.get_screen("mapa").trocar_rota(rota)
         self.voz.falar(["rota_trocada"], P_INFO)
 
@@ -523,6 +534,8 @@ class GTHudApp(App):
             return
         self.nav.trocar_rota(rota)
         self.gps.seguir_rota(rota.pontos)
+        if self.corrida is not None:
+            self.corrida.trocar_rota(rota)
         self.na_tela(lambda: self.sm.get_screen("mapa").trocar_rota(rota))
 
     def _recalculo_falhou(self, erro):
@@ -587,7 +600,82 @@ class GTHudApp(App):
         del self.recentes[MAX_RECENTES:]
         self._gravar_json(self._caminho_recentes, self.recentes)
 
+    # --- corrida ao vivo (link para alguém acompanhar pela web) ---------------------
+    def compartilhando(self):
+        return self.corrida is not None and self.corrida.ativo
+
+    def compartilhar_corrida(self):
+        """Começa a mandar a corrida para o banco (se ainda não começou) e abre
+        o "Compartilhar" do Android com o link. Devolve o link, "sem_rota" ou
+        "sem_config" (falta o endereço do banco nos Ajustes)."""
+        if self.nav is None:
+            return "sem_rota"
+        base = ao_vivo.limpar_endereco(self.ajustes["firebase"])
+        if base is None:
+            return "sem_config"
+        if not self.compartilhando():
+            self.corrida = ao_vivo.AoVivo(base)
+            self.corrida.comecar(self.nav.rota, (self.destino or {}).get("nome", ""))
+            # se o app fechar no meio, a próxima abertura apaga a posição do banco
+            self.ajustes["corridas_abertas"] = self.ajustes["corridas_abertas"] + [
+                [base, self.corrida.codigo, self.corrida.senha]]
+            print("[ao vivo] corrida compartilhada")
+        registro.compartilhar("Acompanhe minha corrida ao vivo:\n" + self.corrida.link,
+                              "Minha corrida ao vivo", "Enviar o link da corrida")
+        return self.corrida.link
+
+    def parar_corrida(self, chegou=False):
+        """Avisa o fim: a posição e o caminho somem do banco (o link para de mostrar)."""
+        corrida, self.corrida = self.corrida, None
+        if corrida is None:
+            return
+        corrida.terminar(chegou)
+
+        def conferir():
+            corrida.esperar_fim(15)
+            return corrida
+        rede.em_segundo_plano(conferir, self._corrida_encerrada)
+
+    def _corrida_encerrada(self, corrida):
+        if corrida.fim_avisado:
+            self.ajustes["corridas_abertas"] = [c for c in self.ajustes["corridas_abertas"]
+                                                if c[1] != corrida.codigo]
+
+    def _fechar_corridas_esquecidas(self, dt=None):
+        """Corridas que ficaram abertas no banco (app fechado no meio, ou sem
+        internet na hora de encerrar): apaga a posição agora."""
+        abertas = [c for c in self.ajustes["corridas_abertas"]
+                   if self.corrida is None or c[1] != self.corrida.codigo]
+        if not abertas:
+            return
+
+        def fechar():
+            fechadas = []
+            for base, codigo, senha in abertas:
+                try:
+                    ao_vivo.encerrar_esquecida(base, codigo, senha)
+                    fechadas.append(codigo)
+                except Exception as e:
+                    print("[ao vivo] corrida antiga ainda aberta:", e)
+            return fechadas
+
+        def pronto(fechadas):
+            self.ajustes["corridas_abertas"] = [c for c in self.ajustes["corridas_abertas"]
+                                                if c[1] not in fechadas]
+        rede.em_segundo_plano(fechar, pronto)
+
     # --- viagem ----------------------------------------------------------
+    def resumo_de_hoje(self):
+        """(metros, segundos andando) das viagens salvas hoje."""
+        dia = time.strftime("%Y-%m-%d")
+        if self._hoje is None or self._hoje[0] != dia:
+            t = time.localtime()
+            meia_noite = time.mktime((t.tm_year, t.tm_mon, t.tm_mday, 0, 0, 0, 0, 0, -1))
+            hoje = [v for v in self.banco.listar_viagens() if (v["inicio"] or 0) >= meia_noite]
+            self._hoje = (dia, sum(v["distancia_m"] or 0 for v in hoje),
+                          sum(v["tempo_mov_s"] or 0 for v in hoje))
+        return self._hoje[1], self._hoje[2]
+
     def salvar_viagem_atual(self):
         resultado = self.viagem.finalizar()
         self.fundo.sincronizar()
@@ -599,6 +687,7 @@ class GTHudApp(App):
             # 5 s com sinal salvava uma viagem de "0 m")
             return None
         self.ultima_salva_m = resumo["distancia_m"]
+        self._hoje = None
         return self.banco.salvar_viagem(resumo, pontos)
 
     def viagem_mudou(self):

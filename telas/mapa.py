@@ -29,7 +29,7 @@ from falas import texto_manobra
 from util import fmt_dist, fmt_dist_nav, fmt_duracao, fmt_hora_chegada, fmt_tempo
 from viagem import Viagem
 from widgets.botao import BotaoHUD
-from widgets.comuns import PainelHUD, Ponto, Texto, pedir_nome
+from widgets.comuns import PainelHUD, Ponto, Texto, escolher, pedir_nome
 from widgets.manobra import IconeManobra
 from widgets.mapa import MapaHUD
 from widgets.perfil import PerfilAltimetria
@@ -231,6 +231,8 @@ class TelaMapa(Screen):
         self.btn_rotas = BotaoHUD(text="Rotas", size_hint=(None, None), opaco=True,
                                   font_size=tema.T_ROTULO + 2,
                                   on_release=lambda *a: app.calcular_rotas_navegando())
+        self.btn_vivo = BotaoHUD(text="Ao vivo", size_hint=(None, None), opaco=True,
+                                 font_size=tema.T_ROTULO + 2, on_release=lambda *a: self._ao_vivo())
         for w in (self.col_tempo_nav, self.col_falta, self.col_sobe, self.btn_encerrar):
             self.barra_nav.add_widget(w)
 
@@ -450,7 +452,8 @@ class TelaMapa(Screen):
         else:
             visiveis += [self.faixa, self.barra_nav]
             if self._escolha_nav is None:
-                visiveis.append(self.btn_rotas)
+                visiveis += [self.btn_rotas, self.btn_vivo]
+                self._pintar_vivo()
             if self._escolha_nav is not None:
                 visiveis.append(self.painel_rotas)
                 visiveis.remove(self.disco)
@@ -546,6 +549,8 @@ class TelaMapa(Screen):
         if self.estado == NAVEGANDO and self._escolha_nav is None:
             self.btn_rotas.pos, self.btn_rotas.size = (x_btn + lb - dp(96), y_extra), (dp(96), ab)
             y_extra += ab + gap
+            self.btn_vivo.pos, self.btn_vivo.size = (x_btn + lb - dp(96), y_extra), (dp(96), ab)
+            y_extra += ab + gap
         self.btn_centro.pos = (x_btn + lb - dp(150), y_extra)
         self.btn_centro.size = (dp(150), ab)
 
@@ -607,14 +612,49 @@ class TelaMapa(Screen):
         # já sugere o lugar conhecido naquele ponto, se houver
         pedir_nome(salvar, sugestao=busca.nome_perto(lat, lon))
 
+    # --- corrida ao vivo ---------------------------------------------------------------
+    def _pintar_vivo(self):
+        ligado = App.get_running_app().compartilhando()
+        self.btn_vivo.text = "No ar" if ligado else "Ao vivo"
+        self.btn_vivo.cor = tema.VERDE if ligado else tema.CIANO
+
+    def _ao_vivo(self):
+        app = App.get_running_app()
+        if app.compartilhando():
+            escolher("Corrida ao vivo", [
+                ("Enviar o link de novo", self._compartilhar),
+                ("Parar de compartilhar", self._parar_vivo),
+                ("Fechar", None)])
+        else:
+            self._compartilhar()
+
+    def _compartilhar(self):
+        app = App.get_running_app()
+        resposta = app.compartilhar_corrida()
+        if resposta == "sem_config":
+            escolher("Corrida ao vivo", [("Abrir os Ajustes", lambda: app.abrir("config")), ("Agora não", None)],
+                     texto="Falta um passo, feito uma vez só: colar nos Ajustes o endereço do seu "
+                           "banco gratuito (linha \"Corrida ao vivo\").")
+        elif resposta != "sem_rota":
+            self.mensagem("Link pronto: escolha o contato", tema.VERDE)
+        self._pintar_vivo()
+
+    def _parar_vivo(self):
+        App.get_running_app().parar_corrida()
+        self.mensagem("Parou de compartilhar: o link não mostra mais nada", tema.LARANJA, 5)
+        self._pintar_vivo()
+
     # --- viagem (modo livre) --------------------------------------------------------
     def _montar_controles(self):
         v = App.get_running_app().viagem
         c = self.controles
         c.clear_widgets()
         if v.estado == Viagem.PARADA:
-            c.add_widget(BotaoHUD(text="Gravar viagem", font_size=tema.T_ROTULO + 2,
-                                  on_release=lambda *a: self._viagem("iniciar")))
+            # sem botão de gravar (pedido do dono, 06/10/2026): a viagem grava
+            # sozinha em toda rota iniciada, e só nelas
+            aviso = Texto(text="Toda rota iniciada\né gravada sozinha", font_size=tema.T_ROTULO,
+                          color=tema.CIANO_FRACO, halign="center")
+            c.add_widget(aviso)
         elif v.estado == Viagem.GRAVANDO:
             c.add_widget(BotaoHUD(text="Pausar", font_size=tema.T_ROTULO + 2,
                                   on_release=lambda *a: self._viagem("pausar")))
@@ -629,11 +669,7 @@ class TelaMapa(Screen):
 
     def _viagem(self, acao):
         app = App.get_running_app()
-        if acao == "iniciar":
-            app.viagem.iniciar()
-            app.viagem_mudou()
-            self.mensagem("Gravando viagem", tema.CIANO)
-        elif acao == "pausar":
+        if acao == "pausar":
             app.viagem.pausar()
             self.mensagem("Viagem pausada", tema.LARANJA)
         elif acao == "retomar":
@@ -649,9 +685,15 @@ class TelaMapa(Screen):
         self._atualizar_viagem()
 
     def _atualizar_viagem(self):
-        v = App.get_running_app().viagem
-        self.col_dist.valor.text = fmt_dist(v.distancia_m)
-        self.col_tempo.valor.text = fmt_tempo(v.tempo_total_s)
+        app = App.get_running_app()
+        v = app.viagem
+        if v.estado == Viagem.PARADA:   # andando livre: o total das rotas de hoje
+            metros, segundos = app.resumo_de_hoje()
+            self.col_dist.valor.text, self.col_dist.rotulo.text = fmt_dist(metros), "hoje"
+            self.col_tempo.valor.text, self.col_tempo.rotulo.text = fmt_tempo(segundos), "andando hoje"
+        else:
+            self.col_dist.valor.text, self.col_dist.rotulo.text = fmt_dist(v.distancia_m), "Distância"
+            self.col_tempo.valor.text, self.col_tempo.rotulo.text = fmt_tempo(v.tempo_total_s), "Tempo"
         if v.estado != getattr(self, "_estado_viagem", None):
             self._montar_controles()  # a pausa automática mudou o estado
 
