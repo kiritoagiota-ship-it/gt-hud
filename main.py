@@ -52,6 +52,7 @@ VIBRA_FORCAS = [0, 255, 0, 255]
 RUMO_MIN_KMH = 3.0          # parado, o rumo do GPS é ruído: fica o último
 RUMO_VALIDO_S = 6.0         # rumo mais velho que isso não vai no pedido de rota
 GPS_PERDIDO_FALA_S = 10     # navegando sem sinal por isso: o assistente avisa
+FIM_APOS_CHEGAR_S = 5.0        # chegou: a rota se encerra sozinha depois disso
 RECALCULO_ESPERA_S = 12     # depois de falhar, espera antes de tentar de novo
 MAX_RECENTES = 8
 
@@ -120,6 +121,7 @@ class GTHudApp(App):
         self._recalculando = False
         self._t_falha_recalculo = 0.0
         self._fim_agendado = False
+        self._fim_em = None            # time.monotonic() em que a rota se encerra depois de chegar
         self._saudou = False
         self._avisou_gps_perdido = False
         self._pilha_telas = []
@@ -423,6 +425,7 @@ class GTHudApp(App):
         self._checar_limite(vel)
         if self.nav is not None:
             self._navegar(d["lat"], d["lon"], vel, agora)
+            self.conferir_fim()
         return vel
 
     def _checar_limite(self, vel):
@@ -530,6 +533,7 @@ class GTHudApp(App):
                              self.ajustes["avisar_semaforos"])
         self.estado_nav = None
         self._fim_agendado = False
+        self._fim_em = None
         self.ritmo.comecar()
         if self.viagem.estado == Viagem.PARADA:
             self.viagem.iniciar()  # a navegação grava a viagem sozinha
@@ -537,9 +541,18 @@ class GTHudApp(App):
         self.sm.get_screen("mapa").modo_navegando(rota)
         self.fundo.comecou()  # notificação + Android deixa seguir minimizado
 
+    def conferir_fim(self):
+        """Chegou há FIM_APOS_CHEGAR_S? Encerra a rota. Chamado pelo Clock (app
+        aberto), a cada leitura do GPS e pela thread de segundo plano."""
+        if self._fim_em is not None and self.nav is not None and time.monotonic() >= self._fim_em:
+            self.encerrar_navegacao(chegou=True)
+
     def encerrar_navegacao(self, chegou=False):
+        """Pode rodar na thread de segundo plano (chegada com o app
+        minimizado): o que é de tela fica para quando o app voltar."""
         if self.nav is None:
             return
+        self._fim_em = None
         self.nav = None
         self.estado_nav = None
         self.rota_previa = None
@@ -553,7 +566,7 @@ class GTHudApp(App):
         texto = "Você chegou!" if chegou else "Navegação encerrada."
         if salvou:
             texto += "  Viagem salva (%s)." % ("%.1f km" % (self.ultima_salva_m / 1000.0)).replace(".", ",")
-        self.sm.get_screen("mapa").modo_livre(texto, tema.VERDE)
+        self.na_tela(lambda: self.sm.get_screen("mapa").modo_livre(texto, tema.VERDE))
 
     def _navegar(self, lat, lon, vel, agora):
         nav = self.nav
@@ -563,7 +576,14 @@ class GTHudApp(App):
             self.corrida.leitura(lat, lon, vel, self.rumo, e["restante_m"], e["restante_s"])
         if nav.chegou and not self._fim_agendado:
             self._fim_agendado = True
-            Clock.schedule_once(lambda dt: self.encerrar_navegacao(chegou=True), 5)
+            # quem acompanha pelo link vê "chegou" na hora, sem esperar nada
+            self.parar_corrida(chegou=True)
+            # a rota se encerra 5 s depois (tempo de ver/ouvir "você chegou").
+            # Pelo relógio do celular, não só pelo Clock do Kivy: com o app
+            # minimizado o Clock para, e a rota ficava "andando" para sempre
+            # (serviço ligado, viagem sem salvar, link sem fim) até reabrir o app.
+            self._fim_em = agora + FIM_APOS_CHEGAR_S
+            Clock.schedule_once(lambda dt: self.conferir_fim(), FIM_APOS_CHEGAR_S + 0.1)
         elif (nav.recalcular_pedido and not self._recalculando
               and agora - self._t_falha_recalculo > RECALCULO_ESPERA_S):
             self._recalcular()
@@ -663,6 +683,26 @@ class GTHudApp(App):
         self.salvos = [s for s in self.salvos if s["nome"] != nome and not self.mesmo_lugar(s, novo)]
         self.salvos.insert(0, novo)
         self._gravar_json(self._caminho_salvos, self.salvos)
+
+    def renomear_lugar(self, lugar, novo_nome):
+        """Troca o nome de um lugar salvo (e do mesmo ponto nos recentes e nos
+        atalhos). Ex.: o que ficou salvo como "Plus Code 9MJH+9W"."""
+        novo_nome = (novo_nome or "").strip()[:60]
+        if not novo_nome:
+            return
+        for lista in (self.salvos, self.recentes):
+            for item in lista:
+                if self.mesmo_lugar(item, lugar):
+                    item["nome"] = novo_nome
+        # dois salvos não podem ficar com o mesmo nome: fica o que foi renomeado
+        self.salvos = [s for s in self.salvos
+                       if s["nome"] != novo_nome or self.mesmo_lugar(s, lugar)]
+        self._gravar_json(self._caminho_salvos, self.salvos)
+        self._gravar_json(self._caminho_recentes, self.recentes)
+        atalhos = {k: (dict(v, nome=novo_nome) if self.mesmo_lugar(v, lugar) and v["nome"] == lugar["nome"] else v)
+                   for k, v in self.ajustes["atalhos"].items()}
+        if atalhos != self.ajustes["atalhos"]:
+            self.ajustes["atalhos"] = atalhos
 
     def definir_atalho(self, qual, lugar):
         """qual: "casa" ou "trabalho"; lugar None apaga."""

@@ -67,7 +67,8 @@
 // Página do "corrida ao vivo" do GT-HUD. O link é .../acompanhar/#<banco>/<código>:
 // o que vem depois do "#" fica só neste navegador. A página lê, a cada
 // LER_A_CADA_MS, a posição que o app mandou para o banco do dono.
-const LER_A_CADA_MS = 4000;
+const LER_A_CADA_MS = 3000;    // sem o canal ao vivo, pergunta ao banco a cada isso
+const CONFERIR_MS = 12000;     // com o canal ao vivo funcionando, só confere de vez em quando
 const ATRASADO_S = 50;        // sem posição nova por isso: avisa (parado, o app manda a cada 20 s)
 const el = (id) => document.getElementById(id);
 
@@ -114,8 +115,11 @@ function estado(classe, texto) {
 
 const link = lerLink();
 let mapa, eu, linhaRota, linhaFeito, marcaDestino;
+let vistoAntes = Date.now();
 let seguindo = true, pedacos = 0, versaoRota = 0, feito = [], acabou = false;
 let ultimoT = null, vistoEm = 0, ultimaPos = null, enquadrou = false;
+let canal = null, canalEm = 0;          // canal ao vivo (o banco avisa na hora) e a última vez que ele falou
+let desliza = null;                     // animação da seta indo de um ponto ao outro
 
 function montarMapa() {
   mapa = L.map("mapa", { zoomControl: false, attributionControl: false }).setView([-16.6799, -49.2550], 13);
@@ -154,18 +158,47 @@ function juntarPedacos(tr) {
   linhaFeito.setLatLngs(ultimaPos ? feito.concat([ultimaPos]) : feito);
 }
 
+// A seta desliza até a posição nova (em vez de pular): mais ou menos no
+// tempo entre dois envios do app, para o movimento parecer contínuo.
+function deslizar(de, para, ms) {
+  if (desliza) cancelAnimationFrame(desliza);
+  const inicio = performance.now();
+  function quadro(agora) {
+    const f = Math.min(1, (agora - inicio) / ms);
+    const p = [de[0] + (para[0] - de[0]) * f, de[1] + (para[1] - de[1]) * f];
+    eu.setLatLng(p);
+    linhaFeito.setLatLngs(feito.concat([p]));
+    if (seguindo) mapa.panTo(p, { animate: false });
+    desliza = f < 1 ? requestAnimationFrame(quadro) : null;
+  }
+  desliza = requestAnimationFrame(quadro);
+}
+
 function mostrarPosicao(pos) {
+  const anterior = ultimaPos, intervalo = Date.now() - vistoAntes;
+  vistoAntes = Date.now();
   ultimaPos = [pos.lat, pos.lon];
   const giro = pos.r == null ? 0 : pos.r;
   const html = '<div class="eu" style="transform: rotate(' + Number(giro) + 'deg)">' +
     '<svg viewBox="0 0 34 34" aria-hidden="true"><circle cx="17" cy="17" r="15" fill="#04070b" opacity=".85"/>' +
     '<path d="M17 4 L27 27 L17 21.5 L7 27 Z" fill="#19e3ff"/></svg></div>';
   const icone = L.divIcon({ className: "", html: html, iconSize: [34, 34], iconAnchor: [17, 17] });
+  const primeira = !eu;
   if (!eu) eu = L.marker(ultimaPos, { icon: icone, keyboard: false, alt: "Posição atual", zIndexOffset: 500 }).addTo(mapa);
-  else { eu.setLatLng(ultimaPos); eu.setIcon(icone); }
-  linhaFeito.setLatLngs(feito.concat([ultimaPos]));
-  if (seguindo) {
-    if (!enquadrou) { mapa.setView(ultimaPos, 16); enquadrou = true; } else mapa.panTo(ultimaPos);
+  else eu.setIcon(icone);
+  const perto = anterior && mapa.distance(anterior, ultimaPos) < 400;
+  const semAnimar = window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+  if (primeira || !perto || semAnimar || document.hidden) {
+    if (desliza) { cancelAnimationFrame(desliza); desliza = null; }
+    eu.setLatLng(ultimaPos);
+    linhaFeito.setLatLngs(feito.concat([ultimaPos]));
+    if (seguindo) {
+      if (!enquadrou) { mapa.setView(ultimaPos, 16); enquadrou = true; } else mapa.panTo(ultimaPos);
+    }
+  } else {
+    if (seguindo && !enquadrou) { mapa.setView(anterior, 16); enquadrou = true; }
+    deslizar(eu.getLatLng() ? [eu.getLatLng().lat, eu.getLatLng().lng] : anterior, ultimaPos,
+             Math.max(600, Math.min(3500, intervalo)));
   }
   el("numeros").hidden = false;
   el("vel").textContent = pos.v;
@@ -175,6 +208,8 @@ function mostrarPosicao(pos) {
 
 function terminou(pos) {
   acabou = true;
+  if (canal) { canal.close(); canal = null; }
+  if (desliza) { cancelAnimationFrame(desliza); desliza = null; }
   el("numeros").hidden = true;
   if (eu) { eu.remove(); eu = null; }
   linhaFeito.setLatLngs([]); linhaRota.setLatLngs([]);
@@ -200,24 +235,59 @@ function relogio() {
   else estado("indo", "Ao vivo · atualizado " + haTempo(Math.max(1, parado)));
 }
 
+// Posição nova (veio do canal ao vivo ou de uma leitura): mostra e busca o
+// que mais mudou (rota recalculada, pedaços novos do caminho).
+let buscando = false;
+async function receber(pos) {
+  if (acabou) return;
+  if (pos === null && ultimoT === null) estado("", "Esperando a primeira posição…");
+  tratarPosicao(pos);
+  if (acabou || !pos || buscando) { relogio(); return; }
+  buscando = true;
+  try {
+    if ((pos.rv || 0) !== versaoRota) mostrarRota(await ler("/rota.json"));
+    if ((pos.n || 0) > pedacos) {
+      const desde = String(pedacos).padStart(5, "0");
+      juntarPedacos(await ler('/tr.json?orderBy=' + encodeURIComponent('"$key"') + '&startAt=' + encodeURIComponent('"' + desde + '"')));
+    }
+  } catch (e) { /* tenta de novo na próxima posição */ }
+  buscando = false;
+  relogio();
+}
+
 async function ciclo() {
   if (acabou) return;
   try {
-    const pos = await ler("/pos.json");
-    if (pos === null && ultimoT === null) estado("", "Esperando a primeira posição…");
-    tratarPosicao(pos);
-    if (!acabou && pos) {
-      if ((pos.rv || 0) !== versaoRota) mostrarRota(await ler("/rota.json"));
-      if ((pos.n || 0) > pedacos) {
-        const desde = String(pedacos).padStart(5, "0");
-        juntarPedacos(await ler('/tr.json?orderBy=' + encodeURIComponent('"$key"') + '&startAt=' + encodeURIComponent('"' + desde + '"')));
-      }
-    }
-    relogio();
+    await receber(await ler("/pos.json"));
   } catch (e) {
     if (!acabou) estado("erro", "Sem conexão com o servidor. Tentando de novo…");
   }
-  if (!acabou) setTimeout(ciclo, document.hidden ? LER_A_CADA_MS * 3 : LER_A_CADA_MS);
+  // com o canal ao vivo falando, a leitura vira só uma conferência
+  const canalVivo = canal && Date.now() - canalEm < 15000;
+  const espera = canalVivo ? CONFERIR_MS : LER_A_CADA_MS;
+  if (!acabou) setTimeout(ciclo, document.hidden ? espera * 3 : espera);
+}
+
+// Canal ao vivo: o banco AVISA quando a posição muda (não é a página que
+// fica perguntando). Chega em menos de um segundo. Se o navegador não tiver
+// ou o canal cair, as leituras de ciclo() seguram.
+function abrirCanal() {
+  if (!window.EventSource || canal) return;
+  try {
+    canal = new EventSource(link.base + "/pos.json");
+  } catch (e) { canal = null; return; }
+  const chegou = (ev) => {
+    canalEm = Date.now();
+    let d;
+    try { d = JSON.parse(ev.data); } catch (e) { return; }
+    if (d && d.path === "/" && (d.data === null || typeof d.data === "object")) receber(d.data);
+    else ler("/pos.json").then(receber).catch(() => {});   // mudou só um pedaço: lê inteiro
+  };
+  canal.addEventListener("put", chegou);
+  canal.addEventListener("patch", chegou);
+  canal.addEventListener("keep-alive", () => { canalEm = Date.now(); });
+  canal.addEventListener("cancel", () => { if (canal) { canal.close(); canal = null; } });
+  canal.onerror = () => { canalEm = 0; };   // o navegador religa sozinho; enquanto isso, ciclo() lê
 }
 
 async function comecar() {
@@ -235,7 +305,7 @@ async function comecar() {
     estado("erro", "Não consegui abrir a corrida. Confira a internet.");
   }
   setInterval(relogio, 1000);
-  if (!acabou) setTimeout(ciclo, LER_A_CADA_MS);
+  if (!acabou) { abrirCanal(); setTimeout(ciclo, LER_A_CADA_MS); }
 }
 comecar();
 </script>

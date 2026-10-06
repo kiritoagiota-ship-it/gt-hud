@@ -2,7 +2,11 @@
 sobe o banco de mentira (firebase_falso.py), serve a pasta docs/ e simula
 uma corrida pela cidade. Abra o endereço que aparece no navegador.
 
-    python ferramentas/simular_ao_vivo.py [segundos de corrida]
+    python ferramentas/simular_ao_vivo.py [segundos de corrida] [endereço de um banco de verdade]
+
+Com o endereço de um banco de verdade, a corrida de teste vai para ele (e é
+encerrada no fim): serve para testar o canal ao vivo, que o banco de mentira
+não tem.
 """
 import functools
 import http.server
@@ -30,18 +34,21 @@ PONTOS = [(-16.6799, -49.2550), (-16.6790, -49.2562), (-16.6772, -49.2568), (-16
 
 def main():
     duracao = float(sys.argv[1]) if len(sys.argv) > 1 else 120.0
-    servidor(PORTA_BANCO)
+    base = ao_vivo.limpar_endereco(sys.argv[2]) if len(sys.argv) > 2 else None
+    if base is None:
+        servidor(PORTA_BANCO)
+        base = "http://127.0.0.1:%d" % PORTA_BANCO
     pagina = http.server.ThreadingHTTPServer(
         ("127.0.0.1", PORTA_PAGINA),
         functools.partial(http.server.SimpleHTTPRequestHandler, directory=os.path.join(RAIZ, "docs")))
     threading.Thread(target=pagina.serve_forever, daemon=True).start()
 
     rota = rotas.Rota(PONTOS, [], [], 300, "Praça do Trabalhador")
-    ao_vivo.ENVIAR_A_CADA_S = 2.0
-    corrida = ao_vivo.AoVivo("http://127.0.0.1:%d" % PORTA_BANCO)
-    corrida.codigo = CODIGO
+    corrida = ao_vivo.AoVivo(base)
+    corrida.codigo = CODIGO + "-" + corrida.codigo[:6]
     corrida.comecar(rota, rota.destino_nome)
-    print("Abra: http://127.0.0.1:%d/acompanhar/#127.0.0.1:%d/%s" % (PORTA_PAGINA, PORTA_BANCO, CODIGO), flush=True)
+    print("Abra: http://127.0.0.1:%d/acompanhar/#%s/%s" % (PORTA_PAGINA, base.split("://", 1)[1], corrida.codigo),
+          flush=True)
 
     inicio = time.time()
     while time.time() - inicio < duracao:

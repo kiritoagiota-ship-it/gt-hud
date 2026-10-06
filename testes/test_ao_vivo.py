@@ -106,18 +106,18 @@ class TesteAoVivo(unittest.TestCase):
         corrida = ao_vivo.AoVivo(self.base)
         corrida.comecar(rota, "X")
         self.assertTrue(esperar(lambda: corrida.enviados >= 1))
-        real = rede.enviar
+        real = ao_vivo._Linha.enviar
 
         def caiu(*a, **k):
             raise OSError("sem internet")
-        rede.enviar = caiu
+        ao_vivo._Linha.enviar = caiu
         try:
             for k in (2, 4, 6):
                 corrida.leitura(rota.pontos[k][0], rota.pontos[k][1], 20, 0, 500, 100)
                 time.sleep(0.08)
             self.assertTrue(esperar(lambda: corrida.ultimo_erro is not None))
         finally:
-            rede.enviar = real
+            ao_vivo._Linha.enviar = real
         n = corrida.enviados
         corrida.leitura(rota.pontos[8][0], rota.pontos[8][1], 20, 0, 400, 80)
         self.assertTrue(esperar(lambda: corrida.enviados > n))
@@ -126,6 +126,20 @@ class TesteAoVivo(unittest.TestCase):
         self.assertEqual(len(feito), 4)
         corrida.terminar()
         corrida.esperar_fim()
+
+    def test_conexao_cai_e_o_envio_seguinte_abre_outra(self):
+        rota = rota_reta(600)
+        corrida = ao_vivo.AoVivo(self.base)
+        corrida.comecar(rota, "X")
+        self.assertTrue(esperar(lambda: corrida.enviados >= 1))
+        corrida._linha._con.close()          # o servidor fechou a conexão parada
+        n = corrida.enviados
+        corrida.leitura(rota.pontos[5][0], rota.pontos[5][1], 20, 0, 400, 80)
+        self.assertTrue(esperar(lambda: corrida.enviados > n))
+        self.assertIsNone(corrida.ultimo_erro)
+        corrida.terminar()
+        corrida.esperar_fim()
+        self.assertTrue(corrida.fim_avisado)
 
     def test_testar_banco(self):
         self.assertIsNone(ao_vivo.testar(self.base))

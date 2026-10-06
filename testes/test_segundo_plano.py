@@ -60,6 +60,9 @@ class AppFalso:
     def vigiar_gps(self):
         pass
 
+    def conferir_fim(self):
+        pass
+
 
 def esperar(condicao, segundos=3.0):
     fim = time.time() + segundos

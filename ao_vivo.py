@@ -24,8 +24,11 @@ Roda numa thread própria (a internet nunca trava a tela) e funciona com o
 app minimizado. Sem internet por um tempo: o caminho acumulado segue no
 próximo envio que der certo.
 """
+import http.client
+import json
 import re
 import secrets
+import urllib.parse
 import threading
 import time
 
@@ -33,7 +36,7 @@ import rede
 from rota import codificar_polyline, distancia_m
 
 PAGINA = "https://kiritoagiota-ship-it.github.io/gt-hud/acompanhar/"
-ENVIAR_A_CADA_S = 5.0
+ENVIAR_A_CADA_S = 2.5        # (era 5 s: quem acompanhava via a posição bem atrasada)
 PARADO_A_CADA_S = 20.0       # parado, não precisa mandar a mesma posição toda hora
 TRILHA_PASSO_M = 12.0        # ponto novo no caminho feito a cada isso
 TEMPO_REDE_S = 10
@@ -88,6 +91,48 @@ def encerrar_esquecida(base, codigo, senha):
                 "PUT", TEMPO_REDE_S)
 
 
+class _Linha:
+    """Conexão que fica ABERTA com o banco: cada envio aproveita a mesma, em
+    vez de abrir uma nova (o aperto de mão de segurança custava meio segundo
+    ou mais a cada posição, na rede do celular). Caiu? Abre outra e repete."""
+
+    def __init__(self, base):
+        u = urllib.parse.urlsplit(base)
+        self._https, self._host = u.scheme == "https", u.netloc
+        self._con = None
+
+    def _abrir(self):
+        if self._https:
+            return http.client.HTTPSConnection(self._host, timeout=TEMPO_REDE_S, context=rede._CTX)
+        return http.client.HTTPConnection(self._host, timeout=TEMPO_REDE_S)
+
+    def enviar(self, caminho, corpo, metodo):
+        dados = json.dumps(corpo).encode("utf-8")
+        cabecalhos = {"User-Agent": rede.USER_AGENT, "Content-Type": "application/json"}
+        for tentativa in (1, 2):
+            try:
+                if self._con is None:
+                    self._con = self._abrir()
+                self._con.request(metodo, caminho, body=dados, headers=cabecalhos)
+                resposta = self._con.getresponse()
+                texto = resposta.read()
+                if resposta.status >= 400:
+                    raise OSError("o banco respondeu %d: %s" % (resposta.status, texto[:120]))
+                return
+            except Exception:
+                self.fechar()
+                if tentativa == 2:
+                    raise   # a conexão parada pode ter sido fechada pelo servidor: tentou de novo com uma nova
+
+    def fechar(self):
+        try:
+            if self._con is not None:
+                self._con.close()
+        except Exception:
+            pass
+        self._con = None
+
+
 class AoVivo:
     def __init__(self, base, relogio=time.time):
         self.base = base
@@ -110,6 +155,7 @@ class AoVivo:
         self._ultimo_ponto = None
         self._pedacos = 0            # pedaços de caminho já no banco
         self._fim = None             # "chegou" ou "encerrou"
+        self._linha = _Linha(base)
         self.fim_avisado = False     # o aviso de fim chegou ao banco (posição apagada)
 
     @property
@@ -118,6 +164,9 @@ class AoVivo:
 
     def _url(self):
         return "%s/corridas/%s.json" % (self.base, self.codigo)
+
+    def _mandar(self, corpo, metodo):
+        self._linha.enviar("/corridas/%s.json" % self.codigo, corpo, metodo)
 
     # --- chamados pelo app (qualquer thread) ---------------------------------------
     def comecar(self, rota, destino_nome):
@@ -196,7 +245,7 @@ class AoVivo:
             if not self._criada:
                 corpo = {"s": self.senha, "pub": {"v": 1, "destino": self._destino,
                                                   "inicio": int(self._relogio())}}
-                rede.enviar(self._url(), corpo, "PUT", TEMPO_REDE_S)
+                self._mandar(corpo, "PUT")
                 self._criada = True
             corpo = {"s": self.senha}
             n = self._pedacos
@@ -209,7 +258,7 @@ class AoVivo:
                                      "dlon": round(rota[3], 6)}
             if pos is not None:
                 corpo["pub/pos"] = dict(pos, n=n, rv=self._rota[0] if self._rota else 0, e="indo")
-            rede.enviar(self._url(), corpo, "PATCH", TEMPO_REDE_S)
+            self._mandar(corpo, "PATCH")
         except Exception:
             with self._trava:  # não foi: o caminho volta para a fila (a posição velha não)
                 self._trilha_nova = trilha + self._trilha_nova
@@ -225,8 +274,9 @@ class AoVivo:
 
     def _enviar_fim(self, fim):
         """Troca a corrida inteira pelo aviso de fim: posição e caminho somem."""
-        rede.enviar(self._url(), {"s": self.senha, "pub": {
+        self._mandar({"s": self.senha, "pub": {
             "v": 1, "destino": self._destino, "fim": int(self._relogio()),
-            "pos": {"e": fim, "t": int(self._relogio())}}}, "PUT", TEMPO_REDE_S)
+            "pos": {"e": fim, "t": int(self._relogio())}}}, "PUT")
         self.enviados += 1
         self.fim_avisado = True
+        self._linha.fechar()

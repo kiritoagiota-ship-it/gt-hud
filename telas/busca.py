@@ -211,10 +211,34 @@ class TelaBusca(Screen):
             return
         linha = BoxLayout(size_hint_y=None, height=item.height, spacing=dp(6))
         linha.add_widget(item)
-        linha.add_widget(BotaoHUD(text="Apagar", cor=tema.VERMELHO, font_size=tema.T_ROTULO + 1,
-                                  size_hint_x=None, width=dp(84),
-                                  on_release=lambda w, l=lugar: self._apagar(l)))
+        if lugar.get("fonte") == "salvo":
+            # salvo: dá para trocar o nome (ex.: ficou "Plus Code 9MJH+9W") ou apagar
+            linha.add_widget(BotaoHUD(text="Editar", font_size=tema.T_ROTULO + 1,
+                                      size_hint_x=None, width=dp(84),
+                                      on_release=lambda w, l=lugar: self._editar(l)))
+        else:
+            linha.add_widget(BotaoHUD(text="Apagar", cor=tema.VERMELHO, font_size=tema.T_ROTULO + 1,
+                                      size_hint_x=None, width=dp(84),
+                                      on_release=lambda w, l=lugar: self._apagar(l)))
         self.lista.add_widget(linha)
+
+    def _editar(self, lugar):
+        self.campo.focus = False
+        escolher(lugar["nome"], [("Trocar o nome", lambda: self._renomear(lugar)),
+                                 ("Apagar", lambda: self._apagar(lugar)),
+                                 ("Cancelar", None)])
+
+    def _renomear(self, lugar):
+        def salvar(nome):
+            App.get_running_app().renomear_lugar(lugar, nome)
+            if self.campo.text.strip():
+                self._buscar_local()
+            else:
+                self._mostrar_recentes()
+            self.lbl_status.text = "Nome trocado para: %s" % nome
+        # nome que é só um código não serve de sugestão: o campo vem vazio
+        so_codigo = lugar["nome"].startswith(("Plus Code ", "Local colado", "Lugar do Google Maps"))
+        pedir_nome(salvar, sugestao="" if so_codigo else lugar["nome"], titulo="Novo nome do lugar")
 
     def _apagar(self, lugar):
         App.get_running_app().apagar_lugar(lugar)

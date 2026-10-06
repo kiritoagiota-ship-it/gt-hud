@@ -89,13 +89,17 @@ def conferir_lista(dt):
     b = app().sm.get_screen("busca")
     checar(len(b.lista.children) == 3, "lista sem repetir o salvo nos recentes (%d itens)" % len(b.lista.children))
     foto("40_salvos_recentes")
-    botoes = [w for w in b.lista.walk() if getattr(w, "text", "") == "Apagar"]
-    checar(len(botoes) == 3, "todos com Apagar (%d)" % len(botoes))
-    # apaga a "Barbearia do amigo": o botão da linha que tem esse nome
+    botoes = [w for w in b.lista.walk() if getattr(w, "text", "") in ("Apagar", "Editar")]
+    checar(len(botoes) == 3, "todos com Apagar (recente) ou Editar (salvo) (%d)" % len(botoes))
+    # apaga a "Barbearia do amigo" (salva): Editar -> Apagar
+    from kivy.uix.popup import Popup
     for linha in b.lista.children:
         textos = [getattr(w, "text", "") for w in linha.walk()]
         if "Barbearia do amigo" in textos:
-            [w for w in linha.walk() if getattr(w, "text", "") == "Apagar"][0].dispatch("on_release")
+            [w for w in linha.walk() if getattr(w, "text", "") == "Editar"][0].dispatch("on_release")
+            pop = [w for w in Window.children if isinstance(w, Popup)]
+            [x for x in pop[0].botoes if x.text == "Apagar"][0].dispatch("on_release")
+            break
 
 
 def conferir_apagado(dt):

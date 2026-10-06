@@ -228,24 +228,31 @@ class SegundoPlano:
 
     def _laco(self):
         t_vigia = time.monotonic()
+        t_erro = 0.0
         try:
             while not self._parar.wait(INTERVALO_S):
-                with self._trava:
-                    prontas, self._fila = self._fila, []
-                for fn, valor in prontas:
-                    fn(valor)
-                d = self.app.gps.ler_direto()
-                if d is not None:
-                    self.leituras_no_fundo += 1
-                    self.app.processar_leitura(d)
-                    self.atualizar()
-                self.app.voz.bombear()
-                if time.monotonic() - t_vigia >= VIGIA_A_CADA_S:
-                    t_vigia = time.monotonic()
-                    self.app.vigiar_gps()
-        except Exception:
-            import traceback
-            print("[fundo] erro na navegação em segundo plano:\n" + traceback.format_exc())
+                # um erro numa volta não pode acabar com a navegação em segundo
+                # plano (antes a thread morria e a rota parava até reabrir o app)
+                try:
+                    with self._trava:
+                        prontas, self._fila = self._fila, []
+                    for fn, valor in prontas:
+                        fn(valor)
+                    d = self.app.gps.ler_direto()
+                    if d is not None:
+                        self.leituras_no_fundo += 1
+                        self.app.processar_leitura(d)
+                        self.atualizar()
+                    self.app.voz.bombear()
+                    self.app.conferir_fim()   # chegou com o app minimizado: encerra a rota daqui
+                    if time.monotonic() - t_vigia >= VIGIA_A_CADA_S:
+                        t_vigia = time.monotonic()
+                        self.app.vigiar_gps()
+                except Exception:
+                    if time.monotonic() - t_erro > 10.0:   # o mesmo erro a cada volta: anota de vez em quando
+                        t_erro = time.monotonic()
+                        import traceback
+                        print("[fundo] erro em segundo plano (segue rodando):\n" + traceback.format_exc())
         finally:
             try:  # thread que falou com o Java precisa se soltar da JVM antes de acabar
                 import jnius
