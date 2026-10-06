@@ -20,7 +20,7 @@ from kivy.clock import Clock
 PythonActivity = autoclass("org.kivy.android.PythonActivity")
 
 PROVEDOR = "gps"
-CONFERIR_S = 0.2  # o GPS manda 1 posição/s; conferir 5x/s atrasa no máximo 0,2 s
+CONFERIR_S = 0.1  # o GPS manda 1 posição/s; conferir 10x/s atrasa no máximo 0,1 s
 
 
 def _classe_satelites():
@@ -88,7 +88,10 @@ class GPSAndroid:
                          # sem velocidade no fix: None (o app mantém a última), não 0
                          speed=loc.velocidade if loc.temVelocidade else None,
                          bearing=loc.rumo if loc.temRumo else None,
-                         accuracy=loc.precisao)
+                         accuracy=loc.precisao,
+                         # para o filtro do velocímetro (filtro.py)
+                         speed_acc=loc.precisaoVelocidade if loc.precisaoVelocidade > 0 else None,
+                         t=loc.tempo if loc.tempo > 0 else None)
             depois = loc.contador
             if depois == n:
                 break

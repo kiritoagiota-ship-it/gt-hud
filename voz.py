@@ -22,6 +22,7 @@ import falas
 
 PASTA_VOZ = os.path.join(os.path.dirname(os.path.abspath(__file__)), "voz")
 RESPIRO_S = 0.09
+ENTRADA_S = 0.3          # silêncio antes da fala gravada: a saída de áudio come o começo
 VALIDADE_NA_FILA_S = 7.0
 ESPERA_MOTOR_S = 4.0     # ao abrir o app, espera o motor de voz ficar pronto
 RITMO = 1.0              # ritmo natural do motor (mais lento soava robótico)
@@ -37,7 +38,7 @@ FRASE_TESTE = ("Sistemas online, senhor. Em duzentos metros, vire à direita. "
 class Voz:
     def __init__(self, pasta_cache):
         self.ligada = True
-        self._pasta = os.path.join(pasta_cache, "falas")
+        self._pasta = os.path.join(pasta_cache, "falas2")  # "falas": sem o silêncio de entrada
         os.makedirs(self._pasta, exist_ok=True)
         self._fila = []            # [(prioridade, hora, pedaços, texto)]
         self._livre_em = 0.0       # time.monotonic() em que a fala atual termina
@@ -214,10 +215,11 @@ class Voz:
                 params = params or w.getparams()
                 quadros.append(w.readframes(w.getnframes()))
         respiro = b"\x00" * (int(params.framerate * RESPIRO_S) * params.sampwidth * params.nchannels)
+        entrada = b"\x00" * (int(params.framerate * ENTRADA_S) * params.sampwidth * params.nchannels)
         temporario = caminho + ".tmp"
         with wave.open(temporario, "wb") as w:
             w.setparams(params)
-            w.writeframes(respiro.join(quadros))
+            w.writeframes(entrada + respiro.join(quadros))
         os.replace(temporario, caminho)
-        total = sum(len(q) for q in quadros) + len(respiro) * (len(quadros) - 1)
+        total = len(entrada) + sum(len(q) for q in quadros) + len(respiro) * (len(quadros) - 1)
         return caminho, total / float(params.framerate * params.sampwidth * params.nchannels)

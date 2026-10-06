@@ -18,19 +18,18 @@ from kivy.properties import NumericProperty
 from kivy.uix.boxlayout import BoxLayout
 from kivy.uix.floatlayout import FloatLayout
 from kivy.uix.label import Label
-from kivy.uix.popup import Popup
 from kivy.uix.screenmanager import Screen
-from kivy.uix.textinput import TextInput
 from kivy.uix.widget import Widget
 
 import android_utils
+import busca
 import goiania
 import tema
 from falas import texto_manobra
 from util import fmt_dist, fmt_dist_nav, fmt_duracao, fmt_hora_chegada, fmt_tempo
 from viagem import Viagem
 from widgets.botao import BotaoHUD
-from widgets.comuns import PainelHUD, Ponto, Texto
+from widgets.comuns import PainelHUD, Ponto, Texto, pedir_nome
 from widgets.manobra import IconeManobra
 from widgets.mapa import MapaHUD
 from widgets.perfil import PerfilAltimetria
@@ -599,36 +598,14 @@ class TelaMapa(Screen):
     def _pedir_nome(self):
         if self._marca is None:
             return
-        caixa = BoxLayout(orientation="vertical", spacing=dp(10), padding=dp(4))
-        campo = TextInput(hint_text="Ex.: Barbearia do amigo", multiline=False,
-                          font_size=tema.T_BOTAO, size_hint_y=None, height=dp(48),
-                          background_normal="", background_active="", background_color=tema.FUNDO,
-                          foreground_color=tema.BRANCO, hint_text_color=tema.CIANO_FRACO,
-                          cursor_color=tema.CIANO, padding=(dp(10), dp(12)))
-        botoes = BoxLayout(size_hint_y=None, height=dp(48), spacing=dp(8))
-        janela = Popup(title="Nome do lugar", content=caixa, size_hint=(0.92, None), height=dp(210),
-                       title_color=tema.CIANO, title_size=tema.T_BOTAO, separator_color=tema.CIANO,
-                       background="", background_color=tema.PAINEL, auto_dismiss=True)
+        lat, lon = self._marca
 
-        def salvar(*a):
-            nome = campo.text.strip()
-            if not nome:
-                return
-            lat, lon = self._marca
+        def salvar(nome):
             App.get_running_app().salvar_lugar(nome, lat, lon)
-            janela.dismiss()
             self._fechar_marca()
             self.mensagem("Salvo! Ache em \"Para onde, senhor?\"", tema.VERDE)
-
-        botoes.add_widget(BotaoHUD(text="Cancelar", font_size=tema.T_ROTULO + 2,
-                                   on_release=lambda *a: janela.dismiss()))
-        botoes.add_widget(BotaoHUD(text="Salvar", destaque=True, font_size=tema.T_ROTULO + 2,
-                                   on_release=salvar))
-        campo.bind(on_text_validate=salvar)
-        caixa.add_widget(campo)
-        caixa.add_widget(botoes)
-        janela.open()
-        campo.focus = True
+        # já sugere o lugar conhecido naquele ponto, se houver
+        pedir_nome(salvar, sugestao=busca.nome_perto(lat, lon))
 
     # --- viagem (modo livre) --------------------------------------------------------
     def _montar_controles(self):

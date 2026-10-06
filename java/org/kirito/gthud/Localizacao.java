@@ -4,6 +4,7 @@ import android.content.Context;
 import android.location.Location;
 import android.location.LocationListener;
 import android.location.LocationManager;
+import android.os.Build;
 import android.os.Bundle;
 import android.os.Looper;
 
@@ -29,6 +30,10 @@ public class Localizacao implements LocationListener {
     public static volatile double rumo = 0;            // graus, 0 = norte, horário
     public static volatile boolean temRumo = false;
     public static volatile int gpsLigado = -1;         // -1 = não sabe, 0 = não, 1 = sim
+    // para o filtro do velocímetro: o quanto o GPS confia na velocidade
+    // (m/s; -1 = não informou) e a hora exata da leitura (s desde o boot)
+    public static volatile double precisaoVelocidade = -1;
+    public static volatile double tempo = 0;
 
     private static Localizacao instancia;
 
@@ -41,6 +46,12 @@ public class Localizacao implements LocationListener {
         precisao = loc.hasAccuracy() ? loc.getAccuracy() : 9999;
         temRumo = loc.hasBearing();
         rumo = loc.hasBearing() ? loc.getBearing() : 0;
+        double pv = -1;
+        if (Build.VERSION.SDK_INT >= 26 && loc.hasSpeedAccuracy()) {
+            pv = loc.getSpeedAccuracyMetersPerSecond();
+        }
+        precisaoVelocidade = pv;
+        tempo = loc.getElapsedRealtimeNanos() / 1e9;
         contador++;  // por último: o Python só lê quando isto muda
     }
 

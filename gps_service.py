@@ -28,7 +28,9 @@ class ServicoGPS:
         else:
             from gps_android import GPSAndroid
             self._gps = GPSAndroid(self._on_location, self._on_status)
-            self._gps.iniciar(intervalo_ms=1000)
+            # pede 2 leituras/s: a maioria dos celulares só dá 1/s (aí nada
+            # muda), mas os que dão mais deixam o velocímetro mais em cima
+            self._gps.iniciar(intervalo_ms=500)
             self.modo = "GPS"
         self.ativo = True
 

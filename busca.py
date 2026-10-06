@@ -22,6 +22,7 @@ nenhuma base gratuita): colar aqui o que o Google Maps dá (lugar_colado):
   e endereço; o app procura esse endereço no mapa aberto (aproximado: a
   rua). Link antigo/longo com "@lat,lon" ou "!3d..!4d.." é exato.
 """
+import math
 import os
 import re
 import sqlite3
@@ -40,6 +41,7 @@ PACOTE = "org.kirito.gthud"
 CERT_SHA1 = "4E22C21B14BD3A119E9737C9C7E378CCBD5F569D"   # parte pública do certificado do APK
 BASE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "dados", "goiania_lugares.db")
 MAX_RESULTADOS = 12
+NOME_PERTO_M = 50          # ponto colado: sugere o nome do lugar conhecido até essa distância
 POUCOS = 4                 # menos que isso na base offline: pergunta também ao Photon
 _PALAVRAS_VAZIAS = {"e", "de", "da", "do", "das", "dos", "a", "o", "as", "os", "&", "-"}
 _COORDENADAS = re.compile(r"(-?\d{1,2}\.\d{3,})\s*,\s*(-?\d{1,3}\.\d{3,})")
@@ -114,12 +116,13 @@ def lugar_colado(texto, resolver=None, geocodificar=None):
         lat, lon = pluscode.recuperar(codigo, *goiania.CENTRO)
         resto = texto.replace(codigo, "").strip(" ,")
         return {"nome": ("Plus Code " + codigo.upper()), "endereco": resto[:80] or "Plus Code do Google Maps",
-                "lat": lat, "lon": lon}
+                "lat": lat, "lon": lon, "sem_nome": True}
     if link is None:
         m = _COORDENADAS.search(texto)
         if m and not re.search(r"[a-zA-Z]{3,}", texto.replace(m.group(0), "")):
             lat, lon = float(m.group(1)), float(m.group(2))
-            return {"nome": "Local colado", "endereco": "%.5f, %.5f" % (lat, lon), "lat": lat, "lon": lon}
+            return {"nome": "Local colado", "endereco": "%.5f, %.5f" % (lat, lon), "lat": lat, "lon": lon,
+                    "sem_nome": True}
         return None
     if "goo.gl" not in link and "google." not in link:
         return None
@@ -133,8 +136,12 @@ def lugar_colado(texto, resolver=None, geocodificar=None):
         nome = titulo.split(" - ")[0][:60] if titulo else ""
         # o texto copiado do app do Google costuma vir "Nome do lugar\nhttps://..."
         antes = texto.split(link)[0].strip() if link in texto else ""
-        nome = nome or (antes.splitlines()[-1][:60] if antes else "Lugar do Google Maps")
-        return {"nome": nome, "endereco": "do Google Maps", "lat": ponto[0], "lon": ponto[1]}
+        achou = nome or (antes.splitlines()[-1][:60] if antes else "")
+        lugar = {"nome": achou or "Lugar do Google Maps", "endereco": "do Google Maps",
+                 "lat": ponto[0], "lon": ponto[1]}
+        if not achou:
+            lugar["sem_nome"] = True
+        return lugar
     if not titulo:
         return None
     nome, endereco, ponto = _do_endereco(titulo, geocodificar)
@@ -156,6 +163,25 @@ def _salvos(texto, salvos):
 
 
 # --- 2) base offline ---------------------------------------------------------------
+def nome_perto(lat, lon, raio_m=NOME_PERTO_M):
+    """Nome do lugar conhecido (base offline) mais perto do ponto, até raio_m;
+    "" se não há. Serve de sugestão de nome para um ponto colado ou marcado."""
+    if not os.path.exists(BASE):
+        return ""
+    dlat = raio_m / 110540.0
+    dlon = raio_m / (111320.0 * math.cos(math.radians(lat)))
+    con = sqlite3.connect(BASE)
+    try:
+        linhas = con.execute(
+            "SELECT nome, lat, lon FROM lugares WHERE lat BETWEEN ? AND ? AND lon BETWEEN ? AND ?",
+            (lat - dlat, lat + dlat, lon - dlon, lon + dlon)).fetchall()
+    finally:
+        con.close()
+    perto = [(distancia_m((lat, lon), (la, lo)), nome) for nome, la, lo in linhas if nome]
+    perto = [p for p in perto if p[0] <= raio_m]
+    return min(perto)[1] if perto else ""
+
+
 def _offline(texto):
     termos = _termos(texto)
     if not termos or not os.path.exists(BASE):
@@ -237,6 +263,9 @@ def buscar(texto, perto=None, salvos=()):
     Devolve [{nome, endereco, lat, lon, dist_m, fonte}], o melhor primeiro."""
     colado = lugar_colado(texto)
     if colado is not None:
+        if colado.get("sem_nome"):
+            # código/coordenada não traz nome: sugere o lugar conhecido ali
+            colado["sugestao"] = nome_perto(colado["lat"], colado["lon"])
         colado.update(fonte="colado", nota=100,
                       dist_m=distancia_m(perto, (colado["lat"], colado["lon"])) if perto else None)
         return [colado]

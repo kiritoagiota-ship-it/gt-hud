@@ -13,7 +13,7 @@ import rede
 import tema
 from util import fmt_dist_nav
 from widgets.botao import BotaoHUD
-from widgets.comuns import Cabecalho, ItemViagem, Texto
+from widgets.comuns import Cabecalho, ItemViagem, Texto, pedir_nome
 
 
 class TelaBusca(Screen):
@@ -124,10 +124,19 @@ class TelaBusca(Screen):
     def _escolher(self, lugar):
         self.campo.focus = False
         app = App.get_running_app()
-        if lugar.get("fonte") == "colado":
-            # veio do Google Maps: fica salvo (na próxima, é só digitar o nome)
-            app.salvar_lugar(lugar["nome"], lugar["lat"], lugar["lon"], lugar.get("endereco", ""))
-        app.escolher_destino(lugar)
+        if lugar.get("fonte") != "colado":
+            app.escolher_destino(lugar)
+            return
+        # veio colado (Plus Code, coordenada ou link): SEMPRE com nome. O campo
+        # já vem com o nome do link ou do lugar conhecido naquele ponto; a
+        # pessoa confirma ou troca. Fica salvo: na próxima é só digitar o nome.
+        sugestao = lugar.get("sugestao", "") if lugar.get("sem_nome") else lugar["nome"]
+
+        def ir(nome):
+            app.salvar_lugar(nome, lugar["lat"], lugar["lon"], lugar.get("endereco", ""))
+            limpo = {k: v for k, v in lugar.items() if k not in ("sem_nome", "sugestao")}
+            app.escolher_destino(dict(limpo, nome=nome))
+        pedir_nome(ir, sugestao=sugestao, titulo="Que lugar é esse?", botao="Salvar e ir")
 
     def _voltar(self):
         self.campo.focus = False

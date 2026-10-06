@@ -317,7 +317,7 @@ class GTHudApp(App):
         if d.get("speed") is None:
             vel = self.filtro.valor  # fix sem velocidade: mantém a última
         else:
-            vel = self.filtro.atualizar(d["speed"])
+            vel = self.filtro.atualizar(d["speed"], d.get("t"), d.get("speed_acc"))
         self.posicao = (d["lat"], d["lon"])
         if d.get("bearing") is not None and vel >= RUMO_MIN_KMH:
             self.rumo = d["bearing"]

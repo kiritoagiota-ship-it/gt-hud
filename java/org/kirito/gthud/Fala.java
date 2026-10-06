@@ -63,6 +63,13 @@ public class Fala {
     // pode liberar a fila no meio da fala seguinte
     private static volatile String falaAtual = "";
     private static volatile AudioTrack trilhaAtual;
+    // hora em que o último som terminou: a saída de áudio "dorme" depois de
+    // uns segundos calada e, ao acordar, engole o começo da fala (pior no
+    // Bluetooth). Fala depois de silêncio ganha uma espera maior na frente.
+    private static volatile long ultimoSom = 0;
+    private static final long SAIDA_DORME_MS = 2500;
+    private static final int ESPERA_ACORDAR_MS = 450;
+    private static final int ESPERA_NORMAL_MS = 120;
 
     public static void iniciar(Context c) {
         if (tts != null) {
@@ -348,7 +355,12 @@ public class Fala {
                 }
             } else {
                 pegarFoco();
-                if (tts.speak(texto, TextToSpeech.QUEUE_FLUSH, params, id) == TextToSpeech.SUCCESS) {
+                int modo = TextToSpeech.QUEUE_FLUSH;
+                if (saidaDormindo()) {  // silêncio na frente: acorda a saída de áudio
+                    tts.playSilentUtterance(ESPERA_ACORDAR_MS, TextToSpeech.QUEUE_FLUSH, "silencio" + contador);
+                    modo = TextToSpeech.QUEUE_ADD;
+                }
+                if (tts.speak(texto, modo, params, id) == TextToSpeech.SUCCESS) {
                     return true;
                 }
             }
@@ -548,11 +560,20 @@ public class Fala {
         return z;
     }
 
+    private static boolean saidaDormindo() {
+        return System.currentTimeMillis() - ultimoSom > SAIDA_DORME_MS;
+    }
+
     private static void tocar(float[] x, int taxa, String id) throws InterruptedException {
-        int silencio = taxa / 10;  // 0,1 s antes: o fone Bluetooth "come" o começo
+        // silêncio antes da fala: a saída de áudio (e mais ainda o fone
+        // Bluetooth) "come" o começo quando estava calada. O dono ouvia a
+        // primeira frase cortada (06/10/2026): eram só 0,1 s.
+        int silencio = taxa * (saidaDormindo() ? ESPERA_ACORDAR_MS : ESPERA_NORMAL_MS) / 1000;
+        int subida = Math.min(x.length, taxa * 12 / 1000);  // entra em 12 ms, sem estalo
         short[] pcm = new short[x.length + silencio];
         for (int k = 0; k < x.length; k++) {
-            pcm[silencio + k] = (short) Math.max(-32767, Math.min(32767, x[k] * 32767));
+            float g = k < subida ? k / (float) subida : 1f;
+            pcm[silencio + k] = (short) Math.max(-32767, Math.min(32767, x[k] * g * 32767));
         }
         AudioTrack trilha = new AudioTrack.Builder()
                 .setAudioAttributes(atributos())
@@ -579,15 +600,20 @@ public class Fala {
             }
             trilha.stop();
         } finally {
+            ultimoSom = System.currentTimeMillis();
             trilhaAtual = null;
             trilha.release();
         }
     }
 
     // --- foco de áudio: a música abaixa enquanto o assistente fala ------------------
+    // USAGE_MEDIA de propósito: a gravação de tela do Android só capta som
+    // de mídia/jogo. Marcada como "orientação de navegação", a voz ficava de
+    // fora dos vídeos gravados (06/10/2026). A música continua abaixando
+    // durante a fala: isso vem do pedido de foco (pegarFoco), não daqui.
     private static AudioAttributes atributos() {
         return new AudioAttributes.Builder()
-                .setUsage(AudioAttributes.USAGE_ASSISTANCE_NAVIGATION_GUIDANCE)
+                .setUsage(AudioAttributes.USAGE_MEDIA)
                 .setContentType(AudioAttributes.CONTENT_TYPE_SPEECH)
                 .build();
     }
@@ -629,6 +655,7 @@ public class Fala {
             return;
         }
         falaAtual = "";
+        ultimoSom = System.currentTimeMillis();
         soltarFoco();
         ocupada = false;
     }

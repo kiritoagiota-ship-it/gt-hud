@@ -1,4 +1,5 @@
 """Peças de interface reaproveitadas entre as telas."""
+from kivy.clock import Clock
 from kivy.graphics import Color, Ellipse, Line, Mesh, Rectangle
 from kivy.metrics import dp
 from kivy.properties import ListProperty, StringProperty
@@ -146,3 +147,45 @@ class ItemViagem(ButtonBehavior, BoxLayout):
             Color(*tema.com_alfa(tema.CIANO, 0.5))
             Line(points=[self.x, self.y + dp(1), self.x + self.width, self.y + dp(1)],
                  width=dp(1))
+
+
+def pedir_nome(ao_confirmar, sugestao="", titulo="Nome do lugar", botao="Salvar"):
+    """Janelinha que pergunta o nome de um lugar; ao_confirmar(nome) só é
+    chamado com nome preenchido. O campo já vem com a sugestão, selecionada
+    (digitar por cima troca)."""
+    from kivy.uix.popup import Popup
+    from kivy.uix.textinput import TextInput
+    from widgets.botao import BotaoHUD
+
+    caixa = BoxLayout(orientation="vertical", spacing=dp(10), padding=dp(4))
+    campo = TextInput(text=sugestao or "", hint_text="Ex.: Barbearia do amigo", multiline=False,
+                      font_size=tema.T_BOTAO, size_hint_y=None, height=dp(48),
+                      background_normal="", background_active="", background_color=tema.FUNDO,
+                      foreground_color=tema.BRANCO, hint_text_color=tema.CIANO_FRACO,
+                      cursor_color=tema.CIANO, padding=(dp(10), dp(12)), write_tab=False)
+    botoes = BoxLayout(size_hint_y=None, height=dp(48), spacing=dp(8))
+    janela = Popup(title=titulo, content=caixa, size_hint=(0.92, None), height=dp(210),
+                   title_color=tema.CIANO, title_size=tema.T_BOTAO, separator_color=tema.CIANO,
+                   background="", background_color=tema.PAINEL, auto_dismiss=True)
+
+    def confirmar(*a):
+        nome = campo.text.strip()[:60]
+        if not nome:
+            campo.focus = True
+            return
+        janela.dismiss()
+        ao_confirmar(nome)
+
+    botoes.add_widget(BotaoHUD(text="Cancelar", font_size=tema.T_ROTULO + 2,
+                               on_release=lambda *a: janela.dismiss()))
+    botoes.add_widget(BotaoHUD(text=botao, destaque=True, font_size=tema.T_ROTULO + 2,
+                               on_release=confirmar))
+    campo.bind(on_text_validate=confirmar)
+    caixa.add_widget(campo)
+    caixa.add_widget(botoes)
+    janela.open()
+    campo.focus = True
+    if sugestao:
+        Clock.schedule_once(lambda dt: campo.select_all(), 0.1)
+    janela.campo, janela.confirmar = campo, confirmar   # para os testes de tela
+    return janela

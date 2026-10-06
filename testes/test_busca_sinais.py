@@ -101,3 +101,25 @@ class TestePlusCodeELinkSemCoordenadas(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TesteNomeDoColado(unittest.TestCase):
+    """Ponto colado sempre ganha nome: o do link, o do lugar conhecido ali, ou perguntado."""
+
+    def test_codigo_e_coordenada_avisam_que_nao_tem_nome(self):
+        self.assertTrue(busca.lugar_colado("9MJH+9W Goiânia")["sem_nome"])
+        self.assertTrue(busca.lugar_colado("-16.70123, -49.27012")["sem_nome"])
+
+    def test_link_com_nome_ja_vem_com_nome(self):
+        lugar = busca.lugar_colado("https://www.google.com/maps/place/Padaria+Boa/@-16.68,-49.25,17z")
+        self.assertEqual(lugar["nome"], "Padaria Boa")
+        self.assertNotIn("sem_nome", lugar)
+
+    def test_sugere_o_lugar_conhecido_no_ponto(self):
+        achado = busca.buscar("bosque dos buritis")[0]
+        self.assertEqual(busca.nome_perto(achado["lat"], achado["lon"], 5), achado["nome"])
+        colado = busca.buscar("%.6f, %.6f" % (achado["lat"], achado["lon"]))[0]
+        self.assertTrue(colado["sugestao"])
+
+    def test_sem_lugar_conhecido_nao_inventa_nome(self):
+        self.assertEqual(busca.nome_perto(-16.84, -49.44, 30), "")
