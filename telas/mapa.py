@@ -29,7 +29,7 @@ from falas import texto_manobra
 from util import fmt_dist, fmt_dist_nav, fmt_duracao, fmt_hora_chegada, fmt_tempo
 from viagem import Viagem
 from widgets.botao import BotaoHUD
-from widgets.comuns import PainelHUD, Ponto, Texto, escolher, pedir_nome
+from widgets.comuns import Aviso, PainelHUD, Ponto, Texto, escolher, pedir_nome
 from widgets.manobra import IconeManobra
 from widgets.mapa import MapaHUD
 from widgets.perfil import PerfilAltimetria
@@ -54,9 +54,11 @@ class DiscoVelocimetro(Widget):
         self.velo.size = (self.width - dp(4), self.height - dp(4))
         self.canvas.before.clear()
         with self.canvas.before:
-            Color(*tema.com_alfa(tema.FUNDO, 0.9))
+            Color(*tema.com_alfa(tema.CIANO, 0.10))   # halo em volta do disco
+            Line(ellipse=(self.x, self.y, self.width, self.height), width=dp(4))
+            Color(*tema.com_alfa(tema.FUNDO, 0.92))
             Ellipse(pos=self.pos, size=self.size)
-            Color(*tema.CIANO_APAGADO)
+            Color(*tema.com_alfa(tema.CIANO, 0.55))
             Line(ellipse=(self.x, self.y, self.width, self.height), width=dp(1.2))
 
 
@@ -209,8 +211,7 @@ class TelaMapa(Screen):
                                  on_release=lambda *a: self.mapa.mudar_zoom(1))
         self.btn_menos = BotaoHUD(text="-", size_hint=(None, None), opaco=True,
                                   on_release=lambda *a: self.mapa.mudar_zoom(-1))
-        self.lbl_msg = Texto(text="", font_size=tema.T_ROTULO + 1, halign="center",
-                             size_hint=(None, None))
+        self.lbl_msg = Aviso(text="", font_size=tema.T_ROTULO + 1, bold=True, size_hint=(None, None))
 
         # --- barra de baixo: livre (viagem) ---
         self.barra_livre = PainelHUD(size_hint=(None, None))

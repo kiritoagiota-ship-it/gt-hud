@@ -118,10 +118,11 @@ let seguindo = true, pedacos = 0, versaoRota = 0, feito = [], acabou = false;
 let ultimoT = null, vistoEm = 0, ultimaPos = null, enquadrou = false;
 
 function montarMapa() {
-  mapa = L.map("mapa", { zoomControl: false, attributionControl: true }).setView([-16.6799, -49.2550], 13);
+  mapa = L.map("mapa", { zoomControl: false, attributionControl: false }).setView([-16.6799, -49.2550], 13);
   L.tileLayer("https://tile.openstreetmap.org/{z}/{x}/{y}.png", {
     maxZoom: 19, attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>'
   }).addTo(mapa);
+  L.control.attribution({ position: "topleft", prefix: false }).addTo(mapa);   // embaixo o painel tapava
   linhaRota = L.polyline([], { color: "#19e3ff", weight: 5, opacity: 0.55 }).addTo(mapa);
   linhaFeito = L.polyline([], { color: "#3be08a", weight: 6, opacity: 0.95 }).addTo(mapa);
   mapa.on("dragstart", () => { seguindo = false; el("centralizar").hidden = false; });

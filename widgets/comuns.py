@@ -1,6 +1,7 @@
 """Peças de interface reaproveitadas entre as telas."""
+from kivy.animation import Animation
 from kivy.clock import Clock
-from kivy.graphics import Color, Ellipse, Line, Mesh, Rectangle
+from kivy.graphics import Color, Ellipse, Line, Rectangle, RoundedRectangle
 from kivy.metrics import dp
 from kivy.properties import ListProperty, StringProperty
 from kivy.uix.behaviors import ButtonBehavior
@@ -9,7 +10,7 @@ from kivy.uix.label import Label
 from kivy.uix.widget import Widget
 
 import tema
-from widgets.botao import BotaoHUD, _poligono
+from widgets.botao import BotaoHUD, _poligono, cantos, degrade, malha_degrade, vibrar_toque
 
 
 def soltar(*widgets):
@@ -34,15 +35,17 @@ class PainelHUD(BoxLayout):
     def _d(self, *a):
         c = min(dp(14), self.height * 0.25)
         pts = _poligono(self.x, self.y, self.width, self.height, c)
-        vert = []
-        for px, py in pts:
-            vert += [px, py, 0, 0]
+        plano = [v for p in pts for v in p]
         self.canvas.before.clear()
         with self.canvas.before:
-            Color(*tema.com_alfa(tema.PAINEL, 0.94))
-            Mesh(vertices=vert, indices=list(range(len(pts))), mode="triangle_fan")
+            Color(*tema.com_alfa(self.cor_borda, 0.10))            # halo
+            Line(points=plano, close=True, width=dp(3.6), joint="round")
+            Color(*tema.com_alfa(tema.PAINEL_CLARO, 0.96))         # corpo em degradê
+            malha_degrade(pts, self.y, self.height)
             Color(*tema.com_alfa(self.cor_borda, 0.9))
-            Line(points=[v for p in pts for v in p], close=True, width=dp(1.2))
+            Line(points=plano, close=True, width=dp(1.2))
+            for traco in cantos(pts, c):                           # cantos marcados
+                Line(points=traco, width=dp(2.2), cap="square", joint="miter")
 
 
 class Texto(Label):
@@ -69,6 +72,17 @@ class Cabecalho(BoxLayout):
                                  on_release=lambda *a: ao_voltar()))
         self.titulo = Texto(text=titulo, font_size=tema.T_TITULO, bold=True, color=tema.CIANO)
         self.add_widget(self.titulo)
+        self.bind(pos=self._d, size=self._d)
+
+    def _d(self, *a):
+        # risco de HUD embaixo do título: forte à esquerda, sumindo à direita
+        self.canvas.after.clear()
+        y, x0 = self.y - dp(4), self.x + dp(108)
+        with self.canvas.after:
+            Color(*tema.CIANO)
+            Line(points=[x0, y, x0 + dp(46), y], width=dp(1.6), cap="none")
+            Color(*tema.com_alfa(tema.CIANO, 0.28))
+            Line(points=[x0 + dp(52), y, self.right, y], width=dp(1))
 
 
 class Bloco(BoxLayout):
@@ -93,11 +107,15 @@ class Bloco(BoxLayout):
     def _desenhar(self, *a):
         self.canvas.before.clear()
         with self.canvas.before:
-            Color(*tema.PAINEL)
-            Rectangle(pos=self.pos, size=self.size)
+            Color(*tema.PAINEL_CLARO)
+            Rectangle(pos=self.pos, size=self.size, texture=degrade())
+            Color(*tema.com_alfa(self.cor_acento, 0.35))            # risco fino em cima
+            Line(points=[self.x, self.top, self.right, self.top], width=dp(1))
+            barra = [self.x + dp(2), self.y + dp(10), self.x + dp(2), self.y + self.height - dp(10)]
+            Color(*tema.com_alfa(self.cor_acento, 0.22))            # acento com brilho
+            Line(points=barra, width=dp(4))
             Color(*self.cor_acento)
-            Line(points=[self.x + dp(2), self.y + dp(10), self.x + dp(2), self.y + self.height - dp(10)],
-                 width=dp(1.5))
+            Line(points=barra, width=dp(1.6))
 
 
 class Ponto(Widget):
@@ -139,14 +157,63 @@ class ItemViagem(ButtonBehavior, BoxLayout):
         self.bind(pos=self._d, size=self._d, state=self._d)
         self._d()
 
+    def on_press(self):
+        vibrar_toque()
+
     def _d(self, *a):
+        tocado = self.state == "down"
         self.canvas.before.clear()
         with self.canvas.before:
-            Color(*(tema.com_alfa(tema.CIANO, 0.18) if self.state == "down" else tema.PAINEL))
-            Rectangle(pos=self.pos, size=self.size)
-            Color(*tema.com_alfa(tema.CIANO, 0.5))
+            Color(*tema.PAINEL_CLARO)
+            Rectangle(pos=self.pos, size=self.size, texture=degrade())
+            if tocado:
+                Color(*tema.com_alfa(tema.CIANO, 0.22))
+                Rectangle(pos=self.pos, size=self.size)
+            Color(*tema.com_alfa(tema.CIANO, 0.45))
             Line(points=[self.x, self.y + dp(1), self.x + self.width, self.y + dp(1)],
                  width=dp(1))
+            # acento à esquerda (acende no toque)
+            Color(*tema.com_alfa(tema.CIANO, 1.0 if tocado else 0.55))
+            Line(points=[self.x + dp(2), self.y + dp(12), self.x + dp(2), self.top - dp(12)],
+                 width=dp(1.6))
+
+
+class Aviso(Texto):
+    """Mensagem curta por cima do mapa ("Link pronto", "Viagem salva"...): uma
+    pílula escura do tamanho do texto, com a borda na cor da mensagem, que
+    aparece suave. (Antes era só o texto solto: em cima de rua clara sumia.)"""
+
+    def __init__(self, **kw):
+        kw.setdefault("halign", "center")
+        super().__init__(**kw)
+        self.bind(text=self._mudou, texture_size=self._d, pos=self._d, size=self._d, color=self._d)
+
+    def _mudou(self, *a):
+        Animation.cancel_all(self, "opacity")
+        if self.text:
+            self.opacity = 0.0
+            Animation(opacity=1.0, d=0.18, t="out_quad").start(self)
+        self._d()
+
+    def _d(self, *a):
+        self.canvas.before.clear()
+        if not self.text:
+            return
+        w = min(self.width, self.texture_size[0] + dp(24))
+        h = min(self.height, self.texture_size[1] + dp(12))
+        x, y = self.center_x - w / 2.0, self.center_y - h / 2.0
+        with self.canvas.before:
+            Color(*tema.com_alfa(tema.FUNDO, 0.90))
+            RoundedRectangle(pos=(x, y), size=(w, h), radius=[dp(10)])
+            Color(*tema.com_alfa(self.color, 0.75))
+            Line(rounded_rectangle=(x, y, w, h, dp(10)), width=dp(1.1))
+
+
+def entrar(conteudo, segundos=0.16):
+    """Entrada suave do conteúdo de uma tela (aparece em vez de "piscar")."""
+    Animation.cancel_all(conteudo, "opacity")
+    conteudo.opacity = 0.0
+    Animation(opacity=1.0, d=segundos, t="out_quad").start(conteudo)
 
 
 def escolher(titulo, opcoes, texto=""):

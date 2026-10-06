@@ -35,6 +35,7 @@ from telas.mapa import TelaMapa
 from telas.viagens import TelaViagens
 from viagem import Viagem
 from voz import Voz
+from widgets.comuns import entrar
 
 # vibra uma vez ao passar do limite e só rearma depois de cair DESARME_KMH
 # abaixo dele e de passar INTERVALO_VIBRA_S desde a última (senão vibraria
@@ -214,11 +215,19 @@ class GTHudApp(App):
         """Vai para a tela `nome` lembrando de onde veio (para o Voltar)."""
         if self.sm.current != nome:
             self._pilha_telas.append(self.sm.current)
-        self.sm.current = nome
+        self._mostrar_tela(nome)
 
     def voltar(self):
         anterior = self._pilha_telas.pop() if self._pilha_telas else "mapa"
-        self.sm.current = anterior if anterior != "boot" else "mapa"
+        self._mostrar_tela(anterior if anterior != "boot" else "mapa")
+
+    def _mostrar_tela(self, nome):
+        mudou = self.sm.current != nome
+        self.sm.current = nome
+        if mudou and nome != "mapa":  # o mapa entra direto (é pesado; e é para onde se volta com pressa)
+            tela = self.sm.get_screen(nome)
+            if tela.children:
+                entrar(tela.children[0])
 
     # --- GPS -------------------------------------------------------------
     def solicitar_gps(self):

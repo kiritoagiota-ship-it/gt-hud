@@ -1,7 +1,10 @@
 """Tela de inicialização: sequência de 'boot' enquanto o GPS acha sinal."""
 from kivy.app import App
+from kivy.animation import Animation
 from kivy.clock import Clock
+from kivy.graphics import Color, Line
 from kivy.metrics import dp
+from kivy.properties import NumericProperty
 from kivy.uix.boxlayout import BoxLayout
 from kivy.uix.label import Label
 from kivy.uix.screenmanager import Screen
@@ -18,6 +21,37 @@ LINHAS = [
 ]
 
 
+class RiscoBoot(Widget):
+    """Risco de HUD embaixo do nome: abre do centro para os lados ao ligar."""
+    abertura = NumericProperty(0.0)
+
+    def __init__(self, **kw):
+        kw.setdefault("size_hint_y", None)
+        kw.setdefault("height", dp(10))
+        super().__init__(**kw)
+        self.bind(pos=self._d, size=self._d, abertura=self._d)
+
+    def abrir(self):
+        Animation.cancel_all(self, "abertura")
+        self.abertura = 0.0
+        Animation(abertura=1.0, d=0.9, t="out_cubic").start(self)
+
+    def _d(self, *a):
+        self.canvas.clear()
+        meia = min(self.width * 0.42, dp(150)) * self.abertura
+        if meia <= 0:
+            return
+        cx, cy = self.center_x, self.center_y
+        with self.canvas:
+            Color(*tema.com_alfa(tema.CIANO, 0.18))
+            Line(points=[cx - meia, cy, cx + meia, cy], width=dp(3.2))
+            Color(*tema.CIANO)
+            Line(points=[cx - meia, cy, cx + meia, cy], width=dp(1.3))
+            for lado in (-1, 1):   # marcas nas pontas
+                x = cx + lado * meia
+                Line(points=[x, cy - dp(4), x, cy + dp(4)], width=dp(1.3))
+
+
 class TelaBoot(Screen):
     def __init__(self, **kw):
         super().__init__(**kw)
@@ -31,6 +65,8 @@ class TelaBoot(Screen):
         self.titulo = Label(text="GT-HUD", font_size=dp(58), bold=True, color=tema.CIANO,
                             size_hint_y=None, height=dp(80))
         self.marca.add_widget(self.titulo)
+        self.risco = RiscoBoot()
+        self.marca.add_widget(self.risco)
         self.marca.add_widget(Label(text="Ouxi GT20", font_size=tema.T_BOTAO,
                                     color=tema.CIANO_FRACO, size_hint_y=None, height=dp(24)))
         self._esp_baixo = Widget(size_hint_y=0.25)
@@ -68,6 +104,9 @@ class TelaBoot(Screen):
 
     # --- sequência de boot -------------------------------------------------
     def on_enter(self, *a):
+        self.titulo.opacity = 0.0
+        Animation(opacity=1.0, d=0.6, t="out_quad").start(self.titulo)
+        self.risco.abrir()
         if not getattr(self, "_ouvindo", False):
             App.get_running_app().ouvir(self._ao_ler)
             self._ouvindo = True

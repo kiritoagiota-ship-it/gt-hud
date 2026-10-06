@@ -21,6 +21,7 @@ import tema
 # No Kivy, 0 grau é o topo e o ângulo cresce no sentido horário.
 INICIO, FIM = -135.0, 135.0
 SUAVE = 7.0  # rapidez do anel/número indo até a velocidade nova (1/s)
+VARREDURA_S = 1.1  # ao ligar, o anel vai até o fim e volta (como painel de moto)
 
 
 class Velocimetro(Widget):
@@ -39,6 +40,7 @@ class Velocimetro(Widget):
         self._ev_correr = None
         self._segs = []           # [(cor_brilho, cor_segmento), ...] por segmento
         self._geo = None
+        self._t_varredura = None  # None = ainda não fez; -1 = já fez
         self.lbl_valor = Label(text="0", bold=True, color=tema.BRANCO,
                                size_hint=(None, None))
         self.lbl_unidade = Label(text="km/h", color=tema.CIANO_FRACO,
@@ -69,6 +71,15 @@ class Velocimetro(Widget):
 
     def _correr(self, dt):
         """Anel e número vão até a velocidade nova em ~0,4 s."""
+        if self._t_varredura is not None and self._t_varredura >= 0:
+            # varredura de boas-vindas: sobe até o fim da escala e desce
+            self._t_varredura += min(dt, 0.05)
+            f = self._t_varredura / VARREDURA_S
+            if f < 1.0:
+                self._mostrada = float(self.maximo) * math.sin(math.pi * f) ** 2
+                self._colorir()
+                return
+            self._t_varredura = -1
         alvo = float(self.velocidade)
         dif = alvo - self._mostrada
         if abs(dif) < 0.05:
@@ -145,6 +156,9 @@ class Velocimetro(Widget):
             lbl.font_size = max(dp(10), r * 0.085)
             lbl.center = self._polar(cx, cy, r - esp * 2.1, self._angulo(v))
         self._colorir()
+        if self._t_varredura is None and self.get_root_window() is not None:
+            self._t_varredura = 0.0
+            self._on_velocidade()
 
     def _colorir(self):
         """Só as cores: segmentos acesos até a velocidade mostrada, número e pisca."""

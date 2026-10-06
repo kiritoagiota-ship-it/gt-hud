@@ -5,6 +5,7 @@ from kivy.utils import get_color_from_hex as hexc
 # Cores
 FUNDO = hexc("#04070B")          # quase preto azulado: contraste alto no sol
 PAINEL = hexc("#0A1520")         # fundo de blocos
+PAINEL_CLARO = hexc("#12283A")   # topo do degradê de painéis e botões
 CIANO = hexc("#00E5FF")          # cor principal do sistema
 CIANO_APAGADO = hexc("#0D3440")  # segmentos apagados do anel
 CIANO_FRACO = hexc("#4FA8B8")    # rótulos secundários
