@@ -27,6 +27,8 @@ public class ServicoNavegacao extends Service {
     private static final int ID = 7001;
     private static volatile String titulo = "GT-HUD navegando";
     private static volatile String texto = "";
+    private static volatile int progresso = -1;       // 0..100 da rota; -1 = sem barra
+    private static volatile boolean claro = false;    // tema do app
     private PowerManager.WakeLock acordado;
 
     // --- chamados pelo Python ---------------------------------------------------
@@ -41,6 +43,13 @@ public class ServicoNavegacao extends Service {
 
     public static void parar(Context c) {
         c.stopService(new Intent(c, ServicoNavegacao.class));
+    }
+
+    /** Tema do app e quanto da rota já foi feito: valem na próxima atualização. */
+    public static void estilo(boolean temaClaro, int feito) {
+        claro = temaClaro;
+        progresso = feito;
+        Bolha.estilo(temaClaro, feito);
     }
 
     public static void atualizar(Context c, String novoTitulo, String novoTexto) {
@@ -136,6 +145,10 @@ public class ServicoNavegacao extends Service {
                 .setShowWhen(false)
                 .setCategory(Notification.CATEGORY_NAVIGATION)
                 .setContentIntent(abrirApp(c));
+        b.setColor(claro ? 0xFF00788F : 0xFF00E5FF);
+        if (progresso >= 0) {
+            b.setProgress(100, Math.min(100, progresso), false);   // barra: quanto da rota já foi
+        }
         if (Build.VERSION.SDK_INT >= 31) {
             b.setForegroundServiceBehavior(Notification.FOREGROUND_SERVICE_IMMEDIATE);
         }

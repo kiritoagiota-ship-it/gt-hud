@@ -84,7 +84,8 @@ _CLARO = {
              "ciclovia": (0.150, 0.640, 0.420, 1), "rua": (1.0, 1.0, 1.0, 1),
              "terciaria": (1.0, 1.0, 1.0, 1), "secundaria": (1.0, 0.955, 0.760, 1),
              "primaria": (1.0, 0.880, 0.560, 1), "expressa": (0.980, 0.740, 0.360, 1)},
-    "setas": {"setas": (0.300, 0.360, 0.420, 0.80), "setas_escuras": (0.280, 0.250, 0.180, 0.80)},
+    # (mais apagadas que no escuro: em cima de rua branca, seta escura cheia pesava o mapa)
+    "setas": {"setas": (0.420, 0.490, 0.560, 0.50), "setas_escuras": (0.470, 0.410, 0.270, 0.55)},
 }
 _ESCURO = None   # guardado na primeira troca
 _USO_DO_SOLO = {

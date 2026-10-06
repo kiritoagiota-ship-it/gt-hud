@@ -16,7 +16,7 @@ CREATE INDEX IF NOT EXISTS idx_pontos_viagem ON pontos(viagem_id);
 """
 
 _CAMPOS = ("id", "inicio", "fim", "distancia_m", "duracao_s",
-           "tempo_mov_s", "vel_max_kmh", "vel_media_kmh")
+           "tempo_mov_s", "vel_max_kmh", "vel_media_kmh", "destino")
 
 
 class Banco:
@@ -25,6 +25,10 @@ class Banco:
         self.caminho = os.path.join(pasta, "gthud.db")
         with self._conectar() as c:
             c.executescript(_ESQUEMA)
+            # banco de versões antigas: ganha a coluna do destino (toda viagem agora é uma rota)
+            colunas = [l[1] for l in c.execute("PRAGMA table_info(viagens)")]
+            if "destino" not in colunas:
+                c.execute("ALTER TABLE viagens ADD COLUMN destino TEXT")
 
     def _conectar(self):
         return sqlite3.connect(self.caminho)
@@ -33,10 +37,10 @@ class Banco:
         with self._conectar() as c:
             cur = c.execute(
                 "INSERT INTO viagens (inicio, fim, distancia_m, duracao_s, tempo_mov_s,"
-                " vel_max_kmh, vel_media_kmh) VALUES (?,?,?,?,?,?,?)",
+                " vel_max_kmh, vel_media_kmh, destino) VALUES (?,?,?,?,?,?,?,?)",
                 (resumo["inicio"], resumo["fim"], resumo["distancia_m"],
                  resumo["duracao_s"], resumo["tempo_mov_s"],
-                 resumo["vel_max_kmh"], resumo["vel_media_kmh"]))
+                 resumo["vel_max_kmh"], resumo["vel_media_kmh"], resumo.get("destino") or ""))
             vid = cur.lastrowid
             c.executemany(
                 "INSERT INTO pontos (viagem_id, lat, lon, vel_kmh, t) VALUES (?,?,?,?,?)",

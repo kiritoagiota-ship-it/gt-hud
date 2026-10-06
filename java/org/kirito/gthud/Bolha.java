@@ -2,6 +2,7 @@ package org.kirito.gthud;
 
 import android.content.Context;
 import android.content.Intent;
+import android.content.res.ColorStateList;
 import android.graphics.Color;
 import android.graphics.PixelFormat;
 import android.graphics.Typeface;
@@ -17,6 +18,7 @@ import android.view.MotionEvent;
 import android.view.View;
 import android.view.WindowManager;
 import android.widget.LinearLayout;
+import android.widget.ProgressBar;
 import android.widget.TextView;
 
 /**
@@ -35,6 +37,49 @@ public class Bolha {
     private static TextView linha2;
     private static volatile String texto1 = "";
     private static volatile String texto2 = "";
+    // visual: tema do app (claro/escuro) e quanto da rota já foi feito
+    // (0..100; -1 = sem barra, ex.: só gravando a viagem)
+    private static ProgressBar barra;
+    private static volatile boolean claro = false;
+    private static volatile int progresso = -1;
+
+    /** Tema e progresso da rota; pode ser chamado com a bolha fechada. */
+    public static void estilo(boolean temaClaro, int feito) {
+        claro = temaClaro;
+        progresso = feito;
+        principal.post(new Runnable() {
+            @Override
+            public void run() {
+                pintar();
+            }
+        });
+    }
+
+    private static void pintar() {
+        if (vista == null || linha1 == null) {
+            return;
+        }
+        try {
+            Context c = vista.getContext();
+            int destaque = Color.parseColor(claro ? "#00788F" : "#00E5FF");
+            GradientDrawable fundo = new GradientDrawable();
+            fundo.setColor(Color.parseColor(claro ? "#F2FFFFFF" : "#E6050A10"));
+            fundo.setCornerRadius(dp(c, 18));
+            fundo.setStroke(dp(c, 2), destaque);
+            vista.setBackground(fundo);
+            linha1.setTextColor(destaque);
+            linha2.setTextColor(Color.parseColor(claro ? "#0A1A24" : "#FFFFFF"));
+            if (barra != null) {
+                barra.setVisibility(progresso >= 0 ? View.VISIBLE : View.GONE);
+                barra.setProgress(Math.max(0, Math.min(100, progresso)));
+                barra.setProgressTintList(ColorStateList.valueOf(destaque));
+                barra.setProgressBackgroundTintList(ColorStateList.valueOf(
+                        Color.parseColor(claro ? "#C2D3DA" : "#0D3440")));
+            }
+        } catch (Exception e) {
+            // visual é detalhe: nunca derruba a bolha
+        }
+    }
 
     public static boolean temPermissao(Context c) {
         return Build.VERSION.SDK_INT < 23 || Settings.canDrawOverlays(c);
@@ -98,6 +143,7 @@ public class Bolha {
                 }
                 vista = null;
                 linha1 = linha2 = null;
+                barra = null;
             }
         });
     }
@@ -141,6 +187,13 @@ public class Bolha {
         linha2.setText(texto2);
         vista.addView(linha1);
         vista.addView(linha2);
+        // barrinha: quanto da rota já foi
+        barra = new ProgressBar(c, null, android.R.attr.progressBarStyleHorizontal);
+        barra.setMax(100);
+        LinearLayout.LayoutParams lb = new LinearLayout.LayoutParams(dp(c, 76), dp(c, 5));
+        lb.topMargin = dp(c, 4);
+        vista.addView(barra, lb);
+        pintar();
 
         int tipo = Build.VERSION.SDK_INT >= 26
                 ? WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY

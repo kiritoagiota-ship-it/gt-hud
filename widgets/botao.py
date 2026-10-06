@@ -16,11 +16,12 @@ from kivy.animation import Animation
 from kivy.graphics import Color, Line, Mesh
 from kivy.graphics.texture import Texture
 from kivy.metrics import dp
-from kivy.properties import BooleanProperty, ListProperty, NumericProperty
+from kivy.properties import BooleanProperty, ListProperty, NumericProperty, StringProperty
 from kivy.uix.button import Button
 
 import android_utils
 import tema
+from widgets import icones
 
 _degrade = {}
 VIBRA_TOQUE_MS = 12
@@ -76,6 +77,7 @@ class BotaoHUD(Button):
     cor = ListProperty(tema.CIANO)
     opaco = BooleanProperty(False)  # por cima do mapa: fundo escuro, senão some na rua clara
     brilho = NumericProperty(0.0)   # 1 = recém-tocado; cai a 0 depois de soltar
+    icone = StringProperty("")      # desenho de widgets/icones.py (o texto, se houver, vai embaixo)
 
     def __init__(self, **kw):
         kw.setdefault("font_size", tema.T_BOTAO)
@@ -90,7 +92,7 @@ class BotaoHUD(Button):
         self._anim = None
         self.bind(pos=self._desenhar, size=self._desenhar, destaque=self._desenhar, cor=self._desenhar,
                   opaco=self._desenhar, disabled=self._desenhar, state=self._ao_tocar,
-                  brilho=self._pintar_brilho)
+                  brilho=self._pintar_brilho, icone=self._desenhar, text=self._desenhar)
         self._desenhar()
 
     def _ao_tocar(self, *a):
@@ -145,6 +147,17 @@ class BotaoHUD(Button):
             for traco in cantos(pts, c):
                 Line(points=traco, width=dp(2.1), cap="square", joint="miter")
         texto = tema.FUNDO if self.destaque else self.cor
+        self.canvas.after.clear()
+        if self.icone:
+            # com texto: ícone em cima e o nome pequeno embaixo; sem texto: só o ícone, no meio
+            com_texto = bool(self.text)
+            tam = min(w, h) * (0.40 if com_texto else 0.50)
+            cy = y + h * (0.62 if com_texto else 0.5)
+            with self.canvas.after:
+                icones.desenhar(self.icone, x + w / 2.0, cy, tam, tema.com_alfa(texto, apagado))
+            self.text_size = (w, h)
+            self.halign, self.valign = "center", "bottom"
+            self.padding = (0, dp(5))
         self.color = texto
         self.disabled_color = tema.com_alfa(texto, 0.55 if self.destaque else 0.4)
         self._pintar_brilho()

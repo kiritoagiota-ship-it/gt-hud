@@ -18,6 +18,7 @@ import threading
 import time
 
 import rede
+import tema
 from falas import texto_manobra
 from util import fmt_dist, fmt_dist_nav, fmt_duracao, fmt_hora_chegada, fmt_tempo
 
@@ -56,6 +57,15 @@ def textos(app):
     return titulo, texto, minutos, km
 
 
+def feito(app):
+    """Quanto da rota já foi, de 0 a 100 (-1 sem rota)."""
+    nav = app.nav
+    rota = getattr(nav, "rota", None)
+    if rota is None or not getattr(rota, "total_m", 0):
+        return -1
+    return int(max(0.0, min(1.0, nav.dist_feita / rota.total_m)) * 100)
+
+
 class _Android:
     """Ponte para o Java (serviço, notificação, bolha). No PC não faz nada
     (só escreve no registro, para os testes)."""
@@ -87,6 +97,12 @@ class _Android:
         if self.servico is not None:
             self._chamar(self.servico.parar, self.ctx)
         self.esconder_bolha()
+
+    def estilo(self, claro, feito):
+        """Tema do app e % da rota já feita (-1 = sem barra): pintam a
+        notificação e a bolha."""
+        if self.servico is not None:
+            self._chamar(self.servico.estilo, bool(claro), int(feito))
 
     def notificar(self, titulo, texto):
         if self.servico is not None:
@@ -178,6 +194,7 @@ class SegundoPlano:
             return
         self._t_aviso = agora
         titulo, texto, l1, l2 = textos(self.app)
+        self.android.estilo(tema.claro(), feito(self.app))
         self.android.notificar(titulo, texto)
         if self.minimizado:
             self.android.atualizar_bolha(l1, l2)

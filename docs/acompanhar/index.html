@@ -11,6 +11,13 @@
 <style>
   :root { --fundo: #04070b; --painel: #0b131c; --borda: #16303f; --ciano: #19e3ff; --texto: #eaf6fb;
           --fraco: #7fa3b3; --verde: #3be08a; --laranja: #ffa23a; --vermelho: #ff5a66; }
+  /* de dia (celular de quem acompanha no tema claro): painel claro */
+  @media (prefers-color-scheme: light) {
+    :root { --fundo: #e9eef2; --painel: #ffffff; --borda: #c2d3da; --ciano: #00788f; --texto: #0a1a24;
+            --fraco: #4a6b78; --verde: #0a8a50; --laranja: #c85a00; --vermelho: #d01f40; }
+    .num { background: #eef3f6 !important; }
+    #painel { box-shadow: 0 6px 24px rgba(0,0,0,.18) !important; }
+  }
   * { box-sizing: border-box; }
   html, body { height: 100%; margin: 0; background: var(--fundo); color: var(--texto);
                font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; }
@@ -35,6 +42,10 @@
   .num b { display: block; font-size: 22px; color: var(--ciano); font-variant-numeric: tabular-nums;
            white-space: nowrap; }
   .num span { font-size: 12px; color: var(--fraco); }
+  #ir { display: block; margin-top: 10px; text-align: center; text-decoration: none; font-weight: 600;
+        color: var(--ciano); border: 1px solid var(--ciano); border-radius: 10px; padding: 11px 12px; }
+  #ir[hidden] { display: none; }
+  #ir:focus-visible { outline: 3px solid var(--texto); outline-offset: 2px; }
   #centralizar { position: absolute; right: 12px; top: calc(12px + env(safe-area-inset-top)); z-index: 1000;
                  background: var(--painel); color: var(--ciano); border: 1px solid var(--ciano);
                  border-radius: 10px; padding: 10px 14px; font: inherit; font-weight: 600; cursor: pointer; }
@@ -57,8 +68,9 @@
   <div id="numeros" hidden>
     <div class="num"><b id="vel">–</b><span>km/h</span></div>
     <div class="num"><b id="falta">–</b><span>faltam</span></div>
-    <div class="num"><b id="chega">–</b><span>chegada</span></div>
+    <div class="num"><b id="chega">–</b><span id="chega-em">chegada</span></div>
   </div>
+  <a id="ir" hidden target="_blank" rel="noopener noreferrer">Traçar caminho até ele no Google Maps</a>
 </section>
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"
         integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo=" crossorigin=""></script>
@@ -204,10 +216,16 @@ function mostrarPosicao(pos) {
   el("vel").textContent = pos.v;
   el("falta").textContent = distancia(pos.fm || 0);
   el("chega").textContent = hora(pos.t + (pos.fs || 0));
+  const min = Math.max(1, Math.round((pos.fs || 0) / 60));
+  el("chega-em").textContent = "chega em " + (min >= 60 ? Math.floor(min / 60) + " h " + (min % 60) + " min" : min + " min");
+  // para quem quer ir ao encontro: abre o Google Maps com a posição de agora como destino
+  el("ir").href = "https://www.google.com/maps/dir/?api=1&destination=" + pos.lat.toFixed(6) + "%2C" + pos.lon.toFixed(6);
+  el("ir").hidden = false;
 }
 
 function terminou(pos) {
   acabou = true;
+  el("ir").hidden = true;
   if (canal) { canal.close(); canal = null; }
   if (desliza) { cancelAnimationFrame(desliza); desliza = null; }
   el("numeros").hidden = true;

@@ -10,6 +10,7 @@ Três modos:
 Tudo por cima do mapa é posicionado à mão em _posicionar() (em pé e deitada):
 widget escondido sai do layout, para não roubar o toque do mapa.
 """
+from kivy.animation import Animation
 from kivy.app import App
 from kivy.clock import Clock
 from kivy.graphics import Color, Ellipse, Line, RoundedRectangle
@@ -35,6 +36,7 @@ from widgets.mapa import MapaHUD
 from widgets.perfil import PerfilAltimetria
 from widgets.velocimetro import Velocimetro
 
+RESUMO_FICA_S = 20.0   # o cartão de resumo da rota some sozinho depois disso
 LIVRE, PREVIA, NAVEGANDO = "livre", "previa", "navegando"
 TRILHA_A_CADA_S = 3
 
@@ -205,11 +207,12 @@ class TelaMapa(Screen):
 
         # --- velocímetro e botões do mapa ---
         self.disco = DiscoVelocimetro()
-        self.btn_centro = BotaoHUD(text="Centralizar", font_size=tema.T_ROTULO + 1, opaco=True,
+        # botões do mapa com ÍCONE (lê mais rápido que palavra, com a bike andando)
+        self.btn_centro = BotaoHUD(text="", icone="centralizar", opaco=True, destaque=True,
                                    size_hint=(None, None), on_release=lambda *a: self.mapa.recentralizar())
-        self.btn_mais = BotaoHUD(text="+", size_hint=(None, None), opaco=True,
+        self.btn_mais = BotaoHUD(text="", icone="mais", size_hint=(None, None), opaco=True,
                                  on_release=lambda *a: self.mapa.mudar_zoom(1))
-        self.btn_menos = BotaoHUD(text="-", size_hint=(None, None), opaco=True,
+        self.btn_menos = BotaoHUD(text="", icone="menos", size_hint=(None, None), opaco=True,
                                   on_release=lambda *a: self.mapa.mudar_zoom(-1))
         self.lbl_msg = Aviso(text="", font_size=tema.T_ROTULO + 1, bold=True, size_hint=(None, None))
 
@@ -229,11 +232,10 @@ class TelaMapa(Screen):
         # botões grandes: dá para acertar com a bike tremendo
         self.btn_encerrar = BotaoHUD(text="Encerrar", cor=tema.VERMELHO, font_size=tema.T_ROTULO + 2,
                                      size_hint_x=0.95, on_release=lambda *a: self._encerrar())
-        self.btn_rotas = BotaoHUD(text="Rotas", size_hint=(None, None), opaco=True,
-                                  font_size=tema.T_ROTULO + 2,
-                                  on_release=lambda *a: app.calcular_rotas_navegando())
-        self.btn_vivo = BotaoHUD(text="Ao vivo", size_hint=(None, None), opaco=True,
-                                 font_size=tema.T_ROTULO + 2, on_release=lambda *a: self._ao_vivo())
+        self.btn_rotas = BotaoHUD(text="Rotas", icone="rotas", size_hint=(None, None), opaco=True,
+                                  font_size=sp(11), on_release=lambda *a: app.calcular_rotas_navegando())
+        self.btn_vivo = BotaoHUD(text="Ao vivo", icone="vivo", size_hint=(None, None), opaco=True,
+                                 font_size=sp(11), on_release=lambda *a: self._ao_vivo())
         for w in (self.col_tempo_nav, self.col_falta, self.col_sobe, self.btn_encerrar):
             self.barra_nav.add_widget(w)
 
@@ -268,6 +270,28 @@ class TelaMapa(Screen):
         botoes.add_widget(self.btn_iniciar)
         for w in (self.lbl_destino, self.lbl_resumo, self.escolha, self.perfil, botoes):
             self.card.add_widget(w)
+
+        # --- resumo da rota que acabou (chegou ou encerrou) ---
+        self._resumo = False
+        self._ev_resumo = None
+        self._manobra_vista = None
+        self.card_resumo = PainelHUD(orientation="vertical", size_hint=(None, None), spacing=dp(6))
+        self.lbl_resumo_titulo = Texto(text="", font_size=tema.T_TITULO, bold=True, color=tema.VERDE,
+                                       halign="center", size_hint_y=None, height=dp(32))
+        self.lbl_resumo_destino = Texto(text="", font_size=tema.T_ROTULO + 2, color=tema.CIANO_FRACO,
+                                        halign="center", shorten=True, shorten_from="right", max_lines=1,
+                                        size_hint_y=None, height=dp(22))
+        numeros = BoxLayout(spacing=dp(6))
+        self.res_dist, self.res_tempo = Coluna("distância"), Coluna("tempo")
+        self.res_media, self.res_max = Coluna("média km/h"), Coluna("máxima km/h")
+        for w in (self.res_dist, self.res_tempo, self.res_media, self.res_max):
+            numeros.add_widget(w)
+        self.card_resumo.add_widget(self.lbl_resumo_titulo)
+        self.card_resumo.add_widget(self.lbl_resumo_destino)
+        self.card_resumo.add_widget(numeros)
+        self.card_resumo.add_widget(BotaoHUD(text="Fechar", size_hint_y=None, height=dp(48),
+                                             font_size=tema.T_ROTULO + 2,
+                                             on_release=lambda *a: self._fechar_resumo()))
 
         # --- ponto marcado (segurar o dedo no mapa) ---
         self._marca = None
@@ -323,7 +347,34 @@ class TelaMapa(Screen):
         if mensagem:
             self.mensagem(mensagem, cor or tema.VERDE)
 
+    def mostrar_resumo(self, titulo, destino, resumo):
+        """Cartão de fechamento da rota: distância, tempo, média e máxima.
+        Fica até tocar em Fechar (ou some sozinho em RESUMO_FICA_S)."""
+        self.lbl_resumo_titulo.text = titulo
+        self.lbl_resumo_destino.text = destino or ""
+        self.res_dist.valor.text = fmt_dist(resumo["distancia_m"])
+        self.res_tempo.valor.text = fmt_tempo(resumo["duracao_s"])
+        self.res_media.valor.text = "%.0f" % (resumo["vel_media_kmh"] or 0)
+        self.res_max.valor.text = "%.0f" % (resumo["vel_max_kmh"] or 0)
+        self._resumo = True
+        if self._ev_resumo is not None:
+            self._ev_resumo.cancel()
+        self._ev_resumo = Clock.schedule_once(lambda dt: self._fechar_resumo(), RESUMO_FICA_S)
+        self._montar()
+        self.card_resumo.opacity = 0.0
+        Animation(opacity=1.0, d=0.3, t="out_quad").start(self.card_resumo)
+
+    def _fechar_resumo(self, montar=True):
+        if self._ev_resumo is not None:
+            self._ev_resumo.cancel()
+            self._ev_resumo = None
+        if self._resumo:
+            self._resumo = False
+            if montar:
+                self._montar()
+
     def previa_calculando(self, lugar):
+        self._fechar_resumo(montar=False)
         self.estado = PREVIA
         self.lbl_destino.text = lugar["nome"]
         self.lbl_resumo.text = "Calculando a rota..."
@@ -368,6 +419,8 @@ class TelaMapa(Screen):
 
     def modo_navegando(self, rota):
         self.estado = NAVEGANDO
+        self._manobra_vista = None
+        self._fechar_resumo(montar=False)
         self._tem_depois = self._tem_subida = self._tem_alerta = False
         self._confirmando_fim = False
         self.btn_encerrar.text = "Encerrar"
@@ -447,6 +500,8 @@ class TelaMapa(Screen):
             visiveis.remove(self.disco)
         elif self.estado == LIVRE:
             visiveis += [self.busca, self.status, self.menu, self.barra_livre]
+            if self._resumo:
+                visiveis.append(self.card_resumo)
         elif self.estado == PREVIA:
             visiveis += [self.status, self.card]
             visiveis.remove(self.disco)
@@ -538,6 +593,9 @@ class TelaMapa(Screen):
             base += dp(150) + m
         self.card_marca.pos = (m, m)
         self.card_marca.size = (min(W - 2 * m, dp(480)), dp(110))
+        larg_res = min(W - 2 * m, dp(440))
+        self.card_resumo.size = (larg_res, dp(214))
+        self.card_resumo.pos = ((W - larg_res) / 2.0, max(m + alt_barra + m, (H - dp(214)) / 2.0))
         if self.estado == LIVRE and self._marca is not None:
             base = m + dp(110) + m
         if deitada and self.estado == PREVIA:
@@ -548,12 +606,13 @@ class TelaMapa(Screen):
         self.btn_mais.pos, self.btn_mais.size = (x_btn, base + ab + gap), (lb, ab)
         y_extra = base + 2 * (ab + gap)
         if self.estado == NAVEGANDO and self._escolha_nav is None:
-            self.btn_rotas.pos, self.btn_rotas.size = (x_btn + lb - dp(96), y_extra), (dp(96), ab)
-            y_extra += ab + gap
-            self.btn_vivo.pos, self.btn_vivo.size = (x_btn + lb - dp(96), y_extra), (dp(96), ab)
-            y_extra += ab + gap
-        self.btn_centro.pos = (x_btn + lb - dp(150), y_extra)
-        self.btn_centro.size = (dp(150), ab)
+            alto = ab + dp(8)   # ícone + nome embaixo
+            self.btn_rotas.pos, self.btn_rotas.size = (x_btn, y_extra), (lb, alto)
+            y_extra += alto + gap
+            self.btn_vivo.pos, self.btn_vivo.size = (x_btn, y_extra), (lb, alto)
+            y_extra += alto + gap
+        self.btn_centro.pos = (x_btn, y_extra)
+        self.btn_centro.size = (lb, ab)
 
         # mensagem curta
         if deitada:
@@ -714,6 +773,17 @@ class TelaMapa(Screen):
     def _atualizar_navegacao(self, e):
         m = e["manobra"]
         if m is not None:
+            if m.get("indice") != self._manobra_vista:
+                # manobra nova: o cartão "acende" e o conteúdo entra (chama o olho na hora certa)
+                primeira, self._manobra_vista = self._manobra_vista is None, m.get("indice")
+                if not primeira:
+                    for w in (self.icone, self.lbl_dist, self.lbl_instr, self.lbl_rua):
+                        Animation.cancel_all(w, "opacity")
+                        w.opacity = 0.0
+                        Animation(opacity=1.0, d=0.35, t="out_quad").start(w)
+                    Animation.cancel_all(self.faixa, "cor_borda")
+                    self.faixa.cor_borda = list(tema.VERDE)
+                    Animation(cor_borda=list(tema.CIANO), d=0.9, t="out_quad").start(self.faixa)
             self.icone.acao = m["acao"]
             self.icone.saida = m.get("saida") or 0
             self.lbl_dist.text = fmt_dist_nav(e["dist_manobra"])

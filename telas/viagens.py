@@ -33,7 +33,7 @@ class TelaViagens(Screen):
             self.lbl_total.text = ""
             self.lista.add_widget(Texto(
                 text="Nenhuma viagem gravada ainda.\n"
-                     "No painel, toque em Iniciar viagem para gravar a primeira.",
+                     "Toda rota que você iniciar é gravada sozinha e aparece aqui.",
                 font_size=tema.T_BOTAO, color=tema.CIANO_FRACO,
                 size_hint_y=None, height=dp(90)))
             return
@@ -42,9 +42,12 @@ class TelaViagens(Screen):
         self.lbl_total.text = "%d %s   %s no total" % (n, "viagem" if n == 1 else "viagens",
                                                       fmt_dist(total_m))
         for v in viagens:
-            detalhe = "%s    %s    max %.0f km/h" % (
+            numeros = "%s    %s    max %.0f km/h" % (
                 fmt_dist(v["distancia_m"]), fmt_tempo(v["duracao_s"]), v["vel_max_kmh"] or 0)
-            item = ItemViagem(fmt_data(v["inicio"]), detalhe)
+            if v.get("destino"):   # a viagem é uma rota: o destino é o título
+                item = ItemViagem("Para " + v["destino"], "%s    %s" % (fmt_data(v["inicio"]), numeros))
+            else:
+                item = ItemViagem(fmt_data(v["inicio"]), numeros)
             item.bind(on_release=lambda w, vid=v["id"]: self._abrir(vid))
             self.lista.add_widget(item)
 

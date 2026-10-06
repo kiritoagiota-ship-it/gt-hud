@@ -117,6 +117,20 @@ def vibrar(tempos, forcas):
         print("[vibrar]", e)
 
 
+# Vibração com sentido (dá para saber o que houve sem olhar a tela):
+# tempos [espera, liga, espera, liga...] em ms e a força de cada trecho
+PADROES = {
+    "inicio": ([0, 45, 90, 45], [0, 150, 0, 150]),                       # rota começou: dois toques curtos
+    "chegou": ([0, 130, 90, 70, 90, 220], [0, 200, 0, 160, 0, 255]),     # chegou: longo, curto, longo
+    "fora": ([0, 55, 70, 55, 70, 55], [0, 220, 0, 220, 0, 220]),         # saiu da rota: três rápidos
+}
+
+
+def vibrar_padrao(nome):
+    tempos, forcas = PADROES[nome]
+    vibrar(tempos, forcas)
+
+
 def pedir_permissoes(callback):
     """Chama callback(True/False) na thread do Kivy.
 

@@ -80,6 +80,8 @@ class GTHudApp(App):
         self.filtro = FiltroVelocidade(alfa=self.ajustes["alfa"])
         self.ritmo = Ritmo(self.ajustes["ritmo"])
         self.corrida = None          # corrida ao vivo em andamento (ao_vivo.AoVivo)
+        self.ultimo_resumo = None    # números da última viagem finalizada (cartão de chegada)
+        self._estava_fora = False    # saiu da rota: vibra uma vez
         self._hoje = None            # (dia, metros, segundos andando) das viagens de hoje
         self.viagem = Viagem()
         self.gps = ServicoGPS(self._ao_receber_gps, self._ao_status_gps)
@@ -194,6 +196,7 @@ class GTHudApp(App):
         Window.remove_widget(velha)
         Window.add_widget(self.sm)
         self.root = self.sm
+        entrar(self.sm, 0.4)   # as telas novas aparecem suave (antes era um corte seco)
         tela = self.sm.get_screen("mapa")
         tela.mapa.centro, tela.mapa.zoom = centro, zoom
         if self.nav is not None:
@@ -515,7 +518,8 @@ class GTHudApp(App):
             tela.previa_erro(str(erro))
             self.voz.falar(["sem_rota"], P_INFO)
         else:
-            tela.previa_erro("Não consegui calcular a rota. Confira a internet.")
+            tela.previa_erro("Sem resposta dos servidores de rota (o seu sinal de internet "
+                             "pode estar fraco). Toque em Cancelar e tente de novo daqui a pouco.")
             self.voz.falar(["sem_internet"], P_INFO)
 
     def cancelar_previa(self):
@@ -534,6 +538,8 @@ class GTHudApp(App):
         self.estado_nav = None
         self._fim_agendado = False
         self._fim_em = None
+        self._estava_fora = False
+        android_utils.vibrar_padrao("inicio")
         self.ritmo.comecar()
         if self.viagem.estado == Viagem.PARADA:
             self.viagem.iniciar()  # a navegação grava a viagem sozinha
@@ -553,6 +559,7 @@ class GTHudApp(App):
         if self.nav is None:
             return
         self._fim_em = None
+        destino_nome = (self.destino or {}).get("nome", "")
         self.nav = None
         self.estado_nav = None
         self.rota_previa = None
@@ -560,13 +567,20 @@ class GTHudApp(App):
         self.ajustes["ritmo"] = round(self.ritmo.terminar(), 3)
         self.parar_corrida(chegou)
         self.gps.deixar_rota()
-        salvou = self.salvar_viagem_atual()
+        salvou = self.salvar_viagem_atual(destino_nome)
+        resumo = self.ultimo_resumo if salvou else None
         if not chegou:
             self.voz.falar(["navegacao_encerrada"], P_INFO)
-        texto = "Você chegou!" if chegou else "Navegação encerrada."
-        if salvou:
-            texto += "  Viagem salva (%s)." % ("%.1f km" % (self.ultima_salva_m / 1000.0)).replace(".", ",")
-        self.na_tela(lambda: self.sm.get_screen("mapa").modo_livre(texto, tema.VERDE))
+        texto = "Você chegou!" if chegou else "Rota encerrada"
+
+        def na_tela():
+            tela = self.sm.get_screen("mapa")
+            if resumo is not None:   # fechamento da rota: cartão com os números
+                tela.modo_livre()
+                tela.mostrar_resumo(texto, destino_nome, resumo)
+            else:
+                tela.modo_livre(texto + ". Trecho curto demais para salvar.", tema.VERDE)
+        self.na_tela(na_tela)
 
     def _navegar(self, lat, lon, vel, agora):
         nav = self.nav
@@ -574,8 +588,13 @@ class GTHudApp(App):
         self.ritmo.leitura(nav, vel, agora)  # aprende o ritmo do dono (tempo de chegada)
         if self.corrida is not None and e:
             self.corrida.leitura(lat, lon, vel, self.rumo, e["restante_m"], e["restante_s"])
+        fora = bool(e and e.get("fora_da_rota"))
+        if fora and not self._estava_fora:
+            android_utils.vibrar_padrao("fora")
+        self._estava_fora = fora
         if nav.chegou and not self._fim_agendado:
             self._fim_agendado = True
+            android_utils.vibrar_padrao("chegou")
             # quem acompanha pelo link vê "chegou" na hora, sem esperar nada
             self.parar_corrida(chegou=True)
             # a rota se encerra 5 s depois (tempo de ver/ouvir "você chegou").
@@ -610,7 +629,8 @@ class GTHudApp(App):
         def falhou(erro):
             if pedido == self._pedido and self.nav is not None:
                 tela.fechar_escolha_nav()
-                tela.mensagem("Sem internet para calcular rotas.", tema.LARANJA)
+                tela.mensagem("Sem internet agora: sigo na rota atual. Tente de novo mais à frente.",
+                              tema.LARANJA, 5)
         rede.em_segundo_plano(todas, prontas, falhou)
 
     def trocar_rota_navegando(self, rota):
@@ -811,12 +831,15 @@ class GTHudApp(App):
                           sum(v["tempo_mov_s"] or 0 for v in hoje))
         return self._hoje[1], self._hoje[2]
 
-    def salvar_viagem_atual(self):
+    def salvar_viagem_atual(self, destino_nome=""):
         resultado = self.viagem.finalizar()
         self.fundo.sincronizar()
+        self.ultimo_resumo = None
         if not resultado:
             return None
         resumo, pontos = resultado
+        resumo["destino"] = destino_nome or ""
+        self.ultimo_resumo = resumo
         if resumo["distancia_m"] < DISTANCIA_MINIMA_M:
             # não salva viagem vazia (antes bastavam 5 leituras: ficar parado
             # 5 s com sinal salvava uma viagem de "0 m")

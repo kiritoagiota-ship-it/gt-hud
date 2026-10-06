@@ -14,6 +14,8 @@ from widgets.botao import BotaoHUD
 from widgets.comuns import Texto
 from widgets.intro import AnelBoot
 
+ABERTURA_MIN_S = 2.0
+
 LINHAS = [
     "Nucleo do sistema ............ ok",
     "Banco de viagens ............. ok",
@@ -56,6 +58,7 @@ class TelaBoot(Screen):
     def __init__(self, **kw):
         super().__init__(**kw)
         self._saiu = False
+        self._t_entrada = 0.0
         # em pé: marca em cima e informações embaixo; deitada: lado a lado
         self.raiz = BoxLayout(padding=dp(28), spacing=dp(10))
 
@@ -97,6 +100,7 @@ class TelaBoot(Screen):
 
     # --- sequência de boot -------------------------------------------------
     def on_enter(self, *a):
+        self._t_entrada = Clock.get_boottime()
         self.anel.iniciar()
         self.risco.abrir()
         if not getattr(self, "_ouvindo", False):
@@ -174,8 +178,11 @@ class TelaBoot(Screen):
         prec = app.precisao or 0
         self.status.text = "Sinal adquirido: precisão %d m" % prec
         self.status.color = tema.VERDE
-        self.anel.concluir()   # tudo acende em verde e a onda se abre
-        Clock.schedule_once(lambda dt: self._ir_para_mapa(), 0.9)
+        # a abertura aparece por pelo menos ABERTURA_MIN_S (com GPS rápido ela
+        # sumia em menos de um segundo); o verde e a onda vêm no fim
+        falta = max(0.0, ABERTURA_MIN_S - (Clock.get_boottime() - self._t_entrada))
+        Clock.schedule_once(lambda dt: self.anel.concluir(), falta)
+        Clock.schedule_once(lambda dt: self._ir_para_mapa(), falta + 0.9)
         self._saiu = True
 
     def _ir_para_mapa(self):
