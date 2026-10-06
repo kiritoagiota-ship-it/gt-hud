@@ -14,3 +14,9 @@ os.environ.setdefault("KIVY_NO_FILELOG", "1")
 # testes some); e só avisos para cima no log
 os.environ.setdefault("KIVY_LOG_MODE", "PYTHON")
 os.environ.setdefault("KCFG_KIVY_LOG_LEVEL", "warning")
+
+# tema.py usa dp()/sp() ao ser importado; sem estes valores o Kivy abre uma
+# janela para descobrir a densidade da tela, e no GitHub não há vídeo
+os.environ.setdefault("KIVY_METRICS_DENSITY", "1")
+os.environ.setdefault("KIVY_METRICS_FONTSCALE", "1")
+os.environ.setdefault("KIVY_DPI", "96")
