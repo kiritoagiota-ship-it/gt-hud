@@ -23,6 +23,7 @@ fixa, com Y para cima (como no Kivy).
 """
 import collections
 import math
+import unicodedata
 from array import array
 import os
 import threading
@@ -63,12 +64,33 @@ PAUSA_S = 0.003
 
 # --- estilo (cores RGBA; larguras em dp no zoom 16) ---------------------------
 FUNDO = (0.016, 0.027, 0.043, 1)
+# (a ordem é a do desenho: o prédio fica por cima do terreno)
 AREAS = {
     "residencial": (0.030, 0.045, 0.062, 1),
-    "verde": (0.030, 0.115, 0.085, 1),
+    "comercial": (0.070, 0.058, 0.040, 1),       # comércio: tom quente discreto
+    "institucional": (0.040, 0.055, 0.095, 1),   # escola, faculdade, hospital: azulado
+    "verde": (0.035, 0.135, 0.095, 1),           # praça, parque, campo
     "agua": (0.025, 0.115, 0.205, 1),
-    "predio": (0.060, 0.088, 0.118, 1),
+    "predio": (0.085, 0.118, 0.155, 1),
 }
+_USO_DO_SOLO = {
+    "residential": "residencial", "suburb": "residencial", "neighbourhood": "residencial",
+    "commercial": "comercial", "retail": "comercial",
+    "school": "institucional", "university": "institucional", "college": "institucional",
+    "hospital": "institucional", "kindergarten": "institucional",
+    "cemetery": "verde", "pitch": "verde", "playground": "verde", "stadium": "verde",
+}
+# Mão única (o dono pediu a contramão bem clara, sem exagero): setinhas no
+# sentido da rua, a partir do zoom 16, uma a cada SETA_PASSO_DP de rua.
+ZOOM_SETAS = 16
+SETA_PASSO_DP = 120.0
+SETA_TAM_DP = 6.5          # metade do comprimento da seta
+SETAS = {  # nome do grupo -> cor (clara nas ruas cinza, escura nas avenidas cor de areia)
+    "setas": (0.90, 0.94, 1.0, 0.85),
+    "setas_escuras": (0.05, 0.07, 0.10, 0.85),
+}
+_SETA_ESCURA = ("primaria", "secundaria")
+_COM_SETA = ("rua", "terciaria", "secundaria", "primaria")
 # (largura dp no z16, cor, zoom mínimo)
 # Hierarquia (o dono achou o mapa de longe uma "teia" branca): rua comum só
 # a partir do zoom 14; avenidas e vias expressas num tom areia que se
@@ -100,8 +122,72 @@ def fator_largura(rz):
 
 
 # lugares que só poluem a tela de quem pedala
-_POI_IGNORAR = {"bus", "railway", "toilets", "atm", "bench", "waste_basket", "parking",
-                "bicycle_parking", "post", "telephone", "vending", "recycling"}
+_POI_IGNORAR = {"railway", "toilets", "atm", "bench", "waste_basket", "parking",
+                "bicycle_parking", "post", "telephone", "vending", "recycling",
+                "gate", "lift_gate", "swimming_pool", "shelter"}
+# Cada lugar tem um GRUPO (a cor da bolinha e do nome no mapa) e uma
+# LEGENDA (o que ele é: aparece ao lado do nome de perto, "Pão Bom · padaria",
+# quando o próprio nome já não diz). classe do mapa -> (grupo, legenda)
+_POI_CATEGORIA = {
+    "park": ("praca", "praça"), "garden": ("praca", "jardim"), "playground": ("praca", "parquinho"),
+    "restaurant": ("comida", "restaurante"), "fast_food": ("comida", "lanchonete"),
+    "bakery": ("comida", "padaria"), "cafe": ("comida", "café"), "bar": ("comida", "bar"),
+    "beer": ("comida", "bar"), "ice_cream": ("comida", "sorveteria"),
+    "grocery": ("compras", "mercado"), "shop": ("compras", "loja"),
+    "clothing_store": ("compras", "roupas"), "alcohol_shop": ("compras", "bebidas"),
+    "butcher": ("compras", "açougue"), "bicycle": ("compras", "bicicletaria"),
+    "car": ("compras", "veículos"), "hairdresser": ("compras", "salão"),
+    "hospital": ("saude", "saúde"), "pharmacy": ("saude", "farmácia"), "dentist": ("saude", "dentista"),
+    "doctors": ("saude", "médico"), "veterinary": ("saude", "veterinário"),
+    "school": ("ensino", "escola"), "college": ("ensino", "faculdade"), "library": ("ensino", "biblioteca"),
+    "bank": ("servico", "banco"), "office": ("servico", "escritório"), "police": ("servico", "polícia"),
+    "fire_station": ("servico", "bombeiros"), "town_hall": ("servico", "órgão público"),
+    "fuel": ("servico", "posto"), "lodging": ("servico", "hotel"), "bus": ("servico", "ônibus"),
+    "place_of_worship": ("lazer", "templo"), "pitch": ("lazer", "quadra"),
+    "sports_centre": ("lazer", "esportes"), "stadium": ("lazer", "estádio"),
+    "museum": ("lazer", "museu"), "theatre": ("lazer", "teatro"), "cinema": ("lazer", "cinema"),
+    "attraction": ("lazer", "atração"), "monument": ("lazer", "monumento"),
+    "art_gallery": ("lazer", "arte"), "water_park": ("lazer", "parque aquático"),
+    "cemetery": ("lazer", "cemitério"),
+}
+_POI_SUBCLASSE = {  # legenda mais exata quando o mapa diz o subtipo
+    "supermarket": "supermercado", "marketplace": "feira", "mall": "shopping",
+    "department_store": "loja de departamentos", "convenience": "conveniência",
+    "clinic": "clínica", "hospital": "hospital", "university": "universidade",
+    "kindergarten": "creche", "government": "órgão público", "company": "empresa",
+    "car_repair": "oficina", "car_parts": "autopeças", "motorcycle": "motos", "pet": "pet shop",
+    "beauty": "salão", "electronics": "eletrônicos", "hardware": "ferragens",
+    "doityourself": "ferragens", "furniture": "móveis", "shoes": "calçados", "motel": "motel",
+    "christian": "igreja", "courthouse": "fórum", "townhall": "prefeitura", "soccer": "campo",
+}
+_JA_DIZ = {  # o nome já explica: não repete a legenda
+    "praça": ("praca", "parque", "bosque", "jardim"), "igreja": ("igreja", "paroquia", "capela", "catedral",
+                                                               "congregacao", "assembleia", "templo"),
+    "escola": ("escola", "colegio", "cmei", "centro de ensino"), "posto": ("posto",),
+    "restaurante": ("restaurante", "churrascaria", "pizzaria"), "padaria": ("padaria", "panificadora"),
+    "farmácia": ("farmacia", "drogaria", "drogasil"), "supermercado": ("supermercado", "atacad"),
+    "universidade": ("universidade", "faculdade", "campus", "ufg", "puc", "ueg"),
+    "faculdade": ("universidade", "faculdade", "senai", "senac", "sest"),
+    "clínica": ("clinica", "cais", "ciams", "upa", "csf", "consultorio"), "hospital": ("hospital",),
+    "saúde": ("hospital", "clinica", "saude"), "hotel": ("hotel", "pousada"), "banco": ("banco", "caixa", "sicoob"),
+    "bar": ("bar ", "boteco", "pub"), "lanchonete": ("lanch", "burger", "pastel", "acai"),
+    "campo": ("campo", "quadra", "estadio"), "quadra": ("campo", "quadra", "ginasio"),
+    "ônibus": ("terminal", "rodoviaria", "onibus"), "shopping": ("shopping",),
+}
+
+
+def _sem_acento(texto):
+    return "".join(c for c in unicodedata.normalize("NFD", texto.lower()) if unicodedata.category(c) != "Mn")
+
+
+def categoria_poi(classe, subclasse, nome=""):
+    """(grupo, legenda) do lugar; legenda "" se o nome já diz o que ele é."""
+    grupo, legenda = _POI_CATEGORIA.get(classe, ("outros", ""))
+    legenda = _POI_SUBCLASSE.get(subclasse, legenda)
+    limpo = _sem_acento(nome) + " "
+    if legenda and any(p in limpo for p in _JA_DIZ.get(legenda, (_sem_acento(legenda),))):
+        legenda = ""
+    return grupo, legenda
 
 
 def cor_rua(nome, rz):
@@ -270,10 +356,43 @@ class _Malha:
         for k in range(1, len(indices_leque) - 1):
             ind += [base + indices_leque[0], base + indices_leque[k], base + indices_leque[k + 1]]
 
+    def seta(self, x, y, ux, uy, t):
+        """Setinha de comprimento 2*t no ponto (x, y), apontando para (ux, uy)."""
+        nx, ny = -uy, ux
+        self.triangulos([x + ux * t, y + uy * t, 0, 0,
+                         x + nx * t * 0.6, y + ny * t * 0.6, 0, 0,
+                         x - nx * t * 0.6, y - ny * t * 0.6, 0, 0], [0, 1, 2])
+        h = t * 0.16  # haste
+        self.triangulos([x + nx * h, y + ny * h, 0, 0, x - nx * h, y - ny * h, 0, 0,
+                         x - ux * t - nx * h, y - uy * t - ny * h, 0, 0,
+                         x - ux * t + nx * h, y - uy * t + ny * h, 0, 0], [0, 1, 2, 3])
+
     def listas(self):
         """[(vértices, índices)] em array compacto ('f' e 'H'), que o Mesh do
         Kivy usa direto, sem copiar para lista."""
         return [(array("f", v), array("H", i)) for v, i in self.pedacos if i]
+
+
+def _por_setas(malha, pts, passo, t):
+    """Setas de mão única ao longo da rua (pts já no sentido permitido):
+    espalhadas por igual, só em trecho reto onde a seta cabe inteira."""
+    comps = [math.hypot(bx - ax, by - ay) for (ax, ay), (bx, by) in zip(pts, pts[1:])]
+    total = sum(comps)
+    if total < passo * 0.4:
+        return
+    n = max(1, int(total // passo))
+    alvos = [(k + 0.5) * total / n for k in range(n)]
+    andado, i = 0.0, 0
+    for alvo in alvos:
+        while i < len(comps) - 1 and andado + comps[i] < alvo:
+            andado += comps[i]
+            i += 1
+        comp = comps[i]
+        if comp < 2.4 * t:
+            continue
+        (ax, ay), (bx, by) = pts[i], pts[i + 1]
+        f = min(max((alvo - andado) / comp, 1.2 * t / comp), 1.0 - 1.2 * t / comp)
+        malha.seta(ax + (bx - ax) * f, ay + (by - ay) * f, (bx - ax) / comp, (by - ay) / comp, t)
 
 
 QUASE_RETO = math.radians(12)   # trecho de rua que desvia menos que isso ainda é "reto"
@@ -367,15 +486,16 @@ def preparar(camadas, dz, tx, ty, rz, origem, escala, densidade):
                 continue
             cor = alvo
             if nome_camada == "landuse":
-                classe = props.get("class")
-                cor = "residencial" if classe in ("residential", "suburb", "neighbourhood") else (
-                    "verde" if classe in ("cemetery", "pitch", "playground", "stadium") else None)
+                cor = _USO_DO_SOLO.get(props.get("class"))
             elif nome_camada == "landcover" and props.get("class") not in ("grass", "wood", "farmland", "scrub"):
                 continue
             if cor:
                 area(cor, partes, conv)
 
     ruas = {nome: _Malha() for nome in RUAS}
+    setas = {nome: _Malha() for nome in SETAS}
+    seta_t = SETA_TAM_DP * (1.0 if rz <= 16 else 1.25) * densidade / px_por_local
+    seta_passo = SETA_PASSO_DP * densidade / px_por_local
     rotulos = []
     if "transportation" in camadas:
         extent, feicoes = camadas["transportation"]
@@ -395,9 +515,13 @@ def preparar(camadas, dz, tx, ty, rz, origem, escala, densidade):
             meia = largura_px / 2.0 / px_por_local
             # juntas redondas só onde a rua é grossa o bastante para o canto aparecer
             lados = 0 if largura_px < 3 else (6 if largura_px < 10 else 8)
+            mao = props.get("oneway") if rz >= ZOOM_SETAS and estilo in _COM_SETA else None
             for parte in partes:
                 pts = _simplificar(conv(parte), tol2)
                 ruas[estilo].faixa(pts, meia, lados)
+                if mao in (1, -1) and len(pts) >= 2:
+                    _por_setas(setas["setas_escuras" if estilo in _SETA_ESCURA else "setas"],
+                               pts if mao == 1 else pts[::-1], seta_passo, seta_t)
     if "transportation_name" in camadas and rz >= 14:
         extent, feicoes = camadas["transportation_name"]
         conv = conversor(extent)
@@ -439,21 +563,28 @@ def preparar(camadas, dz, tx, ty, rz, origem, escala, densidade):
         extent, feicoes = camadas["poi"]
         conv = conversor(extent)
         for tipo, props, partes in feicoes:
-            nome = props.get("name")
-            if (tipo != 1 or not nome or props.get("rank", 99) > (12 if rz >= 17 else 5)
-                    or props.get("class") in _POI_IGNORAR or props.get("subclass") == "bus_stop"
-                    or nome.strip().isdigit()):
+            nome, classe, sub = props.get("name"), props.get("class"), props.get("subclass")
+            if (tipo != 1 or not nome or classe in _POI_IGNORAR or nome.strip().isdigit()
+                    or (classe == "bus" and sub != "bus_station")):
+                continue
+            grupo, legenda = categoria_poi(classe, sub, nome)
+            rank = props.get("rank", 99)
+            # de longe só os principais (praça vale mais: é referência); de perto, quase tudo
+            if rank > (25 if rz >= 17 else (14 if grupo == "praca" else 7)):
                 continue
             x, y = conv(partes[0])[0]
-            rotulos.append({"texto": nome, "x": x, "y": y, "ang": 0.0, "comp": 0,
-                            "peso": 0.5 - props.get("rank", 99) / 100.0, "tipo": "poi"})
+            texto = "%s · %s" % (nome, legenda) if legenda and rz >= 17 else nome
+            rotulos.append({"texto": texto, "x": x, "y": y, "ang": 0.0, "comp": 0,
+                            "peso": 0.5 - rank / 100.0 + (0.3 if grupo == "praca" else 0.0),
+                            "tipo": "poi", "grupo": grupo})
     celula = lado / GRADE
     grade = {}
     for r in rotulos:
         grade.setdefault((int(r["x"] // celula), int(r["y"] // celula)), []).append(r)
     return {
         "areas": [(nome, m.listas()) for nome, m in areas.items()],
-        "ruas": [(nome, cor_rua(nome, rz), m.listas()) for nome, m in ruas.items()],
+        "ruas": [(nome, cor_rua(nome, rz), m.listas()) for nome, m in ruas.items()]
+                + [(nome, SETAS[nome], m.listas()) for nome, m in setas.items()],
         "rotulos": rotulos,
         "grade": grade,          # (gx, gy) -> nomes naquele quadrado (coord. locais / celula)
         "celula": celula,

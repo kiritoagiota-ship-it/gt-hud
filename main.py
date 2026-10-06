@@ -556,8 +556,11 @@ class GTHudApp(App):
 
     def salvar_lugar(self, nome, lat, lon, endereco=""):
         """Lugar marcado no mapa pela pessoa (aparece primeiro na busca)."""
-        self.salvos = [s for s in self.salvos if s["nome"] != nome]
-        self.salvos.insert(0, {"nome": nome, "endereco": endereco, "lat": lat, "lon": lon})
+        novo = {"nome": nome, "endereco": endereco, "lat": lat, "lon": lon}
+        # mesmo nome ou mesmo ponto: troca (salvar de novo o mesmo lugar com
+        # outro nome deixava dois iguais na lista)
+        self.salvos = [s for s in self.salvos if s["nome"] != nome and not self.mesmo_lugar(s, novo)]
+        self.salvos.insert(0, novo)
         self._gravar_json(self._caminho_salvos, self.salvos)
 
     @staticmethod

@@ -76,3 +76,26 @@ class TesteMemoriaELimites(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TesteLegendasESetas(unittest.TestCase):
+    """Lugares com cor/legenda por tipo e setas de mão única."""
+
+    def test_legenda_do_lugar(self):
+        import mapa_vetor
+        self.assertEqual(mapa_vetor.categoria_poi("bakery", "bakery", "Pão Dourado"), ("comida", "padaria"))
+        self.assertEqual(mapa_vetor.categoria_poi("bakery", "bakery", "Panificadora Pertutti"), ("comida", ""))
+        self.assertEqual(mapa_vetor.categoria_poi("park", "park", "Praça Cívica"), ("praca", ""))
+        self.assertEqual(mapa_vetor.categoria_poi("grocery", "supermarket", "MEGA"), ("compras", "supermercado"))
+        self.assertEqual(mapa_vetor.categoria_poi("coisa_nova", None, "X"), ("outros", ""))
+
+    def test_setas_no_sentido_da_rua(self):
+        import mapa_vetor
+        malha = mapa_vetor._Malha()
+        mapa_vetor._por_setas(malha, [(0.0, 0.0), (300.0, 0.0)], 100.0, 5.0)
+        (v, i), = malha.listas()
+        self.assertEqual(len(i), 3 * 9)            # 3 setas: ponta (1 triângulo) + haste (2)
+        self.assertGreater(v[0], v[4])             # a ponta fica à frente da base (sentido +x)
+        curta = mapa_vetor._Malha()
+        mapa_vetor._por_setas(curta, [(0.0, 0.0), (20.0, 0.0)], 100.0, 5.0)
+        self.assertEqual(curta.listas(), [])       # rua curta demais: sem seta

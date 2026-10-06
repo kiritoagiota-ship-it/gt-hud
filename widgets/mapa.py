@@ -38,7 +38,7 @@ import goiania
 import sinais
 import tema
 from diagnostico import seguro
-from mapa_vetor import (AREAS, FUNDO, RUAS, FonteVetorial, tela_animando, tiles_do_retangulo,
+from mapa_vetor import (AREAS, FUNDO, RUAS, SETAS, FonteVetorial, tela_animando, tiles_do_retangulo,
                         z_dados)
 
 ZOOM_MIN, ZOOM_MAX = 11.0, 19.0   # o app é só de Goiânia: de longe, a cidade inteira
@@ -46,7 +46,13 @@ SEGURAR_S = 0.6                  # dedo parado esse tempo = marcar o ponto
 TAM = 256.0
 MAX_ROTULOS_RUA = 30
 MAX_ROTULOS_LUGAR = 8
-MAX_ROTULOS_POI = 10
+MAX_ROTULOS_POI = 14
+# cor da bolinha de cada tipo de lugar (o nome sai num tom mais claro da mesma cor)
+CORES_POI = {
+    "praca": (0.40, 0.90, 0.55, 1), "comida": (1.0, 0.62, 0.25, 1), "compras": (1.0, 0.86, 0.35, 1),
+    "saude": (1.0, 0.45, 0.50, 1), "ensino": (0.50, 0.76, 1.0, 1), "servico": (0.78, 0.68, 1.0, 1),
+    "lazer": (0.55, 0.88, 0.88, 1), "outros": (0.75, 0.78, 0.82, 1),
+}
 REPOSICIONAR_S = 0.45      # refaz a escolha dos nomes no máximo a cada isso
 INERCIA = 3.5              # quanto maior, mais rápido o deslize para
 BONUS_JA_NA_TELA = 1.5     # nome já mostrado tem preferência: não fica trocando
@@ -62,7 +68,7 @@ ZOOM_NAV_PERTO, ZOOM_NAV_LONGE = 17.4, 16.6
 HISTERESE_ZOOM = 0.75      # só troca o nível de desenho com essa folga
 ORCAMENTO_TILES_S = 0.006  # por quadro, no máximo isso montando tiles
 MAX_TEXTURAS_NOVAS = 8     # por escolha de nomes, no máximo tantos nomes novos desenhados
-ZOOM_SINAIS = 17.0         # fora da navegação, semáforos e lombadas a partir desse zoom
+ZOOM_SINAIS = 16.0         # fora da navegação, semáforos e lombadas a partir desse zoom
 MAX_SINAIS = 40
 
 
@@ -103,8 +109,11 @@ class _Rotulo:
         self.textura = textura
         self.grupo = InstructionGroup()
         if ponto is not None:
+            self.grupo.add(Color(*FUNDO))   # aro escuro: a bolinha aparece em cima de qualquer cor
+            self.aro = Ellipse(size=(dp(15), dp(15)))
+            self.grupo.add(self.aro)
             self.grupo.add(Color(*ponto))
-            self.bolinha = Ellipse(size=(dp(10), dp(10)))
+            self.bolinha = Ellipse(size=(dp(11), dp(11)))
             self.grupo.add(self.bolinha)
         else:
             self.bolinha = None
@@ -115,7 +124,7 @@ class _Rotulo:
         self.grupo.add(self.mover)
         self.grupo.add(self.girar)
         w, h = textura.size
-        deslocar = dp(9) if ponto is not None else -w / 2.0
+        deslocar = dp(11) if ponto is not None else -w / 2.0
         self.grupo.add(Rectangle(texture=textura, size=(w, h), pos=(deslocar, -h / 2.0)))
         self.grupo.add(PopMatrix())
 
@@ -182,6 +191,9 @@ class MapaHUD(Widget):
         self.canvas.add(self._g_areas)
         self._g_ruas = {}
         for nome in RUAS:  # da menos importante para a mais (a mais fica por cima)
+            self._g_ruas[nome] = InstructionGroup()
+            self.canvas.add(self._g_ruas[nome])
+        for nome in SETAS:  # setas de mão única: por cima de todas as ruas, por baixo da rota
             self._g_ruas[nome] = InstructionGroup()
             self.canvas.add(self._g_ruas[nome])
         self._g_trilha = InstructionGroup()
@@ -560,15 +572,17 @@ class MapaHUD(Widget):
                 tex = self._textura(r["texto"], sp(15), (0.72, 0.84, 0.94, 1))
                 ang, ponto = 0.0, None
             else:
-                tex = self._textura(r["texto"], sp(12.5), (1.0, 0.80, 0.58, 1), negrito=False)
-                ang, ponto = 0.0, tema.LARANJA
+                ponto = CORES_POI.get(r.get("grupo"), CORES_POI["outros"])
+                clara = tuple(c + (1.0 - c) * 0.45 for c in ponto[:3]) + (1,)
+                tex = self._textura(r["texto"], sp(12.5), clara, negrito=r.get("grupo") == "praca")
+                ang = 0.0
             if tex is None:
                 faltou_textura = True
                 continue
             w, h = tex.size
             c, sn = abs(math.cos(math.radians(ang))), abs(math.sin(math.radians(ang)))
             bw, bh = w * c + h * sn + dp(6), w * sn + h * c + dp(6)
-            cx_ = sx + (w / 2.0 + dp(9) if ponto else 0)
+            cx_ = sx + (w / 2.0 + dp(11) if ponto else 0)
             caixa = (cx_ - bw / 2, sy - bh / 2, cx_ + bw / 2, sy + bh / 2)
             if any(caixa[0] < o[2] and o[0] < caixa[2] and caixa[1] < o[3] and o[1] < caixa[3]
                    for o in ocupados):
@@ -665,7 +679,8 @@ class MapaHUD(Widget):
                 ang = math.degrees(r["ang"]) + self.rotacao
                 rot.girar.angle = (ang + 90.0) % 180.0 - 90.0
             if rot.bolinha is not None:
-                rot.bolinha.pos = (sx - dp(5), sy - dp(5))
+                rot.bolinha.pos = (sx - dp(5.5), sy - dp(5.5))
+                rot.aro.pos = (sx - dp(7.5), sy - dp(7.5))
 
     # --- rota, trilha, destino e seta ---------------------------------------------
     def _refazer_linhas(self, so_trilha=False):

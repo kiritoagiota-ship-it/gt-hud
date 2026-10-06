@@ -127,6 +127,10 @@ class TelaBusca(Screen):
         if lugar.get("fonte") != "colado":
             app.escolher_destino(lugar)
             return
+        ja = next((s for s in app.salvos if app.mesmo_lugar(s, lugar)), None)
+        if ja is not None:   # esse ponto já foi colado e nomeado antes: não pergunta de novo
+            app.escolher_destino(dict(ja, fonte="salvo"))
+            return
         # veio colado (Plus Code, coordenada ou link): SEMPRE com nome. O campo
         # já vem com o nome do link ou do lugar conhecido naquele ponto; a
         # pessoa confirma ou troca. Fica salvo: na próxima é só digitar o nome.
