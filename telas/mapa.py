@@ -10,6 +10,8 @@ Três modos:
 Tudo por cima do mapa é posicionado à mão em _posicionar() (em pé e deitada):
 widget escondido sai do layout, para não roubar o toque do mapa.
 """
+import time
+
 from kivy.animation import Animation
 from kivy.app import App
 from kivy.clock import Clock
@@ -312,6 +314,11 @@ class TelaMapa(Screen):
         for w in (self.lbl_destino, self.lbl_resumo, self.lbl_avisos, self.escolha, self.perfil, botoes):
             self.card.add_widget(w)
 
+        self._rota_na_tela = None    # a rota que a prévia está mostrando (para animar só quando muda)
+        self._card_fora = 0.0        # 1 = cartão da prévia fora da tela; 0 = no lugar
+        self._ev_card = None
+        self._ev_contagem = None
+
         # --- resumo da rota que acabou (chegou ou encerrou) ---
         self._resumo = False
         self._ev_resumo = None
@@ -386,6 +393,8 @@ class TelaMapa(Screen):
         self._tem_depois = self._tem_subida = self._tem_alerta = False
         self.mapa.modo_navegacao(False)
         self.mapa.sinais_rota = None
+        self._rota_na_tela = None
+        self._parar_contagem()
         self.mapa.definir_rota([])
         self.mapa.definir_destino(None)
         self.mapa.recentralizar()
@@ -431,8 +440,71 @@ class TelaMapa(Screen):
         self.mapa.definir_alternativas([])
         self.perfil.elevacao = []
         self.btn_iniciar.disabled = True
-        self.mapa.definir_destino((lugar["lat"], lugar["lon"]))
+        self._parar_contagem()
+        self._rota_na_tela = None
+        self.mapa.definir_rota([])
+        alvo = (lugar["lat"], lugar["lon"])
+        # enquanto a rota é calculada (sem travar nada): o cartão sobe, o pino cai
+        # no destino, um radar sai de quem pedala e a câmera voa até caberem os dois
+        self.mapa.definir_destino(alvo, cair=True)
+        self.mapa.procurar(True)
+        if self.card.parent is None:
+            self._subir_card()
         self._montar()
+        eu = self.mapa.eu
+        if eu and goiania.dentro(alvo[0], alvo[1], 0.01):
+            Clock.schedule_once(lambda dt: self.estado == PREVIA and self.mapa.enquadrar(
+                [eu[:2], alvo], dp(70), self._cobertos_previa(), animado=True, duracao=0.9))
+
+    def _subir_card(self):
+        """O cartão da prévia entra deslizando (de baixo; deitada, da direita)."""
+        self._card_fora = 1.0
+        t0 = time.monotonic()
+        if self._ev_card is not None:
+            self._ev_card.cancel()
+
+        def passo(dt):
+            f = min(1.0, (time.monotonic() - t0) / 0.34)
+            self._card_fora = (1.0 - f) ** 3
+            if f >= 1.0:
+                self._ev_card = None
+                self._posicionar()   # no lugar: os nomes do mapa voltam a desviar do cartão
+                return False
+            self._por_card()
+        self._ev_card = Clock.schedule_interval(passo, 0)
+
+    def _por_card(self):
+        m = dp(10)
+        if self.width > self.height:
+            self.card.pos = (self.width - m - self.card.width + self._card_fora * (self.card.width + 2 * m), m)
+        else:
+            self.card.pos = (m, m - self._card_fora * (self.card.height + 2 * m))
+
+    def _texto_resumo(self, rota, f=1.0):
+        texto = "%s  |  %s  |  sobe %d m" % (
+            fmt_dist_nav(rota.total_m * f), fmt_duracao(rota.tempo_s * f), rota.subida_total_m * f)
+        if rota.movimentada is not None:   # quanto do caminho é em avenida (medido; em laranja/vermelho no mapa)
+            texto += "  |  %d%% avenida" % round(rota.movimentada * 100 * f)
+        return texto
+
+    def _parar_contagem(self):
+        if self._ev_contagem is not None:
+            self._ev_contagem.cancel()
+            self._ev_contagem = None
+
+    def _contar_resumo(self, rota):
+        """Os números da rota contam de zero até o valor (junto com a linha se desenhando)."""
+        self._parar_contagem()
+        t0 = time.monotonic()
+
+        def passo(dt):
+            f = min(1.0, (time.monotonic() - t0) / 0.75)
+            self.lbl_resumo.text = self._texto_resumo(rota, 1.0 - (1.0 - f) ** 3)
+            if f >= 1.0:
+                self._ev_contagem = None
+                return False
+        self._ev_contagem = Clock.schedule_interval(passo, 1 / 30.0)
+        passo(0)
 
     def mostrar_previa(self, rota, rotas=None, enquadrar=True):
         """Rota escolhida (+ as outras opções, em abas e em cinza no mapa)."""
@@ -447,15 +519,20 @@ class TelaMapa(Screen):
             self.escolha.add_widget(Texto(text="refinando...", font_size=tema.T_ROTULO - 1,
                                           color=tema.CIANO_FRACO, halign="center", size_hint_x=0.5))
         self.mapa.definir_alternativas([r.pontos for r in rotas if r is not rota])
-        self.lbl_resumo.text = "%s  |  %s  |  sobe %d m" % (
-            fmt_dist_nav(rota.total_m), fmt_duracao(rota.tempo_s), rota.subida_total_m)
-        if rota.movimentada is not None:   # quanto do caminho é em avenida (medido; em laranja/vermelho no mapa)
-            self.lbl_resumo.text += "  |  %d%% avenida" % round(rota.movimentada * 100)
+        self.mapa.procurar(False)
+        nova = rota is not self._rota_na_tela
+        primeira = self._rota_na_tela is None
+        if nova:
+            self._contar_resumo(rota)
+        elif self._ev_contagem is None:   # a mesma rota, com mais informação (avenidas, trânsito, tempo dele)
+            self.lbl_resumo.text = self._texto_resumo(rota)
         self.lbl_resumo.color = tema.BRANCO
         self.perfil.subidas = rota.subidas
         self.perfil.elevacao = rota.elevacao
         self.btn_iniciar.disabled = False
-        self.mapa.definir_rota(rota.pontos)
+        if nova:   # a linha se desenha de quem pedala até o destino (mais rápido ao trocar de opção)
+            self._rota_na_tela = rota
+            self.mapa.definir_rota(rota.pontos, animar=1.0 if primeira else 0.55)
         self.mapa.definir_trechos(rota.trechos)   # avenidas em laranja/vermelho por cima da rota
         self.mapa.definir_transito(rota.trechos_transito)
         self.lbl_avisos.text = "  ·  ".join(app.avisos_da_rota(rota))
@@ -463,9 +540,12 @@ class TelaMapa(Screen):
         self._montar()
         if enquadrar:
             todos = [p for r in rotas for p in r.pontos]
-            Clock.schedule_once(lambda dt: self.mapa.enquadrar(todos, dp(36), self._cobertos_previa()))
+            Clock.schedule_once(lambda dt: self.estado == PREVIA and self.mapa.enquadrar(
+                todos, dp(36), self._cobertos_previa(), animado=True, duracao=0.7))
 
     def previa_erro(self, texto):
+        self.mapa.procurar(False)
+        self._parar_contagem()
         self.lbl_avisos.text = ""
         self.lbl_resumo.text = texto
         self.lbl_resumo.color = tema.VERMELHO
@@ -479,6 +559,8 @@ class TelaMapa(Screen):
         self._confirmando_fim = False
         self.btn_encerrar.text = "Encerrar"
         self._escolha_nav = None
+        self._rota_na_tela = None
+        self._parar_contagem()
         self.mapa.definir_alternativas([])
         self.mapa.definir_rota(rota.pontos)
         self.mapa.definir_trechos(rota.trechos)
@@ -644,7 +726,7 @@ class TelaMapa(Screen):
         self.card.size = (larg_card, dp(292))
         self.painel_rotas.pos = (m, m + alt_barra + m) if not deitada else (bx, m + alt_barra + m)
         self.painel_rotas.size = (larg_topo if not deitada else min(bw, dp(480)), dp(150))
-        self.card.pos = (W - m - larg_card, m) if deitada else (m, m)
+        self._por_card()   # no lugar (ou ainda entrando, deslizando)
 
         # botões do mapa (direita, acima da barra)
         base = m + alt_barra + m if self.estado != PREVIA else m + self.card.height + m

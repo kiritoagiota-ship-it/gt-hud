@@ -175,9 +175,9 @@ def ajustes(dt):
 def esperar_offline(dt):
     c = app().sm.get_screen("config")
     txt = c.linha_offline.explicacao.text
-    if txt.startswith("Pronto") or txt.startswith("Faltaram") or time.time() - E["t0"] > 240:
+    if txt.startswith("Pronto") or txt.startswith("Goiânia inteira") or txt.startswith("Faltaram") or time.time() - E["t0"] > 240:
         print("[TESTE] offline: %s (%.0f s)" % (txt, time.time() - E["t0"]), flush=True)
-        checar(txt.startswith("Pronto"), "mapa offline baixado")
+        checar(txt.startswith("Goiânia inteira") and c.btn_offline.disabled, "mapa de Goiânia já vem dentro do app")
         foto("29_offline")
         Clock.schedule_once(fim, 1)
         return False

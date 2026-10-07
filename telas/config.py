@@ -300,6 +300,14 @@ class TelaConfig(Screen):
                                    "na hora e funciona sem internet.",
                                    self._centralizar(self.btn_offline))
         lista.add_widget(self.linha_offline)
+        import mapa_vetor
+        partes = mapa_vetor.partes_no_pacote()
+        if partes:   # o mapa já veio dentro do app: não há o que baixar
+            self.btn_offline.text = "Incluído"
+            self.btn_offline.disabled = True
+            self.linha_offline.explicacao.text = (
+                "Goiânia inteira já vem dentro do app (%d partes): o mapa abre na hora "
+                "e funciona sem internet." % partes)
 
         self.btn_vivo = BotaoHUD(text="Configurar", size_hint_x=None, width=dp(130),
                                  on_release=lambda *a: self._configurar_vivo())

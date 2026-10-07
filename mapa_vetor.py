@@ -26,9 +26,11 @@ import math
 import unicodedata
 from array import array
 import os
+import sqlite3
 import threading
 import time
 import urllib.error
+import zlib
 
 from kivy.clock import Clock
 from kivy.graphics.tesselator import TYPE_POLYGONS, WINDING_ODD, Tesselator
@@ -40,6 +42,10 @@ import rede
 TILEJSON = "https://tiles.openfreemap.org/planet"
 URL_PADRAO = "https://tiles.openfreemap.org/planet/20260927_080001_pt/{z}/{x}/{y}.pbf"
 Z_DADOS_MAX = 14
+# Goiânia INTEIRA vem dentro do app (pedido do dono, 07/10/2026: o mapa
+# demorava a aparecer ao arrastar e dar zoom porque cada pedaço era baixado
+# na hora). Feito por ferramentas/empacotar_mapa.py.
+PACOTE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "dados", "goiania_mapa.db")
 VALIDADE_S = 30 * 86400
 TRABALHADORES = 1          # mais threads = a tela espera mais pela vez (GIL)
 # Memória (o dono relatou o app fechando no zoom, 01/10/2026): um tile
@@ -655,6 +661,41 @@ def preparar(camadas, dz, tx, ty, rz, origem, escala, densidade):
     }
 
 
+# --- o mapa que vem dentro do app ---------------------------------------------
+_pacote = {"con": None, "falta": False, "trava": threading.Lock()}
+
+
+def do_pacote(z, x, y):
+    """O tile (z, x, y) que veio DENTRO do app, ou None (fora de Goiânia, ou
+    o app foi montado sem o pacote). Não usa a internet."""
+    if _pacote["falta"]:
+        return None
+    try:
+        with _pacote["trava"]:
+            con = _pacote["con"]
+            if con is None:
+                if not os.path.exists(PACOTE):
+                    _pacote["falta"] = True
+                    return None
+                con = _pacote["con"] = sqlite3.connect(PACOTE, check_same_thread=False)
+            linha = con.execute("SELECT dados FROM tiles WHERE z = ? AND x = ? AND y = ?", (z, x, y)).fetchone()
+        return zlib.decompress(linha[0]) if linha else None
+    except Exception as e:
+        print("[mapa] pacote:", e)
+        return None
+
+
+def partes_no_pacote():
+    """Quantos pedaços do mapa vieram dentro do app (0 = nenhum)."""
+    if do_pacote(0, 0, 0) is None and _pacote["con"] is None:
+        return 0
+    try:
+        with _pacote["trava"]:
+            return _pacote["con"].execute("SELECT COUNT(*) FROM tiles").fetchone()[0]
+    except Exception:
+        return 0
+
+
 # --- download, cache e fila de preparo ------------------------------------------
 class FonteVetorial:
     def __init__(self, pasta, origem, escala, densidade, ao_ficar_pronto):
@@ -809,6 +850,9 @@ class FonteVetorial:
         return os.path.join(self.pasta, str(z), str(x), "%d.pbf" % y)
 
     def _ler_ou_baixar(self, z, x, y):
+        dados = do_pacote(z, x, y)   # Goiânia já vem no app: na hora e sem internet
+        if dados is not None:
+            return dados
         caminho = self._caminho(z, x, y)
         try:
             if time.time() - os.path.getmtime(caminho) < VALIDADE_S:

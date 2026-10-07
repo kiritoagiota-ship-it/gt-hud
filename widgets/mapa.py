@@ -69,6 +69,16 @@ SUAVE_GIRO = 4.0           # rapidez do mapa girando com a direção (1/s)
 ZOOM_NAV_PERTO, ZOOM_NAV_LONGE = 17.4, 16.6
 HISTERESE_ZOOM = 0.75      # só troca o nível de desenho com essa folga
 ORCAMENTO_TILES_S = 0.006  # por quadro, no máximo isso montando tiles
+# animações da prévia da rota (pedido do dono, 07/10/2026: escolher um destino
+# dava uma travada e o caminho aparecia seco)
+RADAR_VOLTA_S = 1.7        # cada onda do "procurando caminho" leva isso
+RADAR_MAX_S = 40.0         # sem resposta nesse tempo, o radar se apaga sozinho
+PINO_CAI_S = 0.5           # o pino do destino caindo
+BRILHO_S = 0.7             # clarão da rota quando termina de se desenhar
+# o Kivy faz cada curva e cada ponta da linha com 10 triângulos; 4 já ficam
+# redondos nessas larguras e a linha da rota (centenas de pontos) pesa bem menos
+LINHA_LEVE = {"joint_precision": 4, "cap_precision": 5}
+PONTOS_REVELAR = 160       # a rota se desenhando usa no máximo tantos pontos (leve a cada quadro)
 MAX_TEXTURAS_NOVAS = 8     # por escolha de nomes, no máximo tantos nomes novos desenhados
 # Lugares da base da busca (69.900 em Goiânia) desenhados no mapa: o mapa do
 # OpenStreetMap tem pouco comércio cadastrado na cidade. Só de perto, e
@@ -189,6 +199,12 @@ class MapaHUD(Widget):
         self._alvo_zoom = None
         self._ev_anim = None
         self._toques = []
+        self._voo = None                    # câmera voando até um enquadramento
+        self._rz_fixo = None                # no voo: já desenha no zoom de chegada
+        self._revelar = None                # rota se desenhando do começo ao fim
+        self._brilho = None                 # hora em que a rota acabou de se desenhar
+        self._radar_t0 = None               # "procurando caminho": ondas saindo de quem pedala
+        self._dest_t0 = None                # pino do destino caindo
         self.ao_segurar = None              # ao_segurar(lat, lon): dedo parado no mapa
         self._ev_segurar = None
         self._velocidade = (0.0, 0.0)
@@ -258,6 +274,7 @@ class MapaHUD(Widget):
         self._ligar_animacao()
 
     def recentralizar(self):
+        self._cancelar_voo()
         self.seguindo = True
         self._ligar_animacao()
 
@@ -274,6 +291,8 @@ class MapaHUD(Widget):
         self._ligar_animacao()
 
     def modo_navegacao(self, ligado):
+        self._cancelar_voo()
+        self._radar_t0 = None
         self._navegando = ligado
         # navegando e girando: a seta fica mais embaixo, sobra mapa à frente
         self.ancora = self.ancora_nav if (ligado and self.girar) else (0.5, 0.5)
@@ -286,11 +305,35 @@ class MapaHUD(Widget):
         self._aplicar()
         self._ligar_animacao()
 
-    def definir_rota(self, pontos):
+    def definir_rota(self, pontos, animar=0.0):
+        """animar = segundos para a linha se desenhar de quem pedala até o
+        destino (0 = aparece inteira na hora)."""
         self._rota = list(pontos)
         self._trechos = []          # as avenidas eram da rota antiga
         self._transito = []
+        self._revelar = self._brilho = None
+        if animar > 0 and len(self._rota) >= 2 and self.ativo:
+            passo = max(1, len(self._rota) // PONTOS_REVELAR)
+            pts = [self._local(p[0], p[1]) for p in self._rota[::passo]]
+            if (len(self._rota) - 1) % passo:
+                pts.append(self._local(*self._rota[-1][:2]))
+            ac = [0.0]
+            for a, b in zip(pts, pts[1:]):
+                ac.append(ac[-1] + math.hypot(b[0] - a[0], b[1] - a[1]))
+            if ac[-1] > 0:
+                self._revelar = {"t0": time.monotonic(), "dur": float(animar), "pts": pts, "ac": ac,
+                                 "linhas": (), "ponta": pts[0]}
+                self._ligar_animacao()
         self._refazer_linhas()
+
+    def procurar(self, ligado):
+        """Calculando a rota: ondas de radar saem de quem pedala (e uma do
+        destino) até a resposta chegar."""
+        self._radar_t0 = time.monotonic() if ligado else None
+        if ligado:
+            self._ligar_animacao()
+        else:
+            self._desenhar_tela()
 
     def definir_trechos(self, trechos):
         """Trechos da rota em via movimentada [(pontos, nível)]: desenhados por
@@ -315,15 +358,20 @@ class MapaHUD(Widget):
         self._trilha = list(pontos)
         self._refazer_linhas(so_trilha=True)
 
-    def definir_destino(self, lat_lon):
+    def definir_destino(self, lat_lon, cair=False):
+        """cair=True: o pino desce e \"quica\" no lugar (destino recém-escolhido)."""
         self._destino = lat_lon
+        self._dest_t0 = time.monotonic() if (cair and lat_lon) else None
+        if self._dest_t0 is not None:
+            self._ligar_animacao()
         self._desenhar_tela()
 
-    def enquadrar(self, pontos, margem_px=None, cobertos=(0, 0, 0, 0)):
+    def enquadrar(self, pontos, margem_px=None, cobertos=(0, 0, 0, 0), animado=False, duracao=0.9):
         """Mostra todos os pontos (norte para cima), sem seguir quem pedala.
         `cobertos` = (esquerda, baixo, direita, cima) em px tapados por
-        painéis: a rota cabe no pedaço de mapa que sobra visível."""
-        if not pontos:
+        painéis: a rota cabe no pedaço de mapa que sobra visível.
+        animado=True: a câmera VOA até lá em `duracao` segundos."""
+        if not pontos or self.width < 2 or self.height < 2:
             return
         margem = margem_px if margem_px is not None else dp(60)
         esq, baixo, dir_, cima = cobertos
@@ -339,13 +387,62 @@ class MapaHUD(Widget):
         z = 14 + math.log2(min(larg / max((x1 - x0) * 2 ** 14, 1e-9),
                                alt / max((y1 - y0) * 2 ** 14, 1e-9)))
         self.seguindo = False
-        self.ancora = ((esq + livre_w / 2.0) / max(self.width, 1),
-                       (baixo + livre_h / 2.0) / max(self.height, 1))
+        ancora = ((esq + livre_w / 2.0) / max(self.width, 1),
+                  (baixo + livre_h / 2.0) / max(self.height, 1))
+        zoom = max(ZOOM_MIN, min(17.0, z))
+        self._cancelar_voo()
+        if animado and self.ativo:
+            de, para = self._local(*self.centro), self._local(*meio)
+            s = self._escala_tela()
+            perto = (abs(zoom - self.zoom) < 0.04 and math.hypot(para[0] - de[0], para[1] - de[1]) * s < dp(6)
+                     and abs(ancora[0] - self.ancora[0]) + abs(ancora[1] - self.ancora[1]) < 0.01)
+            if not perto:
+                self._velocidade = (0.0, 0.0)
+                self._alvo_zoom = None
+                self._voo = {"t0": time.monotonic(), "dur": max(0.05, duracao),
+                             "de": (de, self.zoom, self.ancora, self.rotacao),
+                             "para": (para, zoom, ancora), "centro": meio}
+                # já desenha (e pede) o mapa no zoom de CHEGADA: os pedaços do zoom
+                # atual ficam na tela, esticados, até os novos cobrirem tudo
+                self._rz_fixo = int(max(ZOOM_MIN, min(ZOOM_MAX, round(zoom))))
+                self._pedir_tiles_de(para, zoom, ancora)
+                self._ligar_animacao()
+                return
         self._parar_animacao()
+        self.ancora = ancora
         self.centro = meio
         self.rotacao = 0.0
-        self.zoom = max(ZOOM_MIN, min(17.0, z))
+        self.zoom = zoom
         self._aplicar()
+        if self._radar_t0 is not None or self._revelar is not None or self._dest_t0 is not None:
+            self._ligar_animacao()
+
+    def _cancelar_voo(self):
+        self._voo = None
+        self._rz_fixo = None
+
+    def _pedir_tiles_de(self, centro_local, zoom, ancora):
+        """Pede já o preparo dos pedaços do mapa da vista de CHEGADA do voo
+        (norte para cima): quando a câmera chega, o mapa está pronto ou quase."""
+        rz = self._rz_fixo
+        dz = z_dados(rz)
+        s = self._escala * 2.0 ** (zoom - 14)
+        cx, cy = centro_local
+        ax, ay = self.width * ancora[0], self.height * ancora[1]
+        margem = dp(40)
+        x0 = cx + (-margem - ax) / s + self._origem[0]
+        x1 = cx + (self.width + margem - ax) / s + self._origem[0]
+        y0 = self._origem[1] - (cy + (self.height + margem - ay) / s)
+        y1 = self._origem[1] - (cy + (-margem - ay) / s)
+        gx0, gy0, gx1, gy1 = self._caixa_goiania
+        lado = 256.0 * 2 ** (14 - dz)
+        mx, my = (cx + self._origem[0]) / lado, (self._origem[1] - cy) / lado
+        tiles = tiles_do_retangulo(max(x0, gx0), max(y0, gy0), min(x1, gx1), min(y1, gy1), dz)
+        # a fila atende o pedido mais recente primeiro: os do meio são pedidos por último
+        for tx, ty in sorted(tiles, key=lambda c: -((c[0] + 0.5 - mx) ** 2 + (c[1] + 0.5 - my) ** 2))[-40:]:
+            chave = (dz, tx, ty, rz)
+            if chave not in self._desenhados:
+                self.fonte.pedir(chave)
 
     def ao_voltar(self):
         """App voltou do segundo plano: no Android as texturas dos nomes podem
@@ -431,7 +528,9 @@ class MapaHUD(Widget):
     def _nivel_desenho(self):
         """Zoom inteiro de desenho, com folga: na pinça ou no zoom automático
         o mapa não fica sendo refeito a cada vez que passa de x,5."""
-        if self._rz is None or abs(self.zoom - self._rz) > HISTERESE_ZOOM:
+        if self._rz_fixo is not None:
+            self._rz = self._rz_fixo
+        elif self._rz is None or abs(self.zoom - self._rz) > HISTERESE_ZOOM:
             self._rz = int(max(ZOOM_MIN, min(ZOOM_MAX, round(self.zoom))))
         return self._rz
 
@@ -546,6 +645,8 @@ class MapaHUD(Widget):
         return tex
 
     def _pedir_rotulos(self):
+        if self._voo is not None:   # no voo os nomes só acompanham; a escolha (cara) fica para a chegada
+            return
         if self._ev_rotulos is None:
             espera = max(0.0, REPOSICIONAR_S - (time.time() - self._t_rotulos))
             self._ev_rotulos = Clock.schedule_once(self._escolher_rotulos, espera)
@@ -825,6 +926,29 @@ class MapaHUD(Widget):
             grupo.clear()
             if tipo == "rota":
                 self._larg_rota = []      # [(linha, largura em px)] da rota e do que vai junto dela
+                if self._revelar is not None:   # a rota ainda está se desenhando: só ela, até a ponta
+                    r = self._revelar
+                    inicio = [c for p in r["pts"][:1] * 2 for c in p]
+                    grupo.add(Color(*tema.com_alfa(tema.CIANO, 0.28)))
+                    halo = Line(points=inicio, width=1, joint="round", cap="round", **LINHA_LEVE)
+                    grupo.add(halo)
+                    grupo.add(Color(*tema.CIANO))
+                    linha = Line(points=inicio, width=1, joint="round", cap="round", **LINHA_LEVE)
+                    grupo.add(linha)
+                    r["linhas"] = (halo, linha)
+                    self._larg_rota += [(halo, dp(11)), (linha, dp(4.2))]
+                    self._pintar_revelado()
+                    continue
+                if self._brilho is not None and len(self._rota) >= 2:   # clarão por baixo da rota pronta
+                    passo = max(1, len(self._rota) // PONTOS_REVELAR)
+                    plano = []
+                    for p in self._rota[::passo] + [self._rota[-1]]:
+                        plano.extend(self._local(p[0], p[1]))
+                    self._cor_brilho = Color(*tema.com_alfa(tema.CIANO, 0.0))
+                    grupo.add(self._cor_brilho)
+                    clarao = Line(points=plano, width=1, joint="round", cap="round", **LINHA_LEVE)
+                    grupo.add(clarao)
+                    self._larg_rota.append((clarao, dp(24)))
                 if len(self._rota) >= 2:
                     for pontos, magnitude in self._transito:   # por baixo de tudo
                         self._linha(grupo, pontos, "transito%d" % max(1, min(4, magnitude)))
@@ -837,36 +961,63 @@ class MapaHUD(Widget):
         self._larg_usada = None
         self._ajustar_larguras(self._escala_tela())
 
+    def _pintar_revelado(self):
+        """A linha da rota até onde a animação já chegou (f de 0 a 1 pelo tempo)."""
+        r = self._revelar
+        f = min(1.0, max(0.0, (time.monotonic() - r["t0"]) / r["dur"]))
+        k = f * f * (3.0 - 2.0 * f)   # sai devagar, corre no meio, chega devagar
+        pts, ac = r["pts"], r["ac"]
+        alvo = ac[-1] * k
+        plano = [pts[0][0], pts[0][1]]
+        ponta = pts[0]
+        for i in range(1, len(pts)):
+            if ac[i] <= alvo:
+                plano.extend(pts[i])
+                ponta = pts[i]
+                continue
+            trecho = ac[i] - ac[i - 1]
+            t = (alvo - ac[i - 1]) / trecho if trecho > 0 else 0.0
+            ponta = (pts[i - 1][0] + (pts[i][0] - pts[i - 1][0]) * t,
+                     pts[i - 1][1] + (pts[i][1] - pts[i - 1][1]) * t)
+            plano.extend(ponta)
+            break
+        if len(plano) < 4:
+            plano = plano * 2
+        for linha in r["linhas"]:
+            linha.points = plano
+        r["ponta"] = ponta
+        return f >= 1.0
+
     def _linha(self, grupo, pontos, tipo):
         plano = []
         for p in pontos:
             plano.extend(self._local(p[0], p[1]))
         if tipo == "alt":
             grupo.add(Color(0.05, 0.08, 0.11, 0.9))
-            grupo.add(Line(points=plano, width=1, joint="round", cap="round"))
+            grupo.add(Line(points=plano, width=1, joint="round", cap="round", **LINHA_LEVE))
             grupo.add(Color(0.55, 0.62, 0.70, 0.95))
-            grupo.add(Line(points=plano, width=1, joint="round", cap="round"))
+            grupo.add(Line(points=plano, width=1, joint="round", cap="round", **LINHA_LEVE))
         elif tipo.startswith("transito"):
             grupo.add(Color(*CORES_TRANSITO[int(tipo[-1])]))
-            linha = Line(points=plano, width=1, joint="round", cap="round")
+            linha = Line(points=plano, width=1, joint="round", cap="round", **LINHA_LEVE)
             grupo.add(linha)
             self._larg_rota.append((linha, dp(14)))
         elif tipo in ("movimentado", "pesado"):
             grupo.add(Color(*(tema.VERMELHO if tipo == "pesado" else tema.LARANJA)))
-            linha = Line(points=plano, width=1, joint="round", cap="round")
+            linha = Line(points=plano, width=1, joint="round", cap="round", **LINHA_LEVE)
             grupo.add(linha)
             self._larg_rota.append((linha, dp(4.6)))
         elif tipo == "rota":
             grupo.add(Color(*tema.com_alfa(tema.CIANO, 0.28)))
-            halo = Line(points=plano, width=1, joint="round", cap="round")
+            halo = Line(points=plano, width=1, joint="round", cap="round", **LINHA_LEVE)
             grupo.add(halo)
             grupo.add(Color(*tema.CIANO))
-            linha = Line(points=plano, width=1, joint="round", cap="round")
+            linha = Line(points=plano, width=1, joint="round", cap="round", **LINHA_LEVE)
             grupo.add(linha)
             self._larg_rota += [(halo, dp(11)), (linha, dp(4.2))]
         else:
             grupo.add(Color(*tema.com_alfa(tema.LARANJA, 0.85)))
-            grupo.add(Line(points=plano, width=1, joint="round", cap="round"))
+            grupo.add(Line(points=plano, width=1, joint="round", cap="round", **LINHA_LEVE))
 
     def _ajustar_larguras(self, s):
         # largura da Line é em unidades locais: compensa a escala para ficar
@@ -906,6 +1057,15 @@ class MapaHUD(Widget):
         self._e_ponto = [Ellipse(size=(dp(18), dp(18))), Ellipse(size=(dp(12), dp(12)))]
         self._m_ponto = grupo(Color(*tema.BRANCO), self._e_ponto[0],
                               Color(*tema.CIANO), self._e_ponto[1])
+        # "procurando caminho": 3 ondas saindo de quem pedala e 1 do destino
+        self._radar = [(Color(*tema.com_alfa(tema.CIANO, 0.0)), Line(circle=(0, 0, 1), width=dp(1.6)))
+                       for _ in range(4)]
+        self._m_radar = grupo(*[i for par in self._radar for i in par])
+        # a ponta acesa da rota enquanto ela se desenha
+        self._e_ponta = [Ellipse(size=(dp(26), dp(26))), Ellipse(size=(dp(11), dp(11)))]
+        self._m_ponta = grupo(Color(*tema.com_alfa(tema.CIANO, 0.35)), self._e_ponta[0],
+                              Color(*tema.BRANCO), self._e_ponta[1])
+        self._tam_dest = [e.size for e in self._e_dest]
         self._visiveis = []
         self._ultima_seta = None
 
@@ -918,11 +1078,40 @@ class MapaHUD(Widget):
 
     def _desenhar_tela(self):
         quais = []
+        agora = time.monotonic()
+        radar = self._radar_t0 is not None
+        if radar:
+            centros = [self._para_tela(*(self._vista or self.eu)[:2])] * 3 if self.eu else [None] * 3
+            centros.append(self._para_tela(*self._destino) if self._destino else None)
+            for n, ((cor, anel), centro) in enumerate(zip(self._radar, centros)):
+                if centro is None:
+                    cor.a = 0.0
+                    continue
+                fase = ((agora - self._radar_t0) / RADAR_VOLTA_S + (n / 3.0 if n < 3 else 0.5)) % 1.0
+                alcance = dp(150) if n < 3 else dp(54)
+                anel.circle = (centro[0], centro[1], dp(16) + fase * alcance)
+                cor.a = 0.75 * (1.0 - fase) ** 1.6
+            quais.append(self._m_radar)
         if self._destino:
             x, y = self._para_tela(*self._destino)
-            for e in self._e_dest:
-                e.pos = (x - e.size[0] / 2.0, y - e.size[1] / 2.0)
+            cresce, sobe = 1.0, 0.0
+            if self._dest_t0 is not None:
+                f = (agora - self._dest_t0) / PINO_CAI_S
+                if f >= 1.0:
+                    self._dest_t0 = None
+                else:   # cai de cima e passa um pouco do tamanho antes de assentar
+                    sobe = dp(70) * (1.0 - min(1.0, f / 0.55)) ** 2
+                    g = f - 1.0
+                    cresce = max(0.05, 1.0 + 2.6 * g * g * g + 1.6 * g * g)
+            for e, (w, h) in zip(self._e_dest, self._tam_dest):
+                e.size = (w * cresce, h * cresce)
+                e.pos = (x - w * cresce / 2.0, y + sobe - h * cresce / 2.0)
             quais.append(self._m_dest)
+        if self._revelar is not None:
+            x, y = self._local_para_tela(*self._revelar["ponta"])
+            for e in self._e_ponta:
+                e.pos = (x - e.size[0] / 2.0, y - e.size[1] / 2.0)
+            quais.append(self._m_ponta)
         if self.eu:
             precisao = self.eu[3]
             lat, lon, rumo = self._vista or self.eu[:3]
@@ -997,8 +1186,54 @@ class MapaHUD(Widget):
         dt = min(dt, 0.1)
         tela_animando()  # a thread do mapa dá a vez para a tela
         mexeu = False
+        refazer = False
+        agora = time.monotonic()
+        if self._radar_t0 is not None:
+            if agora - self._radar_t0 > RADAR_MAX_S:
+                self._radar_t0 = None
+            mexeu = True
+        if self._dest_t0 is not None:
+            mexeu = True
+        if self._revelar is not None:
+            mexeu = True
+            if self._pintar_revelado():   # chegou ao destino: rota inteira + clarão
+                self._revelar = None
+                self._brilho = agora
+                refazer = True
+        elif self._brilho is not None:
+            f = (agora - self._brilho) / BRILHO_S
+            mexeu = True
+            if f >= 1.0:
+                self._brilho = None
+                refazer = True
+            else:
+                self._cor_brilho.a = 0.55 * (1.0 - f) ** 2
+        if refazer:
+            self._refazer_linhas()
         self._em_lote = True
         try:
+            if self._voo is not None:
+                v = self._voo
+                f = min(1.0, (agora - v["t0"]) / v["dur"])
+                k = f * f * (3.0 - 2.0 * f)
+                (x0, y0), z0, a0, r0 = v["de"]
+                (x1, y1), z1, a1 = v["para"]
+                dz = z1 - z0
+                # o chão anda na mesma velocidade NA TELA do começo ao fim, mesmo
+                # com o zoom mudando (senão dispara no começo ou no fim do voo)
+                kp = k if abs(dz) < 0.01 else (1.0 - 2.0 ** (-dz * k)) / (1.0 - 2.0 ** (-dz))
+                if f >= 1.0:
+                    self.centro, self.ancora = v["centro"], a1
+                    self.zoom, self.rotacao = z1, 0.0
+                    self._voo = None
+                    self._rz_fixo = None
+                    self._t_rotulos = 0.0   # chegou: agora escolhe os nomes da vista nova
+                else:
+                    self.centro = self._local_para_geo(x0 + (x1 - x0) * kp, y0 + (y1 - y0) * kp)
+                    self.ancora = (a0[0] + (a1[0] - a0[0]) * k, a0[1] + (a1[1] - a0[1]) * k)
+                    self.zoom = z0 + dz * k
+                    self.rotacao = (r0 + _dif_angulo(r0, 0.0) * k) % 360.0
+                mexeu = True
             if self._fix is not None:
                 lat, lon, rumo, andando = self._posicao_prevista(time.monotonic())
                 v = self._vista
@@ -1079,6 +1314,7 @@ class MapaHUD(Widget):
                                                              cy + antes[1] - depois[1]))
 
     def _sair_do_seguir(self):
+        self._cancelar_voo()
         if self.seguindo:
             self.seguindo = False
         if not self._navegando:
@@ -1090,6 +1326,7 @@ class MapaHUD(Widget):
         if super().on_touch_down(touch):
             return True
         self._t_mexeu = time.time()
+        self._cancelar_voo()   # pôs o dedo: o mapa é dele
         if getattr(touch, "is_mouse_scrolling", False):
             self._alvo_zoom = None
             self._zoom_no_ponto(self.zoom + (0.5 if touch.button == "scrolldown" else -0.5), *touch.pos)
