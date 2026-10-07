@@ -40,8 +40,8 @@ import rede
 import sinais
 import tema
 from diagnostico import seguro
-from mapa_vetor import (AREAS, FUNDO, RUAS, SETAS, FonteVetorial, chave_nome, legenda_se_precisa, nivel_de_desenho, origem_padrao,
-                        tela_animando, tiles_do_retangulo, z_dados)
+from mapa_vetor import (AREAS, FUNDO, RUAS, SETAS, FonteVetorial, _Malha, chave_nome, legenda_se_precisa,
+                        nivel_de_desenho, origem_padrao, tela_animando, tiles_do_retangulo, z_dados)
 
 ZOOM_MIN, ZOOM_MAX = 11.0, 19.0   # o app é só de Goiânia: de longe, a cidade inteira
 SEGURAR_S = 0.6                  # dedo parado esse tempo = marcar o ponto
@@ -96,6 +96,11 @@ MAX_CELULAS_LUGARES = 24
 # faixa de trânsito por baixo da rota, pela gravidade (1 leve ... 3 parado, 4 via interditada)
 CORES_TRANSITO = {1: (1.0, 0.84, 0.16, 0.92), 2: (1.0, 0.52, 0.10, 0.92), 3: (0.92, 0.13, 0.13, 0.95),
                   4: (0.52, 0.05, 0.22, 1.0)}
+# ruas coloridas pela velocidade de agora (fluxo.py): 0 livre ... 3 parado, 4 via fechada
+CORES_FLUXO = {0: (0.18, 0.80, 0.44, 0.62), 1: (1.0, 0.84, 0.16, 0.90), 2: (1.0, 0.52, 0.10, 0.92),
+               3: (0.92, 0.13, 0.13, 0.95), 4: (0.52, 0.05, 0.22, 1.0)}
+LARGURA_FLUXO_DP = {0: 2.2, 1: 3.4, 2: 3.8, 3: 4.2, 4: 4.2}   # o livre é só um fio; o parado chama a atenção
+ZOOM_FLUXO = 12.5          # de mais longe as cores virariam um borrão
 ZOOM_OCORRENCIAS = 12.0    # acidente, obra, via interditada (trânsito ao vivo): desde bem longe
 ZOOM_LENTOS = 13.5         # o ícone de trânsito lento, um pouco mais de perto (o trecho pintado, sempre)
 TOQUE_OCORRENCIA_DP = 30   # tocou até isso do ícone: abre o que é
@@ -218,6 +223,8 @@ class MapaHUD(Widget):
         self._dest_t0 = None                # pino do destino caindo
         self.ao_segurar = None              # ao_segurar(lat, lon): dedo parado no mapa
         self.ocorrencias = []               # trânsito de Goiânia agora (transito.py), mesmo sem rota
+        self._fluxo = []                    # ruas pela velocidade de agora: [(pontos locais, nível)]
+        self._fluxo_rz = None               # nível de desenho em que a malha das cores foi feita
         self._ocorr_icones = []             # [(lat, lon, tipo do ícone, ocorrência)]
         self._ocorr_na_tela = []            # [(x local, y local, ocorrência)] com ícone à vista
         self._larg_geral = []               # linhas dos trechos lentos da cidade
@@ -248,6 +255,8 @@ class MapaHUD(Widget):
         for nome in SETAS:  # setas de mão única: por cima de todas as ruas, por baixo da rota
             self._g_ruas[nome] = InstructionGroup()
             self.canvas.add(self._g_ruas[nome])
+        self._g_fluxo = InstructionGroup()      # ruas coloridas pela velocidade de agora
+        self.canvas.add(self._g_fluxo)
         self._g_transito = InstructionGroup()   # trânsito da cidade: por cima das ruas, por baixo da rota
         self.canvas.add(self._g_transito)
         self._g_trilha = InstructionGroup()
@@ -368,6 +377,45 @@ class MapaHUD(Widget):
         parado, vinho = via interditada). A linha da rota segue por cima."""
         self._transito = [(list(pontos), m) for pontos, m in trechos if len(pontos) >= 2]
         self._refazer_linhas()
+
+    def definir_fluxo(self, segmentos):
+        """As ruas pela velocidade de agora: [(pontos (lat, lon), nível 0..4)]
+        (fluxo.py). Verde fino = livre; amarelo, laranja e vermelho = cada
+        vez mais lento; vinho = via fechada."""
+        self._fluxo = [([self._local(lat, lon) for lat, lon in pontos], nivel) for pontos, nivel in segmentos]
+        self._fluxo_rz = None
+        self._desenhar_fluxo()
+
+    def _desenhar_fluxo(self):
+        """Uma malha por cor (centenas de trechos viram 5 desenhos). A largura
+        é fixa no nível de desenho de agora: refaz quando ele muda."""
+        rz = self._rz if self._rz is not None else nivel_de_desenho(self.zoom)
+        visivel = self.zoom >= ZOOM_FLUXO and bool(self._fluxo)
+        if self._fluxo_rz == (rz, visivel):
+            return
+        self._fluxo_rz = (rz, visivel)
+        self._g_fluxo.clear()
+        if not visivel:
+            return
+        px_por_local = self._escala * 2.0 ** (rz - 14)
+        malhas = {n: _Malha() for n in CORES_FLUXO}
+        for pontos, nivel in self._fluxo:
+            malhas[nivel].faixa(pontos, dp(LARGURA_FLUXO_DP[nivel]) / 2.0 / px_por_local, 0)
+        for nivel in sorted(malhas):   # o mais lento por último: fica por cima
+            listas = malhas[nivel].listas()
+            if listas:
+                self._g_fluxo.add(Color(*CORES_FLUXO[nivel]))
+                for vertices, indices in listas:
+                    self._g_fluxo.add(Mesh(vertices=vertices, indices=indices, mode="triangles"))
+
+    def caixa_da_vista(self):
+        """(lat mín, lon mín, lat máx, lon máx) do que está na tela (None sem tamanho)."""
+        if self.width < 2 or self.height < 2:
+            return None
+        cantos = [self._local_para_geo(*self._tela_para_local(px, py))
+                  for px, py in ((self.x, self.y), (self.right, self.y), (self.x, self.top), (self.right, self.top))]
+        return (min(c[0] for c in cantos), min(c[1] for c in cantos),
+                max(c[0] for c in cantos), max(c[1] for c in cantos))
 
     def definir_ocorrencias(self, ocorrencias):
         """O trânsito de Goiânia agora, mesmo sem rota (pedido do dono, 07/10/2026:
@@ -668,6 +716,7 @@ class MapaHUD(Widget):
         if nivel != self._nivel:
             self._nivel = nivel
             self._t_rotulos = 0.0
+        self._desenhar_fluxo()   # (só refaz se o nível de desenho ou a visibilidade mudou)
 
     def _adiantar(self, precisa, dz, rz, caixa):
         """A tela está completa: deixa prontos (sem pressa, quando a fila do

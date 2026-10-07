@@ -808,9 +808,21 @@ class TelaMapa(Screen):
             return
         android_utils.vibrar([0, 35], [0, 160])  # "pegou": dá para sentir sem olhar
         self._marca = (lat, lon)
+        self._marca_endereco = ""
         self.lbl_marca.text = "Ponto marcado: salvar ou ir para cá?"
-        self.mapa.definir_destino(self._marca)
+        self.mapa.definir_destino(self._marca, cair=True)
         self._montar()
+        # o endereço daquele ponto (TomTom), quando chegar: troca o título do cartão
+        app = App.get_running_app()
+        chave = (app.ajustes["tomtom"] or "").strip() or None
+        marca = self._marca
+
+        def chegou(endereco):
+            if endereco and self._marca == marca:
+                self._marca_endereco = endereco
+                self.lbl_marca.text = endereco
+        import rede
+        rede.em_segundo_plano(lambda: busca.endereco_de(lat, lon, chave), chegou, lambda e: None)
 
     def _fechar_marca(self):
         self._marca = None
@@ -822,7 +834,8 @@ class TelaMapa(Screen):
             return
         lat, lon = self._marca
         self._marca = None
-        App.get_running_app().escolher_destino({"nome": "Ponto marcado", "endereco": "",
+        endereco = getattr(self, "_marca_endereco", "")
+        App.get_running_app().escolher_destino({"nome": endereco or "Ponto marcado", "endereco": "",
                                                 "lat": lat, "lon": lon})
 
     def _pedir_nome(self):
@@ -836,7 +849,7 @@ class TelaMapa(Screen):
             self._fechar_marca()
             self.mensagem("Salvo! Ache em \"Para onde, senhor?\"", tema.VERDE)
         # já sugere o lugar conhecido naquele ponto, se houver
-        pedir_nome(salvar, sugestao=busca.nome_perto(lat, lon))
+        pedir_nome(salvar, sugestao=busca.nome_perto(lat, lon) or getattr(self, "_marca_endereco", ""))
 
     # --- corrida ao vivo ---------------------------------------------------------------
     def _pintar_vivo(self):

@@ -14,6 +14,7 @@ from kivy.uix.screenmanager import NoTransition, ScreenManager
 
 import android_utils
 import diagnostico
+import fluxo
 import goiania
 import mapa_vetor
 import rede
@@ -57,6 +58,7 @@ VIBRA_FORCAS = [0, 255, 0, 255]
 RUMO_MIN_KMH = 3.0          # parado, o rumo do GPS é ruído: fica o último
 RUMO_VALIDO_S = 6.0         # rumo mais velho que isso não vai no pedido de rota
 GPS_PERDIDO_FALA_S = 10     # navegando sem sinal por isso: o assistente avisa
+FLUXO_A_CADA_S = 15.0          # mapa: confere se a vista tem as cores do trânsito (só baixa o que falta/venceu)
 TRANSITO_MAPA_A_CADA_S = 240.0  # mapa: o trânsito de Goiânia é olhado de novo a cada isso (~360 consultas/dia no máximo, de 2.500)
 CAMINHO_A_CADA_S = 300.0       # navegando: a TomTom refaz o caminho com o trânsito de agora a cada isso
 CAMINHO_PRIMEIRA_S = 45.0      # a 1ª conferência, pouco depois de sair
@@ -242,6 +244,8 @@ class GTHudApp(App):
         gc.freeze()
         print("[tema] agora:", nome)
         self.atualizar_transito_do_mapa()   # o mapa novo nasce sem o trânsito desenhado
+        self._fluxo_tiles = None
+        self.atualizar_fluxo()
 
     # --- voz -------------------------------------------------------------------
     def indice_voz(self):
@@ -302,6 +306,8 @@ class GTHudApp(App):
         Clock.schedule_once(self._aprender_com_as_antigas, 12)
         Clock.schedule_once(self.atualizar_transito_do_mapa, 5)
         Clock.schedule_interval(self.atualizar_transito_do_mapa, TRANSITO_MAPA_A_CADA_S)
+        Clock.schedule_once(self.atualizar_fluxo, 6)
+        Clock.schedule_interval(self.atualizar_fluxo, FLUXO_A_CADA_S)
 
     def on_pause(self):
         self._guardar_posicao()
@@ -650,6 +656,29 @@ class GTHudApp(App):
             self._buscando_transito = False
             print("[transito] mapa:", type(erro).__name__)
         rede.em_segundo_plano(lambda: transito.da_cidade(chave), pronto, falhou)
+
+    def atualizar_fluxo(self, dt=None):
+        """As ruas coloridas pela velocidade de agora na parte do mapa que
+        está na tela (TomTom). Só baixa pedaço que falta ou que venceu."""
+        chave = transito.chave_em_uso(self.ajustes)
+        if not chave or self.sm is None or self.sm.current != "mapa":
+            return
+        if getattr(self, "fluxo", None) is None:
+            self.fluxo = fluxo.Fluxo()
+        mapa = self.sm.get_screen("mapa").mapa
+        caixa = mapa.caixa_da_vista()
+        if caixa is None or mapa.zoom < 12.5:
+            return
+        tiles = fluxo.tiles_da_caixa(*caixa)
+        if tiles != getattr(self, "_fluxo_tiles", None):   # a vista mudou de pedaço: mostra o que já tem
+            self._fluxo_tiles = tiles
+            mapa.definir_fluxo(self.fluxo.segmentos(tiles))
+
+        def chegou(mudou):
+            if mudou:
+                self.na_tela(lambda: self.sm.get_screen("mapa").mapa.definir_fluxo(
+                    self.fluxo.segmentos(self._fluxo_tiles or [])))
+        self.fluxo.atualizar(chave, tiles, chegou)
 
     def _informar(self, rota, ocorrencias):
         """Histórico e trânsito de UMA rota (roda numa thread)."""

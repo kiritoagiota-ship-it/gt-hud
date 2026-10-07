@@ -329,6 +329,29 @@ def _tomtom(texto, perto, chave, baixar=None):
     return lugares
 
 
+ENDERECO = "https://api.tomtom.com/search/2/reverseGeocode/%.6f,%.6f.json?"
+
+
+def endereco_de(lat, lon, chave=None, baixar=None):
+    """O endereço de um ponto do mapa ("Rua 9, 250 - Setor Oeste"), pela
+    TomTom (Reverse Geocode). "" se não há chave ou ela não achou. Chamada
+    que espera a resposta (thread)."""
+    chave = chave or chaves.chave("tomtom")
+    if not chave:
+        return ""
+    url = ENDERECO % (lat, lon) + urllib.parse.urlencode({"key": chave, "language": "pt-BR", "radius": 80})
+    dados = json.loads((baixar or rede.baixar)(url, 8).decode("utf-8"))
+    for item in dados.get("addresses") or []:
+        e = item.get("address") or {}
+        rua = e.get("streetName") or ""
+        if not rua:
+            continue
+        texto = rua + (", " + e["streetNumber"] if e.get("streetNumber") else "")
+        bairro = e.get("municipalitySubdivision") or ""
+        return texto + (" - " + bairro if bairro and bairro != rua else "")
+    return ""
+
+
 def buscar(texto, perto=None, salvos=(), chave_tomtom=None):
     """Chamada que espera a resposta (use rede.em_segundo_plano).
     Devolve [{nome, endereco, lat, lon, dist_m, fonte}], o melhor primeiro."""
