@@ -101,6 +101,7 @@ public class ServicoNavegacao extends Service {
             acordado.release();
         }
         Bolha.esconder();
+        PainelFlutuante.esconder();
         super.onDestroy();
     }
 

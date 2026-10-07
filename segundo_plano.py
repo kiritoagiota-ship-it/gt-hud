@@ -14,6 +14,7 @@ Como funciona:
   o que é de tela fica para quando o app voltar (app.na_tela).
 - Voltou (on_resume): a thread para e o app segue de onde ela parou.
 """
+import math
 import threading
 import time
 
@@ -22,6 +23,10 @@ import tema
 from falas import texto_manobra
 from util import fmt_dist, fmt_dist_nav, fmt_duracao, fmt_hora_chegada, fmt_tempo
 
+PAINEL_A_CADA_S = 0.9      # painel flutuante: acompanha cada leitura do GPS
+DESENHO_FRENTE_M = 280     # quanto de rota à frente vai no desenho do painel
+DESENHO_ATRAS_M = 60
+DESENHO_PASSO_M = 12
 INTERVALO_S = 0.2          # a thread confere o GPS 5x/s (o GPS manda 1x/s)
 AVISO_A_CADA_S = 2.0       # notificação/bolha: no máximo 1 atualização a cada isso
 VIGIA_A_CADA_S = 2.0       # "perdi o sinal do GPS" (no app aberto é o Clock)
@@ -57,6 +62,58 @@ def textos(app):
     return titulo, texto, minutos, km
 
 
+def desenho_da_rota(nav):
+    """O caminho dos próximos metros visto de cima, com a FRENTE para cima e
+    a pessoa na origem: "x,y;x,y;..." em metros inteiros (x = direita, y =
+    frente). É o que o painel flutuante desenha no lugar do mapa."""
+    rota = nav.rota
+    if rota is None or len(rota.pontos) < 2 or rota.total_m <= 0:
+        return ""
+    aqui = max(0.0, min(rota.total_m, nav.dist_feita))
+    lat0, lon0, rumo = rota.ponto_em(aqui, nav.seg)
+    r = math.radians(rumo)
+    sen, cos = math.sin(r), math.cos(r)
+    k = math.cos(math.radians(lat0)) * 111320.0
+    pontos = []
+    d = max(0.0, aqui - DESENHO_ATRAS_M)
+    fim = min(rota.total_m, aqui + DESENHO_FRENTE_M)
+    while True:
+        lat, lon, _ = rota.ponto_em(d, nav.seg if d >= aqui else 0)
+        leste, norte = (lon - lon0) * k, (lat - lat0) * 110540.0
+        pontos.append("%d,%d" % (round(leste * cos - norte * sen), round(leste * sen + norte * cos)))
+        if d >= fim:
+            break
+        d = min(fim, d + DESENHO_PASSO_M)
+    return ";".join(pontos)
+
+
+def dados_do_painel(app):
+    """(distância, instrução, rua, velocidade, resto, desenho, nível de alerta)
+    para o painel flutuante; None se não há rota."""
+    nav, e = app.nav, app.estado_nav
+    if nav is None:
+        return None
+    vel = "%d" % round(app.filtro.previsto()) if getattr(app, "filtro", None) is not None else "0"
+    if nav.chegou:
+        return ("Chegou", "Você chegou ao destino", "", vel, "", "", 0)
+    if not e:
+        return ("...", "Esperando o GPS", "", vel, "", desenho_da_rota(nav), 0)
+    resto = "%s · %s · %s" % (fmt_duracao(e["restante_s"]), fmt_dist_nav(e["restante_m"]),
+                              fmt_hora_chegada(e["restante_s"]))
+    m = e.get("manobra")
+    alerta = 0
+    a = e.get("alerta")
+    if a is not None and a.get("tipo") == "avenida" and a.get("em_m", 1) <= 0:
+        alerta = 2 if a.get("nivel", 2) >= 3 else 1      # andando numa avenida
+    if e.get("fora_da_rota"):
+        return ("Fora da rota", "Recalculando..." if app.recalculando else "Volte para a rota", "",
+                vel, resto, desenho_da_rota(nav), 2)
+    if m is None:
+        return ("", "Siga em frente", "", vel, resto, desenho_da_rota(nav), alerta)
+    return (fmt_dist_nav(e["dist_manobra"]), texto_manobra(m["acao"], m.get("saida")), m.get("ruas") or "",
+            vel, resto, desenho_da_rota(nav), alerta)
+
+
 def feito(app):
     """Quanto da rota já foi, de 0 a 100 (-1 sem rota)."""
     nav = app.nav
@@ -71,12 +128,13 @@ class _Android:
     (só escreve no registro, para os testes)."""
 
     def __init__(self):
-        self.servico = self.bolha = self.ctx = None
+        self.servico = self.bolha = self.painel = self.ctx = None
         try:
             from jnius import autoclass
             self.ctx = autoclass("org.kivy.android.PythonActivity").mActivity
             self.servico = autoclass("org.kirito.gthud.ServicoNavegacao")
             self.bolha = autoclass("org.kirito.gthud.Bolha")
+            self.painel = autoclass("org.kirito.gthud.PainelFlutuante")
         except Exception as e:
             if not isinstance(e, ImportError):
                 print("[fundo] sem servico/bolha:", e)
@@ -97,6 +155,7 @@ class _Android:
         if self.servico is not None:
             self._chamar(self.servico.parar, self.ctx)
         self.esconder_bolha()
+        self.esconder_painel()
 
     def estilo(self, claro, feito):
         """Tema do app e % da rota já feita (-1 = sem barra): pintam a
@@ -130,6 +189,22 @@ class _Android:
         if self.bolha is not None:
             self._chamar(self.bolha.esconder)
 
+    # painel flutuante (retângulo com o caminho à frente e a velocidade)
+    def mostrar_painel(self, dados, claro):
+        if self.painel is not None:
+            self.atualizar_painel(dados, claro)
+            self._chamar(self.painel.mostrar, self.ctx)
+
+    def atualizar_painel(self, dados, claro):
+        if self.painel is not None and dados is not None:
+            distancia, instrucao, rua, vel, resto, desenho, alerta = dados
+            self._chamar(self.painel.atualizar, distancia, instrucao, rua, vel, resto, desenho,
+                         bool(claro), int(alerta))
+
+    def esconder_painel(self):
+        if self.painel is not None:
+            self._chamar(self.painel.esconder)
+
     @staticmethod
     def _pedir_notificacoes():
         """Android 13+: sem essa permissão a notificação não aparece (o
@@ -153,6 +228,8 @@ class SegundoPlano:
         self._fila = []                 # respostas da internet chegando com o app minimizado
         self._trava = threading.Lock()
         self._t_aviso = 0.0
+        self._t_painel = 0.0
+        self._painel_a_vista = False
         self._ligado = False            # o serviço Android está no ar
         self.leituras_no_fundo = 0      # (diagnóstico e testes)
 
@@ -196,8 +273,27 @@ class SegundoPlano:
         titulo, texto, l1, l2 = textos(self.app)
         self.android.estilo(tema.claro(), feito(self.app))
         self.android.notificar(titulo, texto)
-        if self.minimizado:
+        if self.minimizado and not self._painel_a_vista:
             self.android.atualizar_bolha(l1, l2)
+
+    def _tipo_flutuante(self):
+        """ "painel", "bolha" ou None (desligado nos Ajustes)."""
+        if not self.app.ajustes["bolha"]:
+            return None
+        try:
+            return self.app.ajustes["flutuante_tipo"]
+        except KeyError:
+            return "bolha"
+
+    def atualizar_painel(self):
+        """O painel flutuante acompanha cada leitura (a notificação, não)."""
+        if not (self.minimizado and self._painel_a_vista):
+            return
+        agora = time.monotonic()
+        if agora - self._t_painel < PAINEL_A_CADA_S:
+            return
+        self._t_painel = agora
+        self.android.atualizar_painel(dados_do_painel(self.app), tema.claro())
 
     # --- app minimizado / de volta -------------------------------------------------
     def ao_pausar(self):
@@ -205,9 +301,17 @@ class SegundoPlano:
         if not self._ligado:
             return
         self.minimizado = True
-        if self.app.ajustes["bolha"] and self.android.bolha_permitida():
-            _, _, l1, l2 = textos(self.app)
-            self.android.mostrar_bolha(l1, l2)
+        tipo = self._tipo_flutuante()
+        self._painel_a_vista = False
+        if tipo is not None and self.android.bolha_permitida():
+            dados = dados_do_painel(self.app) if tipo == "painel" else None
+            if dados is not None:
+                # retângulo no meio da tela com o caminho à frente e a velocidade
+                self._painel_a_vista = True
+                self.android.mostrar_painel(dados, tema.claro())
+            else:
+                _, _, l1, l2 = textos(self.app)
+                self.android.mostrar_bolha(l1, l2)
         with self._trava:
             self._fila = []
             rede.desviar_respostas(self._receber)
@@ -220,7 +324,9 @@ class SegundoPlano:
         if not self.minimizado:
             return
         self.minimizado = False
+        self._painel_a_vista = False
         self.android.esconder_bolha()
+        self.android.esconder_painel()
         self._parar.set()
         if self._thread is not None:
             self._thread.join(timeout=2.0)
@@ -260,6 +366,7 @@ class SegundoPlano:
                         self.leituras_no_fundo += 1
                         self.app.processar_leitura(d)
                         self.atualizar()
+                    self.atualizar_painel()   # (a velocidade prevista anda entre as leituras)
                     self.app.voz.bombear()
                     self.app.conferir_fim()   # chegou com o app minimizado: encerra a rota daqui
                     if time.monotonic() - t_vigia >= VIGIA_A_CADA_S:

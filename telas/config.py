@@ -97,7 +97,7 @@ class Alternar(BotaoHUD):
 SECOES = [
     ("Voz", ["Voz do assistente", "Qual voz", "Tom da voz", "Efeito de IA", "Testar a voz"]),
     ("Navegação", ["Rota preferida", "Avisar subidas e descidas", "Avisar semáforos", "Continuar em segundo plano",
-                   "Bolha flutuante", "Corrida ao vivo"]),
+                   "Janela ao minimizar", "Tipo de janela", "Corrida ao vivo"]),
     ("Mapa e tela", ["Aparência", "Mapa gira com a direção", "Mapa offline de Goiânia",
                      "Tela deitada", "Manter tela ligada"]),
     ("Velocímetro e viagem", ["Alerta de velocidade", "Vibrar no limite", "Ajuste do velocímetro",
@@ -225,8 +225,15 @@ class TelaConfig(Screen):
                                "tela) não para nada: a voz continua e aparece uma notificação.",
                                self._centralizar(self.alt_fundo)))
 
+        self.btn_tipo = BotaoHUD(text="", size_hint_x=None, width=dp(130), font_size=tema.T_ROTULO + 2,
+                                 on_release=lambda *a: self._mudar_tipo_flutuante())
+        lista.add_widget(Linha("Tipo de janela",
+                               "Painel: retângulo no meio da tela com o caminho à frente, a próxima "
+                               "curva e a velocidade. Bolha: pequena, só minutos e km.",
+                               self._centralizar(self.btn_tipo)))
+
         self.alt_bolha = Alternar(self._mudar_bolha)
-        self.linha_bolha = Linha("Bolha flutuante",
+        self.linha_bolha = Linha("Janela ao minimizar",
                                  "Minimizado, mostra os minutos e os km até o destino por cima "
                                  "dos outros apps (como a 99). Toque nela para voltar.",
                                  self._centralizar(self.alt_bolha))
@@ -337,6 +344,7 @@ class TelaConfig(Screen):
         self.alt_sim.mostrar(aj["simulador"])
         self.btn_tema.text = _NOMES_TEMA.get(aj["tema"], "Automático")
         self.btn_rota.text = "Tranquila" if aj["rota_preferida"] == "tranquila" else "Mais rápida"
+        self.btn_tipo.text = "Bolha" if aj["flutuante_tipo"] == "bolha" else "Painel"
         self._mostrar_vivo()
         self.lbl_versao.text = ("GT-HUD versão %s\nMapa (c) OpenStreetMap, OpenFreeMap  |  "
                                 "Lugares (c) Overture Maps Foundation" % _versao())
@@ -446,9 +454,9 @@ class TelaConfig(Screen):
             self.linha_bolha.explicacao.text = ("Falta liberar \"Exibir sobre outros apps\" "
                                                 "para o GT-HUD: toque em Permitir.")
         else:
-            self.linha_bolha.explicacao.text = ("Minimizado, mostra os minutos e os km até o destino "
-                                                "por cima dos outros apps (como a 99). Toque nela "
-                                                "para voltar.")
+            self.linha_bolha.explicacao.text = ("Com rota ativa e o app minimizado, uma janela fica por "
+                                                "cima dos outros apps para você seguir acompanhando. "
+                                                "Dá para arrastar; tocar nela volta ao app.")
 
     def _mudar_bolha(self, ligado):
         app = App.get_running_app()
@@ -553,6 +561,12 @@ class TelaConfig(Screen):
                                   lambda e: self._mostrar_vivo("Não consegui testar o banco."))
         pedir_nome(salvar, sugestao=app.ajustes["firebase"], titulo="Endereço do banco (Firebase)",
                    botao="Salvar e testar", dica="https://...firebaseio.com", limite=200)
+
+    def _mudar_tipo_flutuante(self):
+        app = App.get_running_app()
+        novo = "painel" if app.ajustes["flutuante_tipo"] == "bolha" else "bolha"
+        app.ajustes["flutuante_tipo"] = novo
+        self.btn_tipo.text = "Bolha" if novo == "bolha" else "Painel"
 
     def _mudar_rota_preferida(self):
         app = App.get_running_app()

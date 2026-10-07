@@ -24,6 +24,8 @@ PADRAO = {
     "avisar_subidas": True,
     "avisar_semaforos": True,   # lombada é avisada sempre (segurança)
     "segundo_plano": True,      # rota ativa + app minimizado: continua navegando
+    "flutuante_tipo": "painel",  # o que aparece minimizado: "painel" (retângulo com a rota e a
+                                 # velocidade) ou "bolha" (pequena, só minutos e km)
     "bolha": True,              # ... com a bolha de km/minutos por cima dos apps
     "voz_indice": -1,        # -1 = automática: a mais grave (masculina) do celular
     "voz_auto": -1,          # índice que a medição achou (-1 = ainda não mediu)
