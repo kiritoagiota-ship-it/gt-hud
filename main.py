@@ -495,23 +495,32 @@ class GTHudApp(App):
         self.calculando_alternativas = True
         self.sm.get_screen("mapa").mostrar_previa(rota, self.rotas_previa)
         nome = self.destino["nome"]
-        rede.em_segundo_plano(lambda: rotas.pedir_alternativas(origem, alvo, rumo, nome, [rota]),
+        def parcial(lista):
+            # a primeira rota tranquila aparece em uns 7 s; o refino segue por trás
+            rede._entregar(lambda l: self._alternativas_prontas(l, pedido, final=False), lista)
+        rede.em_segundo_plano(lambda: rotas.pedir_alternativas(origem, alvo, rumo, nome, [rota], parcial),
                               lambda rs: self._alternativas_prontas(rs, pedido),
                               lambda e: self._alternativas_prontas([rota], pedido))
 
-    def _alternativas_prontas(self, lista, pedido):
+    def _alternativas_prontas(self, lista, pedido, final=True):
         if pedido != self._pedido or self.destino is None or self.nav is not None:
             return
-        self.calculando_alternativas = False
+        if final:
+            self.calculando_alternativas = False
+        elif not self.calculando_alternativas:
+            return   # um parcial atrasado, depois do resultado final
+        era_tranquila = self.rota_previa is not None and "tranquila" in self.rota_previa.nome_perfil
         self.rotas_previa = lista or [self.rota_previa]
         if self.rota_previa not in self.rotas_previa:
-            self.rota_previa = self.rotas_previa[0]
+            # a tranquila que estava escolhida deu lugar a uma melhor: segue na tranquila
+            calma = next((r for r in self.rotas_previa if "tranquila" in r.nome_perfil), None)
+            self.rota_previa = calma if (era_tranquila and calma is not None) else self.rotas_previa[0]
         if self.ajustes["rota_preferida"] == "tranquila" and not self._escolheu_rota:
             # quem prefere a tranquila já a encontra escolhida (se existir uma)
             calma = next((r for r in self.rotas_previa if "tranquila" in r.nome_perfil), None)
             if calma is not None:
                 self.rota_previa = calma
-        self.sm.get_screen("mapa").mostrar_previa(self.rota_previa, self.rotas_previa, enquadrar=True)
+        self.sm.get_screen("mapa").mostrar_previa(self.rota_previa, self.rotas_previa, enquadrar=final)
 
     def escolher_rota_previa(self, rota):
         self._escolheu_rota = True
@@ -553,6 +562,7 @@ class GTHudApp(App):
             self.viagem.iniciar()  # a navegação grava a viagem sozinha
         self.gps.seguir_rota(rota.pontos)
         self.sm.get_screen("mapa").modo_navegando(rota)
+        self._medir_rota_em_uso(rota)   # (a escolhida na prévia quase sempre já vem medida)
         self.fundo.comecou()  # notificação + Android deixa seguir minimizado
 
     def conferir_fim(self):
@@ -628,7 +638,8 @@ class GTHudApp(App):
 
         def todas():
             primeira = rotas.pedir_rota(origem, alvo, rumo, d["nome"])
-            return rotas.pedir_alternativas(origem, alvo, rumo, d["nome"], [primeira])
+            # no meio do caminho a resposta precisa vir logo: sem o refino de contornar avenidas
+            return rotas.pedir_alternativas(origem, alvo, rumo, d["nome"], [primeira], voltas=0)
 
         def prontas(lista):
             if pedido == self._pedido and self.nav is not None:
@@ -684,6 +695,20 @@ class GTHudApp(App):
         if self.corrida is not None:
             self.corrida.trocar_rota(rota)
         self.na_tela(lambda: self.sm.get_screen("mapa").trocar_rota(rota))
+        self._medir_rota_em_uso(rota)
+
+    def _medir_rota_em_uso(self, rota):
+        """Rota nova no meio do caminho ainda não tem as avenidas medidas: mede
+        em segundo plano e, quando chegar, pinta os trechos e liga os avisos."""
+        if rota.movimentada is not None or getattr(rota, "reserva", False):
+            return
+
+        def medida(resultado):
+            if resultado is None or self.nav is None or self.nav.rota is not rota:
+                return
+            self.nav.avenidas = [a for a in rota.avenidas if a[1] - a[0] >= 300]
+            self.na_tela(lambda: self.sm.get_screen("mapa").mapa.definir_trechos(rota.trechos))
+        rede.em_segundo_plano(lambda: rotas.medir_movimento(rota), medida, lambda e: None)
 
     def _recalculo_falhou(self, erro):
         self._recalculando = False

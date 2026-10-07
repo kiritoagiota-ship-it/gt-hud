@@ -155,6 +155,7 @@ class MapaHUD(Widget):
         self._escala = Metrics.density      # px de tela por px do mundo no zoom 14
         self._origem = mundo(self.centro[0], self.centro[1], 14)
         self._rota, self._trilha, self._destino = [], [], None
+        self._trechos = []                  # avenidas da rota: [(pontos, nível)]
         self._alternativas = []
         self._desenhados = {}               # (dz, tx, ty, rz) -> [(grupo, instrução), ...]
         self._nivel = None                  # (dz, rz) atual
@@ -281,6 +282,14 @@ class MapaHUD(Widget):
 
     def definir_rota(self, pontos):
         self._rota = list(pontos)
+        self._trechos = []          # as avenidas eram da rota antiga
+        self._refazer_linhas()
+
+    def definir_trechos(self, trechos):
+        """Trechos da rota em via movimentada [(pontos, nível)]: desenhados por
+        cima da linha em laranja (movimentado) ou vermelho (pesado), para a
+        pessoa ver ONDE o caminho pede mais atenção."""
+        self._trechos = [(list(pontos), nivel) for pontos, nivel in trechos if len(pontos) >= 2]
         self._refazer_linhas()
 
     def definir_alternativas(self, listas):
@@ -799,6 +808,9 @@ class MapaHUD(Widget):
             for pontos in listas:
                 if len(pontos) >= 2:
                     self._linha(grupo, pontos, tipo)
+            if tipo == "rota" and len(self._rota) >= 2:
+                for pontos, nivel in self._trechos:
+                    self._linha(grupo, pontos, "pesado" if nivel >= 3 else "movimentado")
         self._larg_usada = None
         self._ajustar_larguras(self._escala_tela())
 
@@ -810,6 +822,9 @@ class MapaHUD(Widget):
             grupo.add(Color(0.05, 0.08, 0.11, 0.9))
             grupo.add(Line(points=plano, width=1, joint="round", cap="round"))
             grupo.add(Color(0.55, 0.62, 0.70, 0.95))
+            grupo.add(Line(points=plano, width=1, joint="round", cap="round"))
+        elif tipo in ("movimentado", "pesado"):
+            grupo.add(Color(*(tema.VERMELHO if tipo == "pesado" else tema.LARANJA)))
             grupo.add(Line(points=plano, width=1, joint="round", cap="round"))
         elif tipo == "rota":
             grupo.add(Color(*tema.com_alfa(tema.CIANO, 0.28)))
@@ -827,8 +842,8 @@ class MapaHUD(Widget):
             return
         self._larg_usada = s
         linhas_rota = [i for i in self._g_rota.children if isinstance(i, Line)]
-        for linha, px in zip(linhas_rota, (dp(11), dp(4.2))):
-            linha.width = px / s
+        for k, linha in enumerate(linhas_rota):   # halo, linha da rota e, depois, os trechos de avenida
+            linha.width = (dp(11) if k == 0 else dp(4.2) if k == 1 else dp(4.6)) / s
         for linha in (i for i in self._g_trilha.children if isinstance(i, Line)):
             linha.width = dp(2.6) / s
         linhas_alt = [i for i in self._g_alt.children if isinstance(i, Line)]

@@ -430,18 +430,22 @@ class TelaMapa(Screen):
         app = App.get_running_app()
         self.escolha.mostrar(rotas, rota, app.escolher_rota_previa)
         if len(rotas) == 1 and app.calculando_alternativas:
-            self.escolha.add_widget(Texto(text="Buscando outras\nrotas...", font_size=tema.T_ROTULO,
+            self.escolha.add_widget(Texto(text="Buscando a rota\nmais calma...", font_size=tema.T_ROTULO,
                                           color=tema.CIANO_FRACO, halign="center"))
+        elif app.calculando_alternativas:   # já há uma tranquila; ainda tentando contornar as avenidas
+            self.escolha.add_widget(Texto(text="refinando...", font_size=tema.T_ROTULO - 1,
+                                          color=tema.CIANO_FRACO, halign="center", size_hint_x=0.5))
         self.mapa.definir_alternativas([r.pontos for r in rotas if r is not rota])
         self.lbl_resumo.text = "%s  |  %s  |  sobe %d m" % (
             fmt_dist_nav(rota.total_m), fmt_duracao(rota.tempo_s), rota.subida_total_m)
-        if rota.movimentada is not None:   # quanto do caminho é em avenida (medido)
+        if rota.movimentada is not None:   # quanto do caminho é em avenida (medido; em laranja/vermelho no mapa)
             self.lbl_resumo.text += "  |  %d%% avenida" % round(rota.movimentada * 100)
         self.lbl_resumo.color = tema.BRANCO
         self.perfil.subidas = rota.subidas
         self.perfil.elevacao = rota.elevacao
         self.btn_iniciar.disabled = False
         self.mapa.definir_rota(rota.pontos)
+        self.mapa.definir_trechos(rota.trechos)   # avenidas em laranja/vermelho por cima da rota
         self.mapa.definir_destino(rota.pontos[-1])
         self._montar()
         if enquadrar:
@@ -463,6 +467,7 @@ class TelaMapa(Screen):
         self._escolha_nav = None
         self.mapa.definir_alternativas([])
         self.mapa.definir_rota(rota.pontos)
+        self.mapa.definir_trechos(rota.trechos)
         self.mapa.definir_destino(rota.pontos[-1])
         self.mapa.modo_navegacao(True)
         self.mapa.prever = App.get_running_app().nav.prever  # seta anda em cima da rota
@@ -471,6 +476,7 @@ class TelaMapa(Screen):
 
     def trocar_rota(self, rota):
         self.mapa.definir_rota(rota.pontos)
+        self.mapa.definir_trechos(rota.trechos)
         self._sinais_da_rota()
 
     def _sinais_da_rota(self):
@@ -871,13 +877,20 @@ class TelaMapa(Screen):
                                                                   fmt_dist_nav(s["falta_m"]))
         a = e.get("alerta")
         if a is not None:
-            if sinais.e_radar(a["tipo"]):
-                limite = sinais.limite_do_radar(a["tipo"])
-                nome = "Radar %d km/h" % limite if limite else "Radar"
+            if a["tipo"] == "avenida":
+                if a["em_m"] > 0:
+                    self.lbl_alerta.text = "Avenida em %s" % fmt_dist_nav(a["em_m"])
+                else:
+                    self.lbl_alerta.text = "Em avenida: %s" % fmt_dist_nav(a["falta_m"])
+                self.chip_alerta.cor_borda = tema.VERMELHO if a["nivel"] >= 3 else tema.LARANJA
             else:
-                nome = "Semáforo" if a["tipo"] == "semaforo" else "Lombada"
-            self.lbl_alerta.text = "%s em %s" % (nome, fmt_dist_nav(a["em_m"]))
-            self.chip_alerta.cor_borda = tema.LARANJA if a["tipo"] == "lombada" else tema.VERMELHO
+                if sinais.e_radar(a["tipo"]):
+                    limite = sinais.limite_do_radar(a["tipo"])
+                    nome = "Radar %d km/h" % limite if limite else "Radar"
+                else:
+                    nome = "Semáforo" if a["tipo"] == "semaforo" else "Lombada"
+                self.lbl_alerta.text = "%s em %s" % (nome, fmt_dist_nav(a["em_m"]))
+                self.chip_alerta.cor_borda = tema.LARANJA if a["tipo"] == "lombada" else tema.VERMELHO
         tem = (depois is not None, s is not None, a is not None)
         if tem != (self._tem_depois, self._tem_subida, self._tem_alerta):
             self._tem_depois, self._tem_subida, self._tem_alerta = tem

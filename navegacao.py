@@ -23,6 +23,7 @@ AVISO_PERTO_MIN_M = 35
 AVISO_SUBIDA_M = 220
 AVISO_DESCIDA_M = 180
 DESCIDA_FALADA_MIN = 5.0     # descida mais leve que isso só aparece na tela
+AVENIDA_AVISO_MIN_M = 300    # avenida mais curta que isso não merece aviso
 AVISO_SINAL_S = 7.0          # semáforo/lombada: avisa uns 7 s antes (pela velocidade)
 AVISO_SINAL_MIN_M = 50
 SINAL_COM_MANOBRA_M = 60     # semáforo colado numa curva: a fala da curva já basta
@@ -74,6 +75,9 @@ class Navegacao:
         self._descidas_avisadas = set()
         self._subida_atual = None
         self.alertas = sinais.ao_longo(rota)   # [(dist_m, "semaforo"/"lombada")]
+        # trechos longos em avenida (medidos por rota.medir_movimento): avisa antes de entrar
+        self.avenidas = [a for a in getattr(rota, "avenidas", ()) if a[1] - a[0] >= AVENIDA_AVISO_MIN_M]
+        self._avenidas_ditas = set()
         self._alertas_ditos = set()
         self._ultimo_semaforo_m = -1e9
 
@@ -140,7 +144,26 @@ class Navegacao:
         if self.avisar_subidas:
             self._avisar_subidas()
         self._avisar_alertas(vel_kmh, proxima)
+        self._avisar_avenidas(vel_kmh)
         return self._estado(proxima)
+
+    def _avisar_avenidas(self, vel_kmh):
+        """ "Atenção: Avenida X à frente, movimentada, por 600 metros." uma vez
+        por trecho (o dono anda numa moto elétrica de ~50 km/h e quer saber
+        quando o caminho sai das ruas calmas)."""
+        janela = max(120.0, vel_kmh / 3.6 * 9.0)
+        for k, (inicio, fim, nivel, nome) in enumerate(self.avenidas):
+            falta = inicio - self.dist_feita
+            if k in self._avenidas_ditas or falta < -30:
+                continue
+            if falta > janela:
+                break
+            self._avenidas_ditas.add(k)
+            metros = int(round((fim - inicio) / 100.0)) * 100
+            quanto = "%d metros" % metros if metros < 1000 else ("%.1f quilômetros" % (metros / 1000.0)).replace(".", ",")
+            via = nome or "avenida"
+            tipo = "de trânsito pesado" if nivel >= 3 else "movimentada"
+            self.falar(["avenida"], P_AVISO, "Atenção: %s à frente, %s, por %s." % (via, tipo, quanto))
 
     def _avisar_alertas(self, vel_kmh, proxima):
         """Lombada sempre (segurança); semáforo se ligado nos Ajustes e se não
@@ -280,4 +303,11 @@ class Navegacao:
             if 0 <= em <= (350 if sinais.e_radar(tipo) else 200):   # radar aparece de mais longe
                 estado["alerta"] = {"tipo": tipo, "em_m": em}
                 break
+        if estado["alerta"] is None:   # sem radar/semáforo/lombada por perto: a avenida
+            for inicio, fim, nivel, nome in self.avenidas:
+                if inicio - 250 <= self.dist_feita < fim:
+                    estado["alerta"] = {"tipo": "avenida", "em_m": max(0.0, inicio - self.dist_feita),
+                                        "falta_m": fim - max(inicio, self.dist_feita), "nivel": nivel,
+                                        "nome": nome}
+                    break
         return estado
