@@ -2,6 +2,7 @@
 velocímetro GPS com registro de viagens, para a Ouxi GT20."""
 import gc
 import json
+import threading
 import os
 import sys
 import time
@@ -23,7 +24,10 @@ from banco import Banco
 from filtro import FiltroVelocidade
 from ritmo import Ritmo
 import ao_vivo
+import clima
 import diagnostico as registro
+import transito
+from aprendizado import Aprendizado
 from gps_service import ServicoGPS
 from navegacao import P_INFO, Navegacao
 from segundo_plano import SegundoPlano
@@ -52,6 +56,8 @@ VIBRA_FORCAS = [0, 255, 0, 255]
 RUMO_MIN_KMH = 3.0          # parado, o rumo do GPS é ruído: fica o último
 RUMO_VALIDO_S = 6.0         # rumo mais velho que isso não vai no pedido de rota
 GPS_PERDIDO_FALA_S = 10     # navegando sem sinal por isso: o assistente avisa
+TRANSITO_A_CADA_S = 240.0      # navegando: olha o trânsito da rota de novo a cada isso
+CHUVA_A_CADA_S = 600.0         # ... e a previsão de chuva
 FIM_APOS_CHEGAR_S = 5.0        # chegou: a rota se encerra sozinha depois disso
 RECALCULO_ESPERA_S = 12     # depois de falhar, espera antes de tentar de novo
 MAX_RECENTES = 8
@@ -87,6 +93,11 @@ class GTHudApp(App):
         self.filtro.ajuste = 1.0 + self.ajustes["vel_ajuste"] / 100.0
         self._gps_medidas = [0, 0.0, 0.0, 0.0, 0.0]   # leituras, soma dos intervalos, das idades, das incertezas; hora da última
         self.ritmo = Ritmo(self.ajustes["ritmo"])
+        self.aprendizado = Aprendizado(self.banco.caminho)   # o que o app aprende com as viagens dele
+        self.chuva_prevista = None   # previsão de chuva para a rota em vista (clima.chuva)
+        self._chuva_dita = False
+        self._t_transito = 0.0       # time.monotonic() da última conferência do trânsito na navegação
+        self._t_chuva = 0.0
         self.corrida = None          # corrida ao vivo em andamento (ao_vivo.AoVivo)
         self.ultimo_resumo = None    # números da última viagem finalizada (cartão de chegada)
         self._estava_fora = False    # saiu da rota: vibra uma vez
@@ -281,6 +292,7 @@ class GTHudApp(App):
         gc.collect()
         gc.freeze()
         Clock.schedule_once(self._fechar_corridas_esquecidas, 8)
+        Clock.schedule_once(self._aprender_com_as_antigas, 12)
 
     def on_pause(self):
         self.fundo.ao_pausar()  # rota ativa: segue navegando minimizado
@@ -527,7 +539,10 @@ class GTHudApp(App):
         self.rota_previa = rota
         self.rotas_previa = [rota]
         self.calculando_alternativas = True
+        self.chuva_prevista = None
+        self._chuva_dita = False
         self.sm.get_screen("mapa").mostrar_previa(rota, self.rotas_previa)
+        self._informar_rotas([rota], pedido, origem, alvo, chuva=True)
         nome = self.destino["nome"]
         def parcial(lista):
             # a primeira rota tranquila aparece em uns 7 s; o refino segue por trás
@@ -555,6 +570,113 @@ class GTHudApp(App):
             if calma is not None:
                 self.rota_previa = calma
         self.sm.get_screen("mapa").mostrar_previa(self.rota_previa, self.rotas_previa, enquadrar=final)
+        self._informar_rotas(self.rotas_previa, pedido)
+
+    # --- o que o app sabe a mais sobre as rotas: histórico dele, trânsito, chuva -----------
+    def _informar_rotas(self, lista, pedido, origem=None, alvo=None, chuva=False):
+        """Em segundo plano, para cada rota ainda não olhada: o tempo pelo
+        histórico dele, os trechos que costumam estar lentos e o trânsito de
+        agora (se houver chave da TomTom); e a previsão de chuva (uma vez por
+        destino). Quando termina, a prévia é redesenhada com os avisos."""
+        novas = [r for r in lista if not getattr(r, "_informada", False)]
+        if not novas and not chuva:
+            return
+        for r in novas:
+            r._informada = True
+        chave = (self.ajustes["tomtom"] or "").strip()
+        quer_chuva = chuva and self.ajustes["avisar_chuva"] and origem is not None
+
+        def olhar():
+            ocorrencias = None
+            if chave:
+                try:
+                    ocorrencias = transito.da_cidade(chave)
+                except Exception as e:           # sem internet, chave recusada...: segue sem o trânsito
+                    print("[transito]", type(e).__name__)
+            for r in novas:
+                self._informar(r, ocorrencias)
+            previsao = None
+            if quer_chuva:
+                try:
+                    previsao = clima.chuva(origem, alvo, novas[0].tempo_s if novas else 1200)
+                except Exception as e:
+                    print("[chuva]", type(e).__name__)
+            return previsao
+
+        def pronto(previsao):
+            if pedido != self._pedido or self.destino is None or self.nav is not None:
+                return
+            if quer_chuva:
+                self.chuva_prevista = previsao
+            if self.rota_previa is not None:
+                self.sm.get_screen("mapa").mostrar_previa(self.rota_previa, self.rotas_previa, enquadrar=False)
+        rede.em_segundo_plano(olhar, pronto, lambda e: None)
+
+    def _informar(self, rota, ocorrencias):
+        """Histórico e trânsito de UMA rota (roda numa thread)."""
+        try:
+            sabe = self.aprendizado.avaliar(rota)
+            rota.tempo_pessoal_s = sabe["tempo_s"]
+            rota.lentos, rota.extra_lento_s = sabe["lentos"], sabe["extra_s"]
+        except Exception as e:
+            print("[aprendizado]", e)
+        if ocorrencias is not None:
+            try:
+                transito.avaliar(rota, ocorrencias)
+            except Exception as e:
+                print("[transito] avaliar:", e)
+
+    def avisos_da_rota(self, rota):
+        """Frases curtas para a prévia: chuva, trânsito de agora e trechos que
+        costumam estar lentos."""
+        avisos = []
+        if self.chuva_prevista is not None:
+            avisos.append(clima.frase(self.chuva_prevista))
+        do_transito = transito.resumo(rota)
+        if do_transito:
+            avisos.append(do_transito)
+        if rota.lentos and not rota.incidentes:
+            minutos = int(round(rota.extra_lento_s / 60.0))
+            n = len(rota.lentos)
+            avisos.append("Costuma estar lento: %d %s%s" % (
+                n, "trecho" if n == 1 else "trechos", " (+%d min)" % minutos if minutos >= 1 else ""))
+        return avisos
+
+    def _conferir_transito_e_chuva(self, agora):
+        """Na navegação: a cada TRANSITO_A_CADA_S olha de novo o trânsito da
+        rota (acidente novo, trânsito que parou) e, a cada CHUVA_A_CADA_S, a
+        previsão de chuva. Tudo em segundo plano."""
+        nav, destino = self.nav, self.destino
+        if nav is None:
+            return
+        chave = (self.ajustes["tomtom"] or "").strip()
+        if chave and agora - self._t_transito >= TRANSITO_A_CADA_S:
+            self._t_transito = agora
+            rota = nav.rota
+
+            def olhar():
+                transito.avaliar(rota, transito.da_cidade(chave))
+                return rota
+
+            def pronto(r):
+                if self.nav is None or self.nav.rota is not r:
+                    return
+                self.nav.incidentes = list(r.incidentes)
+                self.na_tela(lambda: self.sm.get_screen("mapa").mapa.definir_transito(r.trechos_transito))
+            rede.em_segundo_plano(olhar, pronto, lambda e: None)
+        if (self.ajustes["avisar_chuva"] and not self._chuva_dita and destino is not None
+                and self.posicao is not None and agora - self._t_chuva >= CHUVA_A_CADA_S):
+            self._t_chuva = agora
+            origem, alvo = self.posicao, (destino["lat"], destino["lon"])
+            falta_s = (self.estado_nav or {}).get("restante_s", 600)
+
+            def previsto(c):
+                if c is None or self.nav is None or self._chuva_dita or c["em_min"] > 20:
+                    return
+                self._chuva_dita = True
+                self.voz.falar(["chuva"], P_INFO, clima.fala(c))
+                self.na_tela(lambda: self.sm.get_screen("mapa").mensagem(clima.frase(c), tema.LARANJA, 8))
+            rede.em_segundo_plano(lambda: clima.chuva(origem, alvo, falta_s), previsto, lambda e: None)
 
     def escolher_rota_previa(self, rota):
         self._escolheu_rota = True
@@ -591,6 +713,12 @@ class GTHudApp(App):
         self._fim_em = None
         self._estava_fora = False
         android_utils.vibrar_padrao("inicio")
+        agora = time.monotonic()
+        self._t_transito = agora          # (a rota acabou de ser olhada na prévia)
+        self._t_chuva = agora - CHUVA_A_CADA_S + 90.0
+        if self.chuva_prevista is not None and self.ajustes["avisar_chuva"]:
+            self._chuva_dita = True       # já está na tela desde a prévia: fala uma vez ao sair
+            self.voz.falar(["chuva"], P_INFO, clima.fala(self.chuva_prevista))
         self.ritmo.comecar()
         if self.viagem.estado == Viagem.PARADA:
             self.viagem.iniciar()  # a navegação grava a viagem sozinha
@@ -657,6 +785,7 @@ class GTHudApp(App):
         if self.corrida is not None and e:
             self.corrida.leitura(lat, lon, vel, self.rumo, e["restante_m"], e["restante_s"],
                                  nav.dist_feita, e.get("fora_da_rota", False))
+        self._conferir_transito_e_chuva(agora)
         fora = bool(e and e.get("fora_da_rota"))
         if fora and not self._estava_fora:
             android_utils.vibrar_padrao("fora")
@@ -747,6 +876,7 @@ class GTHudApp(App):
             self.corrida.trocar_rota(rota)
         self.na_tela(lambda: self.sm.get_screen("mapa").trocar_rota(rota))
         self._medir_rota_em_uso(rota)
+        self._t_transito = 0.0   # rota nova: olha o trânsito dela na próxima leitura
 
     def _medir_rota_em_uso(self, rota):
         """Rota nova no meio do caminho ainda não tem as avenidas medidas: mede
@@ -944,7 +1074,38 @@ class GTHudApp(App):
             return None
         self.ultima_salva_m = resumo["distancia_m"]
         self._hoje = None
+        # o app aprende com ela: velocidade dele em cada trecho, por horário
+        threading.Thread(target=self._aprender, args=(list(pontos),), name="aprender", daemon=True).start()
         return self.banco.salvar_viagem(resumo, pontos)
+
+    def _aprender(self, pontos):
+        try:
+            self.aprendizado.aprender(pontos)
+        except Exception as e:
+            print("[aprendizado] aprender:", e)
+
+    def _aprender_com_as_antigas(self, dt=None):
+        """Uma vez: as viagens que já estavam guardadas também ensinam."""
+        if self.ajustes["aprendeu_v1"]:
+            return
+        self.ajustes["aprendeu_v1"] = True
+
+        def todas():
+            n = 0
+            for v in self.banco.listar_viagens():
+                _, pontos = self.banco.obter_viagem(v["id"])
+                if len(pontos) > 20:
+                    self.aprendizado.aprender(pontos)
+                    n += 1
+            print("[aprendizado] aprendeu com %d viagens guardadas" % n)
+        threading.Thread(target=lambda: self._seguro(todas), name="aprender-antigas", daemon=True).start()
+
+    @staticmethod
+    def _seguro(funcao):
+        try:
+            funcao()
+        except Exception as e:
+            print("[aprendizado] viagens antigas:", e)
 
     def viagem_mudou(self):
         """As telas avisam quando a gravação começa, pausa ou termina: o

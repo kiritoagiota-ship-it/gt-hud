@@ -65,6 +65,8 @@ FALAS.update({
     "lombada": "Lombada à frente, reduza.",
     "radar": "Radar à frente.",
     "avenida": "Atenção: avenida movimentada à frente.",
+    "incidente": "Atenção: ocorrência de trânsito à frente.",
+    "chuva": "Atenção: previsão de chuva no caminho.",
     "sem_rota": "Não encontrei um caminho de bike até esse destino.",
 })
 

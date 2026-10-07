@@ -117,6 +117,13 @@ def passo_desviar(dt):
 def passo_desvio_foto(dt):
     app = App.get_running_app()
     foto("10_fora_da_rota")
+    if app.nav is not None and app.nav.rota is PASSO["rota"] and not app.recalculando:
+        # a rota faz uma volta e os 70 m caíram em cima de OUTRO pedaço dela
+        # (o app, com razão, não se considera fora): sai pelo outro lado
+        PASSO["sim"].desvio_m = -70.0
+        print("[TESTE] desviando 70 m para o outro lado", flush=True)
+        Clock.schedule_once(lambda dt: setattr(PASSO["sim"], "desvio_m", 0.0), 7)
+        return
     PASSO["sim"].desvio_m = 0.0
 
 
@@ -141,6 +148,6 @@ Clock.schedule_once(passo_destino, 22)
 Clock.schedule_once(passo_navegar, 29)
 Clock.schedule_once(passo_desviar, 36)
 Clock.schedule_once(passo_desvio_foto, 43)
-Clock.schedule_once(passo_recalculou, 52)
-Clock.schedule_once(fim, 54)
+Clock.schedule_once(passo_recalculou, 60)
+Clock.schedule_once(fim, 62)
 runpy.run_path("main.py", run_name="__main__")

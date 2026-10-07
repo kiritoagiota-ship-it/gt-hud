@@ -168,6 +168,14 @@ class Rota:
         self.estresse = None             # média dos níveis de estresse (medir_movimento)
         self.trechos = []                # [(pontos, nível)] das avenidas da rota
         self.avenidas = []               # [(início m, fim m, nível, nome)]
+        # o que o app sabe a mais sobre ela (main.GTHudApp._informar_rotas):
+        self.tempo_pessoal_s = None      # pelo histórico do dono (aprendizado.py); None = não conhece o caminho
+        self.lentos = []                 # [(início m, fim m)] que costumam estar lentos neste horário
+        self.extra_lento_s = 0.0
+        self.atraso_transito_s = 0.0     # trânsito de agora (transito.py)
+        self.incidentes = []             # acidentes, trânsito lento, obras... em cima da rota
+        self.interditada = False
+        self.trechos_transito = []       # [(pontos, magnitude)] para pintar no mapa
         self.destino_nome = destino_nome
         self.elevacao = elevacao
         self.subidas = achar_subidas(elevacao)
@@ -180,8 +188,10 @@ class Rota:
 
     @property
     def tempo_s(self):
-        """Tempo previsto já no ritmo do dono."""
-        return self.tempo_base_s * fator_ritmo
+        """Tempo previsto: pelo histórico dele nos trechos que já conhece (ou o
+        do servidor no ritmo dele), mais o atraso do trânsito de agora."""
+        base = self.tempo_pessoal_s if self.tempo_pessoal_s is not None else self.tempo_base_s * fator_ritmo
+        return base + self.atraso_transito_s
 
     @classmethod
     def do_osrm(cls, dados, destino_nome=""):

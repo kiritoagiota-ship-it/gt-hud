@@ -78,6 +78,9 @@ class Navegacao:
         # trechos longos em avenida (medidos por rota.medir_movimento): avisa antes de entrar
         self.avenidas = [a for a in getattr(rota, "avenidas", ()) if a[1] - a[0] >= AVENIDA_AVISO_MIN_M]
         self._avenidas_ditas = set()
+        # trânsito de agora (transito.py); o app troca esta lista a cada atualização
+        self.incidentes = list(getattr(rota, "incidentes", ()))
+        self._incidentes_ditos = set()
         self._alertas_ditos = set()
         self._ultimo_semaforo_m = -1e9
 
@@ -145,7 +148,30 @@ class Navegacao:
             self._avisar_subidas()
         self._avisar_alertas(vel_kmh, proxima)
         self._avisar_avenidas(vel_kmh)
+        self._avisar_incidentes(vel_kmh)
         return self._estado(proxima)
+
+    def _avisar_incidentes(self, vel_kmh):
+        """ "Atenção: acidente à frente, em 300 metros." uma vez por ocorrência
+        (a mesma ocorrência costuma voltar nas atualizações do trânsito: a
+        marca é pelo tipo e pelo lugar, não pela posição na lista)."""
+        import transito
+        janela = max(250.0, vel_kmh / 3.6 * 16.0)
+        for o in self.incidentes:
+            falta = o["inicio_m"] - self.dist_feita
+            marca = (o["categoria"], int(o["inicio_m"] // 250))
+            if marca in self._incidentes_ditos or falta < -20:
+                continue
+            if falta > janela:
+                break
+            self._incidentes_ditos.add(marca)
+            nome = transito.CATEGORIAS.get(o["categoria"], ("", "ocorrência de trânsito"))[1]
+            metros = max(50, int(round(max(0.0, falta) / 50.0)) * 50)
+            texto = "Atenção: %s à frente, em %d metros." % (nome, metros)
+            comprimento = o["fim_m"] - o["inicio_m"]
+            if o["categoria"] == 6 and comprimento >= 150:
+                texto = "Atenção: trânsito lento à frente, por %d metros." % (int(round(comprimento / 100.0)) * 100)
+            self.falar(["incidente"], P_AVISO, texto)
 
     def _avisar_avenidas(self, vel_kmh):
         """ "Atenção: Avenida X à frente, movimentada, por 600 metros." uma vez
@@ -302,6 +328,12 @@ class Navegacao:
             em = dist - self.dist_feita
             if 0 <= em <= (350 if sinais.e_radar(tipo) else 200):   # radar aparece de mais longe
                 estado["alerta"] = {"tipo": tipo, "em_m": em}
+                break
+        for o in self.incidentes:   # ocorrência de trânsito perto passa na frente do resto
+            em = o["inicio_m"] - self.dist_feita
+            if -20 <= em <= 500 or (o["inicio_m"] <= self.dist_feita < o["fim_m"]):
+                estado["alerta"] = {"tipo": "incidente", "categoria": o["categoria"], "em_m": max(0.0, em),
+                                    "falta_m": max(0.0, o["fim_m"] - max(o["inicio_m"], self.dist_feita))}
                 break
         if estado["alerta"] is None:   # sem radar/semáforo/lombada por perto: a avenida
             for inicio, fim, nivel, nome in self.avenidas:

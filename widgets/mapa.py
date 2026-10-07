@@ -77,6 +77,9 @@ ZOOM_LUGARES = 16.5
 CONF_POR_ZOOM = ((18.3, 0.75), (17.5, 0.86), (16.5, 0.94))   # (zoom mínimo, confiança mínima)
 MAX_CELULAS_LUGARES = 24
 # (16 enchia a tela de semáforos no centro da cidade, andando livre)
+# faixa de trânsito por baixo da rota, pela gravidade (1 leve ... 3 parado, 4 via interditada)
+CORES_TRANSITO = {1: (1.0, 0.84, 0.16, 0.92), 2: (1.0, 0.52, 0.10, 0.92), 3: (0.92, 0.13, 0.13, 0.95),
+                  4: (0.52, 0.05, 0.22, 1.0)}
 ZOOM_RADARES = 14.5        # radares aparecem bem antes
 ZOOM_SINAIS = 17.0         # fora da navegação, semáforos e lombadas a partir desse zoom
 MAX_SINAIS = 40
@@ -156,6 +159,8 @@ class MapaHUD(Widget):
         self._origem = mundo(self.centro[0], self.centro[1], 14)
         self._rota, self._trilha, self._destino = [], [], None
         self._trechos = []                  # avenidas da rota: [(pontos, nível)]
+        self._transito = []                 # trânsito de agora na rota: [(pontos, magnitude)]
+        self._larg_rota = []
         self._alternativas = []
         self._desenhados = {}               # (dz, tx, ty, rz) -> [(grupo, instrução), ...]
         self._nivel = None                  # (dz, rz) atual
@@ -284,6 +289,7 @@ class MapaHUD(Widget):
     def definir_rota(self, pontos):
         self._rota = list(pontos)
         self._trechos = []          # as avenidas eram da rota antiga
+        self._transito = []
         self._refazer_linhas()
 
     def definir_trechos(self, trechos):
@@ -291,6 +297,13 @@ class MapaHUD(Widget):
         cima da linha em laranja (movimentado) ou vermelho (pesado), para a
         pessoa ver ONDE o caminho pede mais atenção."""
         self._trechos = [(list(pontos), nivel) for pontos, nivel in trechos if len(pontos) >= 2]
+        self._refazer_linhas()
+
+    def definir_transito(self, trechos):
+        """Trânsito de agora na rota [(pontos, magnitude 1..4)]: uma faixa larga
+        POR BAIXO da linha (amarelo = lento, laranja = moderado, vermelho =
+        parado, vinho = via interditada). A linha da rota segue por cima."""
+        self._transito = [(list(pontos), m) for pontos, m in trechos if len(pontos) >= 2]
         self._refazer_linhas()
 
     def definir_alternativas(self, listas):
@@ -810,6 +823,11 @@ class MapaHUD(Widget):
             grupos.append((self._g_alt, self._alternativas, "alt"))
         for grupo, listas, tipo in grupos:
             grupo.clear()
+            if tipo == "rota":
+                self._larg_rota = []      # [(linha, largura em px)] da rota e do que vai junto dela
+                if len(self._rota) >= 2:
+                    for pontos, magnitude in self._transito:   # por baixo de tudo
+                        self._linha(grupo, pontos, "transito%d" % max(1, min(4, magnitude)))
             for pontos in listas:
                 if len(pontos) >= 2:
                     self._linha(grupo, pontos, tipo)
@@ -828,14 +846,24 @@ class MapaHUD(Widget):
             grupo.add(Line(points=plano, width=1, joint="round", cap="round"))
             grupo.add(Color(0.55, 0.62, 0.70, 0.95))
             grupo.add(Line(points=plano, width=1, joint="round", cap="round"))
+        elif tipo.startswith("transito"):
+            grupo.add(Color(*CORES_TRANSITO[int(tipo[-1])]))
+            linha = Line(points=plano, width=1, joint="round", cap="round")
+            grupo.add(linha)
+            self._larg_rota.append((linha, dp(14)))
         elif tipo in ("movimentado", "pesado"):
             grupo.add(Color(*(tema.VERMELHO if tipo == "pesado" else tema.LARANJA)))
-            grupo.add(Line(points=plano, width=1, joint="round", cap="round"))
+            linha = Line(points=plano, width=1, joint="round", cap="round")
+            grupo.add(linha)
+            self._larg_rota.append((linha, dp(4.6)))
         elif tipo == "rota":
             grupo.add(Color(*tema.com_alfa(tema.CIANO, 0.28)))
-            grupo.add(Line(points=plano, width=1, joint="round", cap="round"))
+            halo = Line(points=plano, width=1, joint="round", cap="round")
+            grupo.add(halo)
             grupo.add(Color(*tema.CIANO))
-            grupo.add(Line(points=plano, width=1, joint="round", cap="round"))
+            linha = Line(points=plano, width=1, joint="round", cap="round")
+            grupo.add(linha)
+            self._larg_rota += [(halo, dp(11)), (linha, dp(4.2))]
         else:
             grupo.add(Color(*tema.com_alfa(tema.LARANJA, 0.85)))
             grupo.add(Line(points=plano, width=1, joint="round", cap="round"))
@@ -846,9 +874,8 @@ class MapaHUD(Widget):
         if self._larg_usada and abs(s / self._larg_usada - 1) < 0.04:
             return
         self._larg_usada = s
-        linhas_rota = [i for i in self._g_rota.children if isinstance(i, Line)]
-        for k, linha in enumerate(linhas_rota):   # halo, linha da rota e, depois, os trechos de avenida
-            linha.width = (dp(11) if k == 0 else dp(4.2) if k == 1 else dp(4.6)) / s
+        for linha, px in self._larg_rota:   # faixa de trânsito, halo, linha da rota e trechos de avenida
+            linha.width = px / s
         for linha in (i for i in self._g_trilha.children if isinstance(i, Line)):
             linha.width = dp(2.6) / s
         linhas_alt = [i for i in self._g_alt.children if isinstance(i, Line)]

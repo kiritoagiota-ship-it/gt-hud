@@ -96,7 +96,7 @@ class Alternar(BotaoHUD):
 # foram sendo criadas): seção -> títulos das linhas, na ordem da tela.
 SECOES = [
     ("Voz", ["Voz do assistente", "Qual voz", "Tom da voz", "Efeito de IA", "Testar a voz"]),
-    ("Navegação", ["Rota preferida", "Avisar subidas e descidas", "Avisar semáforos", "Continuar em segundo plano",
+    ("Navegação", ["Rota preferida", "Trânsito ao vivo", "Aviso de chuva", "Avisar subidas e descidas", "Avisar semáforos", "Continuar em segundo plano",
                    "Janela ao minimizar", "Tipo de janela", "Corrida ao vivo"]),
     ("Mapa e tela", ["Aparência", "Mapa gira com a direção", "Mapa offline de Goiânia",
                      "Tela deitada", "Manter tela ligada"]),
@@ -218,6 +218,17 @@ class TelaConfig(Screen):
                                "A que já vem escolhida ao buscar um destino. Tranquila: foge das "
                                "avenidas (costuma demorar uns minutos a mais). As duas sempre aparecem.",
                                self._centralizar(self.btn_rota)))
+
+        self.btn_transito = BotaoHUD(text="", size_hint_x=None, width=dp(130), font_size=tema.T_ROTULO + 2,
+                                     on_release=lambda *a: self._configurar_transito())
+        self.linha_transito = Linha("Trânsito ao vivo", "", self._centralizar(self.btn_transito))
+        lista.add_widget(self.linha_transito)
+
+        self.alt_chuva = Alternar(lambda v: self._mudar_simples("avisar_chuva", self.alt_chuva, v))
+        lista.add_widget(Linha("Aviso de chuva",
+                               "Avisa na prévia e por voz se a previsão indica chuva na saída ou no "
+                               "destino até a hora de chegar. É previsão: pode errar.",
+                               self._centralizar(self.alt_chuva)))
 
         self.alt_fundo = Alternar(lambda v: self._mudar_simples("segundo_plano", self.alt_fundo, v))
         lista.add_widget(Linha("Continuar em segundo plano",
@@ -345,6 +356,8 @@ class TelaConfig(Screen):
         self.btn_tema.text = _NOMES_TEMA.get(aj["tema"], "Automático")
         self.btn_rota.text = "Tranquila" if aj["rota_preferida"] == "tranquila" else "Mais rápida"
         self.btn_tipo.text = "Bolha" if aj["flutuante_tipo"] == "bolha" else "Painel"
+        self.alt_chuva.mostrar(aj["avisar_chuva"])
+        self._mostrar_transito()
         self._mostrar_vivo()
         self.lbl_versao.text = ("GT-HUD versão %s\nMapa (c) OpenStreetMap, OpenFreeMap  |  "
                                 "Lugares (c) Overture Maps Foundation" % _versao())
@@ -561,6 +574,42 @@ class TelaConfig(Screen):
                                   lambda e: self._mostrar_vivo("Não consegui testar o banco."))
         pedir_nome(salvar, sugestao=app.ajustes["firebase"], titulo="Endereço do banco (Firebase)",
                    botao="Salvar e testar", dica="https://...firebaseio.com", limite=200)
+
+    # --- trânsito ao vivo: a chave da TomTom do dono ------------------------------------
+    def _mostrar_transito(self, aviso=None):
+        tem = bool((App.get_running_app().ajustes["tomtom"] or "").strip())
+        self.btn_transito.text = "Trocar" if tem else "Configurar"
+        self.linha_transito.explicacao.text = aviso or (
+            "Ligado: acidentes, trânsito lento e obras aparecem na rota e são avisados por voz."
+            if tem else
+            "Acidentes, trânsito lento e obras na sua rota. Falta colar aqui a chave gratuita "
+            "da TomTom (ela fica só no seu celular).")
+
+    def _configurar_transito(self):
+        import rede
+        import transito
+        from widgets.comuns import pedir_nome
+        app = App.get_running_app()
+
+        def salvar(texto):
+            chave = "".join(texto.split())
+            if len(chave) < 16:
+                self._mostrar_transito("Isso não parece a chave: ela é um código comprido de letras e números.")
+                return
+            self._mostrar_transito("Testando a chave...")
+
+            def resultado(problema):
+                if problema is None:
+                    app.ajustes["tomtom"] = chave
+                    transito.esquecer()
+                    self._mostrar_transito("Funcionou! O trânsito já entra na próxima rota.")
+                else:
+                    self._mostrar_transito(problema)
+            rede.em_segundo_plano(lambda: transito.testar(chave), resultado,
+                                  lambda e: self._mostrar_transito("Não consegui testar a chave."))
+        # (o campo vem vazio: a chave guardada não é mostrada de novo)
+        pedir_nome(salvar, sugestao="", titulo="Chave da TomTom", botao="Salvar e testar",
+                   dica="Cole a chave aqui", limite=80)
 
     def _mudar_tipo_flutuante(self):
         app = App.get_running_app()

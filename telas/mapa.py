@@ -306,7 +306,10 @@ class TelaMapa(Screen):
         self.btn_iniciar = BotaoHUD(text="Iniciar", destaque=True,
                                     on_release=lambda *a: app.iniciar_navegacao())
         botoes.add_widget(self.btn_iniciar)
-        for w in (self.lbl_destino, self.lbl_resumo, self.escolha, self.perfil, botoes):
+        # chuva prevista, trânsito de agora e trechos que costumam estar lentos
+        self.lbl_avisos = Texto(text="", font_size=tema.T_ROTULO + 1, bold=True, color=tema.LARANJA,
+                                size_hint_y=None, height=dp(20), shorten=True, shorten_from="right", max_lines=1)
+        for w in (self.lbl_destino, self.lbl_resumo, self.lbl_avisos, self.escolha, self.perfil, botoes):
             self.card.add_widget(w)
 
         # --- resumo da rota que acabou (chegou ou encerrou) ---
@@ -423,6 +426,7 @@ class TelaMapa(Screen):
         self.lbl_destino.text = lugar["nome"]
         self.lbl_resumo.text = "Calculando a rota..."
         self.lbl_resumo.color = tema.CIANO_FRACO
+        self.lbl_avisos.text = ""
         self.escolha.clear_widgets()
         self.mapa.definir_alternativas([])
         self.perfil.elevacao = []
@@ -453,6 +457,8 @@ class TelaMapa(Screen):
         self.btn_iniciar.disabled = False
         self.mapa.definir_rota(rota.pontos)
         self.mapa.definir_trechos(rota.trechos)   # avenidas em laranja/vermelho por cima da rota
+        self.mapa.definir_transito(rota.trechos_transito)
+        self.lbl_avisos.text = "  ·  ".join(app.avisos_da_rota(rota))
         self.mapa.definir_destino(rota.pontos[-1])
         self._montar()
         if enquadrar:
@@ -460,6 +466,7 @@ class TelaMapa(Screen):
             Clock.schedule_once(lambda dt: self.mapa.enquadrar(todos, dp(36), self._cobertos_previa()))
 
     def previa_erro(self, texto):
+        self.lbl_avisos.text = ""
         self.lbl_resumo.text = texto
         self.lbl_resumo.color = tema.VERMELHO
         self.btn_iniciar.disabled = True
@@ -475,6 +482,7 @@ class TelaMapa(Screen):
         self.mapa.definir_alternativas([])
         self.mapa.definir_rota(rota.pontos)
         self.mapa.definir_trechos(rota.trechos)
+        self.mapa.definir_transito(rota.trechos_transito)
         self.mapa.definir_destino(rota.pontos[-1])
         self.mapa.modo_navegacao(True)
         self.mapa.prever = App.get_running_app().nav.prever  # seta anda em cima da rota
@@ -484,6 +492,7 @@ class TelaMapa(Screen):
     def trocar_rota(self, rota):
         self.mapa.definir_rota(rota.pontos)
         self.mapa.definir_trechos(rota.trechos)
+        self.mapa.definir_transito(rota.trechos_transito)
         self._sinais_da_rota()
 
     def _sinais_da_rota(self):
@@ -632,7 +641,7 @@ class TelaMapa(Screen):
 
         # prévia
         larg_card = min(W - 2 * m, dp(480))
-        self.card.size = (larg_card, dp(268))
+        self.card.size = (larg_card, dp(292))
         self.painel_rotas.pos = (m, m + alt_barra + m) if not deitada else (bx, m + alt_barra + m)
         self.painel_rotas.size = (larg_topo if not deitada else min(bw, dp(480)), dp(150))
         self.card.pos = (W - m - larg_card, m) if deitada else (m, m)
@@ -892,7 +901,15 @@ class TelaMapa(Screen):
                                                                   fmt_dist_nav(s["falta_m"]))
         a = e.get("alerta")
         if a is not None:
-            if a["tipo"] == "avenida":
+            if a["tipo"] == "incidente":
+                import transito
+                nome = transito.CATEGORIAS.get(a["categoria"], ("Ocorrência",))[0]
+                if a["em_m"] > 0:
+                    self.lbl_alerta.text = "%s em %s" % (nome, fmt_dist_nav(a["em_m"]))
+                else:
+                    self.lbl_alerta.text = "%s: %s" % (nome, fmt_dist_nav(a["falta_m"]))
+                self.chip_alerta.cor_borda = tema.VERMELHO
+            elif a["tipo"] == "avenida":
                 if a["em_m"] > 0:
                     self.lbl_alerta.text = "Avenida em %s" % fmt_dist_nav(a["em_m"])
                 else:
