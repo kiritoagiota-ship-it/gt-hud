@@ -95,7 +95,7 @@ class Alternar(BotaoHUD):
 # As opções, agrupadas (eram mais de 20 linhas soltas, na ordem em que
 # foram sendo criadas): seção -> títulos das linhas, na ordem da tela.
 SECOES = [
-    ("Voz", ["Voz do assistente", "Qual voz", "Tom da voz", "Efeito de IA", "Testar a voz"]),
+    ("Voz", ["Voz do assistente", "Qual voz", "Tom da voz", "Efeito de IA", "Testar a voz", "Sons de aviso"]),
     ("Navegação", ["Rota preferida", "Trânsito ao vivo", "Testar o trânsito", "Aviso de chuva", "Avisar subidas e descidas", "Avisar semáforos", "Continuar em segundo plano",
                    "Janela ao minimizar", "Tipo de janela", "Corrida ao vivo"]),
     ("Mapa e tela", ["Aparência", "Mapa gira com a direção", "Mapa offline de Goiânia",
@@ -211,6 +211,13 @@ class TelaConfig(Screen):
         lista.add_widget(Linha("Avisar semáforos",
                                "Fala \"Semáforo à frente\" no caminho (lombada é sempre avisada).",
                                self._centralizar(self.alt_semaforos)))
+
+        self.btn_sons = BotaoHUD(text="", size_hint_x=None, width=dp(130), font_size=tema.T_ROTULO + 2,
+                                 on_release=lambda *a: self._mudar_sons())
+        lista.add_widget(Linha("Sons de aviso",
+                               "Um toque curto antes de cada fala diz o tipo do aviso (curva, radar, trânsito, "
+                               "chegada). Toque para trocar o volume; cada troca toca um exemplo.",
+                               self._centralizar(self.btn_sons)))
 
         self.btn_rota = BotaoHUD(text="", size_hint_x=None, width=dp(130), font_size=tema.T_ROTULO + 2,
                                  on_release=lambda *a: self._mudar_rota_preferida())
@@ -369,6 +376,8 @@ class TelaConfig(Screen):
         self.alt_sim.mostrar(aj["simulador"])
         self.btn_tema.text = _NOMES_TEMA.get(aj["tema"], "Automático")
         self.btn_rota.text = "Tranquila" if aj["rota_preferida"] == "tranquila" else "Mais rápida"
+        import sons
+        self.btn_sons.text = dict(sons.NOMES_VOLUME).get(aj["sons"], "Médio")
         self.btn_tipo.text = "Bolha" if aj["flutuante_tipo"] == "bolha" else "Painel"
         self.alt_chuva.mostrar(aj["avisar_chuva"])
         self._mostrar_transito()
@@ -669,6 +678,17 @@ class TelaConfig(Screen):
         novo = "painel" if app.ajustes["flutuante_tipo"] == "bolha" else "bolha"
         app.ajustes["flutuante_tipo"] = novo
         self.btn_tipo.text = "Bolha" if novo == "bolha" else "Painel"
+
+    def _mudar_sons(self):
+        import sons
+        app = App.get_running_app()
+        ordem = [n for n, _ in sons.NOMES_VOLUME]
+        atual = app.ajustes["sons"] if app.ajustes["sons"] in ordem else "medio"
+        novo = ordem[(ordem.index(atual) + 1) % len(ordem)]
+        app.ajustes["sons"] = novo
+        app.sons.definir_volume(novo)
+        self.btn_sons.text = dict(sons.NOMES_VOLUME)[novo]
+        app.sons.tocar("curva")   # exemplo no volume novo
 
     def _mudar_rota_preferida(self):
         app = App.get_running_app()

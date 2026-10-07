@@ -673,6 +673,12 @@ class TelaMapa(Screen):
         for w in visiveis:  # na ordem: o mapa fica embaixo de tudo
             if w.parent is None:
                 self.raiz.add_widget(w)
+                if w is not self.mapa and w is not self.card and w is not self.lbl_msg:
+                    # tudo que entra por cima do mapa (faixa da curva, avisos, botões) aparece
+                    # suave, em vez de "pipocar" (o cartão da prévia tem a entrada dele)
+                    Animation.cancel_all(w, "opacity")
+                    w.opacity = 0.0
+                    Animation(opacity=1.0, d=0.2, t="out_quad").start(w)
         self._posicionar()
 
     def _cobertos_previa(self):

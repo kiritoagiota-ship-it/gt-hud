@@ -25,7 +25,7 @@ from falas import FALAS  # noqa: E402
 
 PASTA_KOKORO = r"C:\Users\kirit\travetefocus\ferramentas\voz"
 SAIDA = os.path.join(RAIZ, "voz")
-TAXA = 22050          # mono 16 bits: ~44 KB por segundo de fala
+TAXA = 24000          # a taxa em que o Kokoro fala: sem reamostrar não perde nitidez (mono 16 bits, ~48 KB/s)
 VELOCIDADE = 0.98     # um pouco mais pausada: soa mais "assistente" e entende melhor
 VOZES = {
     "A": {"pm_alex": 1.0},
@@ -61,6 +61,23 @@ def efeito_ia(a, sr):
     return np.tanh(2.2 * x) / np.tanh(2.2)                      # compressão suave
 
 
+def voz_limpa(a, sr):
+    """3ª versão (pedido do dono em 07/10/2026: "voz com mais qualidade, mais
+    natural e clara"). A 2ª deixava a voz metálica: baixava o tom reamostrando,
+    somava três ecos e achatava forte (tanh 2,2), o que distorce. Esta mexe o
+    mínimo: tira o grave que o celular não toca, dá um pouco de presença
+    (clareza no vento) e segura só os picos, de leve."""
+    a = np.asarray(a, dtype=np.float64)
+    espectro = np.fft.rfft(a)
+    f = np.fft.rfftfreq(len(a), 1.0 / sr)
+    ganho = 1 / (1 + (120 / np.maximum(f, 1)) ** 4)            # grave que o celular não toca
+    ganho *= 1 + 0.35 * np.exp(-((f - 3000) / 1500) ** 2)      # presença: +2,6 dB em torno de 3 kHz
+    ganho *= 1 / (1 + (f / 10500) ** 6)                         # tira chiado
+    a = np.fft.irfft(espectro * ganho, len(a))
+    x = a / (np.max(np.abs(a)) or 1.0)
+    return np.tanh(1.25 * x) / np.tanh(1.25)                    # só arredonda os picos
+
+
 def aparar(a, sr, folga_s=0.03):
     ativo = np.where(np.abs(a) > np.max(np.abs(a)) * 0.02)[0]
     if not len(ativo):
@@ -74,17 +91,32 @@ def reamostrar(a, de, para):
     return np.interp(np.linspace(0, len(a) - 1, n), np.arange(len(a)), a)
 
 
+def suavizar_pontas(a, sr, entra_s=0.012, sai_s=0.03):
+    """A fala entra e sai subindo/descendo o volume em milésimos: emendada com
+    outra (ou depois do silêncio) não dá estalo nem parece cortada."""
+    a = np.array(a, dtype=np.float64)
+    n, m = min(len(a), int(sr * entra_s)), min(len(a), int(sr * sai_s))
+    a[:n] *= np.linspace(0.0, 1.0, n)
+    a[len(a) - m:] *= np.linspace(1.0, 0.0, m)
+    return a
+
+
 def nivelar(a, rms_alvo=0.16, pico_max=0.97):
     """Todas as falas no mesmo volume percebido, sem estourar."""
     rms = np.sqrt(np.mean(a ** 2)) or 1.0
     a = a * (rms_alvo / rms)
-    pico = np.max(np.abs(a))
-    return a * (pico_max / pico) if pico > pico_max else a
+    # pico acima do teto: arredonda só a ponta dele (acima de `joelho`). Baixar a fala
+    # inteira, como era, deixava algumas falas até 2 dB mais baixas que as outras.
+    joelho = 0.70
+    modulo = np.abs(a)
+    alto = modulo > joelho
+    a[alto] = np.sign(a[alto]) * (joelho + (pico_max - joelho) * np.tanh((modulo[alto] - joelho) / (pico_max - joelho)))
+    return a
 
 
 def gerar_fala(k, estilo, texto):
     audio, sr = k.create(texto, voice=estilo, speed=VELOCIDADE, lang="pt-br")
-    return nivelar(reamostrar(aparar(efeito_ia(audio, sr), sr), sr, TAXA))
+    return nivelar(suavizar_pontas(reamostrar(aparar(voz_limpa(audio, sr), sr), sr, TAXA), TAXA))
 
 
 def amostras(k, pasta):

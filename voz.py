@@ -19,6 +19,7 @@ from kivy.core.audio import SoundLoader
 from kivy.utils import platform
 
 import falas
+import sons
 
 PASTA_VOZ = os.path.join(os.path.dirname(os.path.abspath(__file__)), "voz")
 RESPIRO_S = 0.09
@@ -38,7 +39,8 @@ FRASE_TESTE = ("Sistemas online, senhor. Em duzentos metros, vire à direita. "
 class Voz:
     def __init__(self, pasta_cache):
         self.ligada = True
-        self._pasta = os.path.join(pasta_cache, "falas2")  # "falas": sem o silêncio de entrada
+        self.sons = None             # sons.Sons: o toque que anuncia cada fala (o app liga)
+        self._pasta = os.path.join(pasta_cache, "falas3")  # "falas": sem o silêncio de entrada; "falas2": a voz antiga (22 kHz)
         os.makedirs(self._pasta, exist_ok=True)
         self._fila = []            # [(prioridade, hora, pedaços, texto)]
         self._livre_em = 0.0       # time.monotonic() em que a fala atual termina
@@ -122,6 +124,8 @@ class Voz:
         """pedacos: chaves de falas.FALAS (usadas pela voz gravada e para
         montar a frase); texto: frase pronta, só para o motor do celular."""
         if not self.ligada:
+            if self.sons is not None:   # voz desligada: o toque sozinho ainda avisa
+                self.sons.tocar(sons.som_da_fala(pedacos))
             return
         pedacos = [p for p in pedacos if p in falas.FALAS]
         if not pedacos and not texto:
@@ -173,6 +177,8 @@ class Voz:
         if not self._fila:
             return
         _, _, pedacos, texto = self._fila.pop(0)
+        if self.sons is not None:       # o toque do tipo de aviso, logo antes da fala
+            self.sons.tocar(sons.som_da_fala(pedacos))
         if self.motor_pronto():
             self._aplicar_config()
             frase = texto or falas.frase(pedacos)

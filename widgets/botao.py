@@ -13,6 +13,7 @@ Custo: o desenho só é refeito quando muda tamanho/estado; a animação do
 toque mexe em duas cores já criadas (nada é redesenhado por quadro).
 """
 from kivy.animation import Animation
+from kivy.app import App
 from kivy.graphics import Color, Line, Mesh
 from kivy.graphics.texture import Texture
 from kivy.metrics import dp
@@ -102,6 +103,9 @@ class BotaoHUD(Button):
         if self.state == "down":
             self.brilho = 1.0
             vibrar_toque()
+            tocador = getattr(App.get_running_app(), "sons", None)
+            if tocador is not None:
+                tocador.tocar("toque")
         else:
             self._anim = Animation(brilho=0.0, d=0.28, t="out_quad")
             self._anim.start(self)

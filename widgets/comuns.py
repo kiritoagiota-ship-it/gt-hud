@@ -209,11 +209,16 @@ class Aviso(Texto):
             Line(rounded_rectangle=(x, y, w, h, dp(10)), width=dp(1.1))
 
 
-def entrar(conteudo, segundos=0.16):
-    """Entrada suave do conteúdo de uma tela (aparece em vez de "piscar")."""
-    Animation.cancel_all(conteudo, "opacity")
+def entrar(conteudo, segundos=0.16, subir=0.0):
+    """Entrada suave do conteúdo de uma tela (aparece em vez de "piscar").
+    subir > 0: além de aparecer, sobe esses px até o lugar (telas de lista)."""
+    Animation.cancel_all(conteudo, "opacity", "y")
     conteudo.opacity = 0.0
-    Animation(opacity=1.0, d=segundos, t="out_quad").start(conteudo)
+    if subir:
+        conteudo.y = -subir
+        Animation(opacity=1.0, y=0, d=segundos, t="out_cubic").start(conteudo)
+    else:
+        Animation(opacity=1.0, d=segundos, t="out_quad").start(conteudo)
 
 
 def escolher(titulo, opcoes, texto=""):

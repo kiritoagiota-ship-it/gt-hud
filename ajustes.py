@@ -12,6 +12,7 @@ PADRAO = {
     "corridas_abertas": [],  # [banco, código, senha] de corrida ao vivo ainda não encerrada no banco
     "atalhos": {},           # {"casa": lugar, "trabalho": lugar}: destinos de um toque na busca
     "tomtom": "",                 # chave da TomTom DO DONO para o trânsito ao vivo (transito.py)
+    "sons": "medio",            # sons de aviso (sons.py): desligado, baixo, medio ou alto
     "avisar_chuva": True,         # previsão de chuva no caminho (clima.py)
     "ultima_posicao": None,      # [lat, lon] de onde a pessoa estava ao sair: o mapa já abre (pronto) ali
     "aprendeu_v1": False,         # já aprendeu com as viagens antigas guardadas (aprendizado.py)

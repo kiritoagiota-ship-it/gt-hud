@@ -10,6 +10,7 @@ import time
 from kivy.app import App
 from kivy.clock import Clock
 from kivy.core.window import Window
+from kivy.metrics import dp
 from kivy.uix.screenmanager import NoTransition, ScreenManager
 
 import android_utils
@@ -20,6 +21,7 @@ import mapa_vetor
 import rede
 import rota as rotas
 import rota_tomtom
+import sons
 import tema
 from ajustes import Ajustes
 from banco import Banco
@@ -113,6 +115,8 @@ class GTHudApp(App):
         self.viagem = Viagem()
         self.gps = ServicoGPS(self._ao_receber_gps, self._ao_status_gps)
         self.voz = Voz(pasta)
+        self.sons = sons.Sons(self.ajustes["sons"])
+        self.voz.sons = self.sons
         self.voz.ligada = self.ajustes["voz"]
         if not self.ajustes["voz_masculina_v1"]:
             # o dono pediu voz masculina: quem tinha escolhido outra volta para a
@@ -307,6 +311,7 @@ class GTHudApp(App):
         Clock.schedule_once(self.atualizar_transito_do_mapa, 5)
         Clock.schedule_interval(self.atualizar_transito_do_mapa, TRANSITO_MAPA_A_CADA_S)
         Clock.schedule_once(self.atualizar_fluxo, 6)
+        self.sons.carregar_todos(Clock.schedule_once)
         Clock.schedule_interval(self.atualizar_fluxo, FLUXO_A_CADA_S)
 
     def on_pause(self):
@@ -356,7 +361,7 @@ class GTHudApp(App):
         if mudou and nome != "mapa":  # o mapa entra direto (é pesado; e é para onde se volta com pressa)
             tela = self.sm.get_screen(nome)
             if tela.children:
-                entrar(tela.children[0])
+                entrar(tela.children[0], 0.22, subir=dp(22))
 
     # --- GPS -------------------------------------------------------------
     def solicitar_gps(self):
@@ -568,6 +573,7 @@ class GTHudApp(App):
         self.chuva_prevista = None
         self._chuva_dita = False
         self.sm.get_screen("mapa").mostrar_previa(rota, self.rotas_previa)
+        self.sons.tocar("pronto")   # a rota chegou
         self._informar_rotas([rota], pedido, origem, alvo, chuva=True)
         nome = self.destino["nome"]
         def parcial(lista):
@@ -879,6 +885,7 @@ class GTHudApp(App):
         if nav.chegou and not self._fim_agendado:
             self._fim_agendado = True
             android_utils.vibrar_padrao("chegou")
+            self.na_tela(lambda: self.sm.get_screen("mapa").mapa.comemorar())
             # quem acompanha pelo link vê "chegou" na hora, sem esperar nada
             self.parar_corrida(chegou=True)
             # a rota se encerra 5 s depois (tempo de ver/ouvir "você chegou").
