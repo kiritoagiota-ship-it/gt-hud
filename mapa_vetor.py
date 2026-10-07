@@ -80,15 +80,19 @@ AREAS = {
 }
 # Tema claro (dia): mapa de fundo cinza-claro com ruas brancas e avenidas
 # amarelas, como os mapas de papel; o escuro são os valores deste arquivo.
+# (08/10/2026, com um print do dono no celular: o mapa claro estava "chapado",
+# ruas brancas num fundo cinza sem definição e a avenida igual às ruas. Agora:
+# fundo mais claro, CONTORNO nas ruas, e avenidas em amarelo que se vê.)
 _CLARO = {
-    "fundo": (0.865, 0.890, 0.910, 1),
-    "areas": {"residencial": (0.895, 0.915, 0.930, 1), "comercial": (0.945, 0.915, 0.865, 1),
-              "institucional": (0.870, 0.895, 0.955, 1), "verde": (0.740, 0.885, 0.770, 1),
-              "agua": (0.610, 0.790, 0.945, 1), "predio": (0.790, 0.820, 0.850, 1)},
-    "ruas": {"servico": (0.960, 0.968, 0.975, 1), "caminho": (0.800, 0.830, 0.850, 1),
+    "fundo": (0.935, 0.938, 0.925, 1),
+    "contorno": (0.775, 0.795, 0.815, 1),
+    "areas": {"residencial": (0.948, 0.950, 0.938, 1), "comercial": (0.968, 0.948, 0.905, 1),
+              "institucional": (0.905, 0.920, 0.968, 1), "verde": (0.760, 0.895, 0.765, 1),
+              "agua": (0.640, 0.810, 0.955, 1), "predio": (0.868, 0.868, 0.850, 1)},
+    "ruas": {"servico": (0.975, 0.978, 0.982, 1), "caminho": (0.830, 0.850, 0.865, 1),
              "ciclovia": (0.150, 0.640, 0.420, 1), "rua": (1.0, 1.0, 1.0, 1),
-             "terciaria": (1.0, 1.0, 1.0, 1), "secundaria": (1.0, 0.955, 0.760, 1),
-             "primaria": (1.0, 0.880, 0.560, 1), "expressa": (0.980, 0.740, 0.360, 1)},
+             "terciaria": (1.0, 0.985, 0.900, 1), "secundaria": (1.0, 0.930, 0.640, 1),
+             "primaria": (1.0, 0.860, 0.470, 1), "expressa": (0.985, 0.760, 0.380, 1)},
     # (mais apagadas que no escuro: em cima de rua branca, seta escura cheia pesava o mapa)
     "setas": {"setas": (0.420, 0.490, 0.560, 0.50), "setas_escuras": (0.470, 0.410, 0.270, 0.55)},
 }
@@ -115,6 +119,12 @@ _COM_SETA = ("rua", "terciaria", "secundaria", "primaria")
 # Hierarquia (o dono achou o mapa de longe uma "teia" branca): rua comum só
 # a partir do zoom 14; avenidas e vias expressas num tom areia que se
 # destaca de longe (como os mapas de navegação), o resto em cinza-azulado.
+# Contorno das ruas: de perto, cada rua é desenhada duas vezes (uma mais larga,
+# nesta cor, por baixo): a borda fina dá definição ao desenho, como nos mapas
+# do Google e do Waze. (lista: aplicar_tema troca o conteúdo no lugar)
+CONTORNO = [0.082, 0.100, 0.138, 1]
+ZOOM_CONTORNO = 15         # de mais longe as ruas são finas demais para a borda aparecer
+CONTORNO_PX = 1.1          # largura da borda de cada lado, em px de tela
 RUAS = collections.OrderedDict([
     ("servico", (3.0, (0.196, 0.236, 0.302, 1), 15)),
     ("caminho", (2.2, (0.184, 0.222, 0.284, 1), 15)),
@@ -224,10 +234,11 @@ def aplicar_tema(claro):
     DEPOIS: quem chama remonta o mapa."""
     global _ESCURO
     if _ESCURO is None:
-        _ESCURO = {"fundo": tuple(FUNDO), "areas": dict(AREAS),
+        _ESCURO = {"fundo": tuple(FUNDO), "contorno": tuple(CONTORNO), "areas": dict(AREAS),
                    "ruas": {n: v[1] for n, v in RUAS.items()}, "setas": dict(SETAS)}
     estilo = _CLARO if claro else _ESCURO
     FUNDO[:] = estilo["fundo"]
+    CONTORNO[:] = estilo["contorno"]
     AREAS.update(estilo["areas"])
     SETAS.update(estilo["setas"])
     for nome, (largura, _, zoom_min) in list(RUAS.items()):
@@ -539,6 +550,8 @@ def preparar(camadas, dz, tx, ty, rz, origem, escala, densidade):
                 area(cor, partes, conv)
 
     ruas = {nome: _Malha() for nome in RUAS}
+    contorno = _Malha()
+    borda_local = CONTORNO_PX * densidade / px_por_local
     setas = {nome: _Malha() for nome in SETAS}
     seta_t = SETA_TAM_DP * (1.0 if rz <= 16 else 1.25) * densidade / px_por_local
     seta_passo = SETA_PASSO_DP * densidade / px_por_local
@@ -562,9 +575,12 @@ def preparar(camadas, dz, tx, ty, rz, origem, escala, densidade):
             # juntas redondas só onde a rua é grossa o bastante para o canto aparecer
             lados = 0 if largura_px < 3 else (6 if largura_px < 10 else 8)
             mao = props.get("oneway") if rz >= ZOOM_SETAS and estilo in _COM_SETA else None
+            com_borda = rz >= ZOOM_CONTORNO and largura_px >= 4 and estilo not in ("caminho", "ciclovia")
             for parte in partes:
                 pts = _simplificar(conv(parte), tol2)
                 ruas[estilo].faixa(pts, meia, lados)
+                if com_borda:
+                    contorno.faixa(pts, meia + borda_local, lados)
                 if mao in (1, -1) and len(pts) >= 2:
                     _por_setas(setas["setas_escuras" if estilo in _SETA_ESCURA else "setas"],
                                pts if mao == 1 else pts[::-1], seta_passo, seta_t)
@@ -629,7 +645,8 @@ def preparar(camadas, dz, tx, ty, rz, origem, escala, densidade):
         grade.setdefault((int(r["x"] // celula), int(r["y"] // celula)), []).append(r)
     return {
         "areas": [(nome, m.listas()) for nome, m in areas.items()],
-        "ruas": [(nome, cor_rua(nome, rz), m.listas()) for nome, m in ruas.items()]
+        "ruas": [("contorno", tuple(CONTORNO), contorno.listas())]
+                + [(nome, cor_rua(nome, rz), m.listas()) for nome, m in ruas.items()]
                 + [(nome, SETAS[nome], m.listas()) for nome, m in setas.items()],
         "rotulos": rotulos,
         "grade": grade,          # (gx, gy) -> nomes naquele quadrado (coord. locais / celula)

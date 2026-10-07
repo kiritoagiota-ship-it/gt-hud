@@ -201,7 +201,8 @@ class MapaHUD(Widget):
             self._m_centro = Translate(0, 0)
         self._g_areas = InstructionGroup()
         self.canvas.add(self._g_areas)
-        self._g_ruas = {}
+        self._g_ruas = {"contorno": InstructionGroup()}   # a borda das ruas, por baixo de todas elas
+        self.canvas.add(self._g_ruas["contorno"])
         for nome in RUAS:  # da menos importante para a mais (a mais fica por cima)
             self._g_ruas[nome] = InstructionGroup()
             self.canvas.add(self._g_ruas[nome])
@@ -764,10 +765,14 @@ class MapaHUD(Widget):
                                     so_radares=self.zoom < ZOOM_SINAIS)
         # Casa e Trabalho: sempre à vista (são referência), por cima dos outros
         fonte = list(fonte) + [p for p in self.marcos if la0 <= p[0] <= la1 and lo0 <= p[1] <= lo1]
+        eu_na_tela = self._para_tela(self.eu[0], self.eu[1]) if self.eu else None
         for lat, lon, tipo in fonte:
             if len(postos) >= MAX_SINAIS:
                 break
             sx, sy = self._para_tela(lat, lon)
+            if (tipo in ("casa", "trabalho") and eu_na_tela is not None
+                    and abs(sx - eu_na_tela[0]) < dp(36) and abs(sy - eu_na_tela[1]) < dp(44)):
+                continue   # a pessoa está em cima do pino: ele taparia a seta
             # cruzamento com vários semáforos mapeados: um ícone só
             if any(t == tipo and abs(sx - x) < dp(30) and abs(sy - y) < dp(30) for x, y, t in postos):
                 continue
