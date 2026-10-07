@@ -134,7 +134,10 @@ class _Android:
             self.ctx = autoclass("org.kivy.android.PythonActivity").mActivity
             self.servico = autoclass("org.kirito.gthud.ServicoNavegacao")
             self.bolha = autoclass("org.kirito.gthud.Bolha")
-            self.painel = autoclass("org.kirito.gthud.PainelFlutuante")
+            try:   # separado: sem o painel, a bolha e o serviço continuam valendo
+                self.painel = autoclass("org.kirito.gthud.PainelFlutuante")
+            except Exception as e:
+                print("[fundo] sem o painel flutuante:", e)
         except Exception as e:
             if not isinstance(e, ImportError):
                 print("[fundo] sem servico/bolha:", e)
@@ -191,9 +194,21 @@ class _Android:
 
     # painel flutuante (retângulo com o caminho à frente e a velocidade)
     def mostrar_painel(self, dados, claro):
-        if self.painel is not None:
-            self.atualizar_painel(dados, claro)
-            self._chamar(self.painel.mostrar, self.ctx)
+        """True se o pedido foi feito (se abriu mesmo, ver estado_painel)."""
+        if self.painel is None:
+            return False
+        self.atualizar_painel(dados, claro)
+        self._chamar(self.painel.mostrar, self.ctx)
+        return True
+
+    def estado_painel(self):
+        """(estado, erro): 1 na tela, 0 fechado/ainda abrindo, -1 não abriu."""
+        if self.painel is None:
+            return -1, "sem a classe do painel"
+        try:
+            return int(self.painel.estado), str(self.painel.erro)
+        except Exception as e:
+            return -1, str(e)
 
     def atualizar_painel(self, dados, claro):
         if self.painel is not None and dados is not None:
@@ -230,6 +245,7 @@ class SegundoPlano:
         self._t_aviso = 0.0
         self._t_painel = 0.0
         self._painel_a_vista = False
+        self._conferir_painel_em = None
         self._ligado = False            # o serviço Android está no ar
         self.leituras_no_fundo = 0      # (diagnóstico e testes)
 
@@ -290,6 +306,16 @@ class SegundoPlano:
         if not (self.minimizado and self._painel_a_vista):
             return
         agora = time.monotonic()
+        if self._conferir_painel_em is not None and agora >= self._conferir_painel_em:
+            # abriu mesmo? Se o Android recusou, cai para a bolha e anota o motivo
+            self._conferir_painel_em = None
+            estado, erro = self.android.estado_painel()
+            print("[fundo] painel flutuante: estado=%s %s" % (estado, erro))
+            if estado == -1:
+                self._painel_a_vista = False
+                _, _, l1, l2 = textos(self.app)
+                self.android.mostrar_bolha(l1, l2)
+                return
         if agora - self._t_painel < PAINEL_A_CADA_S:
             return
         self._t_painel = agora
@@ -303,12 +329,21 @@ class SegundoPlano:
         self.minimizado = True
         tipo = self._tipo_flutuante()
         self._painel_a_vista = False
-        if tipo is not None and self.android.bolha_permitida():
-            dados = dados_do_painel(self.app) if tipo == "painel" else None
-            if dados is not None:
+        self._conferir_painel_em = None
+        permitida = self.android.bolha_permitida()
+        # (no diagnóstico: por que a janela apareceu ou não)
+        print("[fundo] janela ao minimizar: tipo=%s, permissao de sobrepor=%s" % (tipo, permitida))
+        if tipo is not None and permitida:
+            dados = None
+            if tipo == "painel":
+                try:
+                    dados = dados_do_painel(self.app)
+                except Exception as e:
+                    print("[fundo] dados do painel:", e)
+            if dados is not None and self.android.mostrar_painel(dados, tema.claro()):
                 # retângulo no meio da tela com o caminho à frente e a velocidade
                 self._painel_a_vista = True
-                self.android.mostrar_painel(dados, tema.claro())
+                self._conferir_painel_em = time.monotonic() + 1.5
             else:
                 _, _, l1, l2 = textos(self.app)
                 self.android.mostrar_bolha(l1, l2)

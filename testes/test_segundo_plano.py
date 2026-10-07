@@ -12,6 +12,7 @@ class AndroidFalso:
         self.chamadas = []
         self.bolha = object()
         self.permitida = permitida
+        self.painel_abre = True    # None = sem a classe do painel; False = o Android recusou
 
     def __getattr__(self, nome):
         def registrar(*args):
@@ -20,6 +21,13 @@ class AndroidFalso:
 
     def bolha_permitida(self):
         return self.permitida
+
+    def mostrar_painel(self, dados, claro):
+        self.chamadas.append(("mostrar_painel", dados, claro))
+        return self.painel_abre is not None
+
+    def estado_painel(self):
+        return (1, "") if self.painel_abre else (-1, "o Android recusou")
 
     def nomes(self):
         return [c[0] for c in self.chamadas]
@@ -189,6 +197,23 @@ class TestePainelFlutuante(unittest.TestCase):
         self.assertGreater(len(desenho.split(";")), 10)
         fundo.ao_voltar()
         self.assertIn("esconder_painel", android.nomes())
+
+    def test_painel_que_nao_abre_cai_para_a_bolha(self):
+        for abre in (None, False):      # sem a classe do painel / o Android recusou abrir
+            app, android = AppFalso(), AndroidFalso()
+            android.painel_abre = abre
+            app.ajustes["flutuante_tipo"] = "painel"
+            app.nav = self._nav()
+            app.estado_nav = {"restante_s": 480, "restante_m": 2300, "dist_manobra": 200, "fora_da_rota": False,
+                              "manobra": {"acao": "direita", "ruas": "Rua 5"}, "alerta": None}
+            fundo = SegundoPlano(app, android)
+            fundo.ao_pausar()
+            if abre is False:           # só descobre depois de pedir: confere 1,5 s depois
+                fundo._conferir_painel_em = 0.0
+                fundo.atualizar_painel()
+            self.assertIn("mostrar_bolha", android.nomes(), abre)
+            self.assertFalse(fundo._painel_a_vista)
+            fundo.ao_voltar()
 
     def test_avenida_e_fora_da_rota_mudam_a_cor(self):
         app = AppFalso()

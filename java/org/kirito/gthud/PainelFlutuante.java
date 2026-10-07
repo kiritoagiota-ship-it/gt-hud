@@ -57,20 +57,33 @@ public class PainelFlutuante {
     private static volatile float[] rota = new float[0];   // x, y em metros (x = direita, y = frente)
     private static volatile boolean claro = false;
     private static volatile int alerta = 0;                 // 0 normal, 1 laranja, 2 vermelho
+    // para o diagnóstico (o Python lê): 0 = fechado, 1 = na tela, -1 = não abriu
+    public static volatile int estado = 0;
+    public static volatile String erro = "";
 
     public static void mostrar(final Context contexto) {
         final Context c = contexto.getApplicationContext();
         principal.post(new Runnable() {
             @Override
             public void run() {
-                if (vista != null || !Bolha.temPermissao(c)) {
+                if (vista != null) {
+                    estado = 1;
+                    return;
+                }
+                if (!Bolha.temPermissao(c)) {
+                    estado = -1;
+                    erro = "sem a permissao de exibir sobre outros apps";
                     return;
                 }
                 try {
                     criar(c);
                     wm.addView(vista, lp);
-                } catch (Exception e) {
+                    estado = 1;
+                    erro = "";
+                } catch (Throwable e) {
                     vista = null;
+                    estado = -1;
+                    erro = String.valueOf(e);
                 }
             }
         });
@@ -110,6 +123,7 @@ public class PainelFlutuante {
                     }
                 }
                 vista = null;
+                estado = 0;
             }
         });
     }

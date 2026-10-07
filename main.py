@@ -131,6 +131,7 @@ class GTHudApp(App):
         self._recalculando = False
         self._t_falha_recalculo = 0.0
         self._escolheu_rota = False    # a pessoa tocou numa das rotas da prévia
+        self._ofereceu_janela = False  # já avisou da permissão da janela flutuante nesta abertura
         self._fim_agendado = False
         self._fim_em = None            # time.monotonic() em que a rota se encerra depois de chegar
         self._saudou = False
@@ -595,6 +596,7 @@ class GTHudApp(App):
             self.viagem.iniciar()  # a navegação grava a viagem sozinha
         self.gps.seguir_rota(rota.pontos)
         self.sm.get_screen("mapa").modo_navegando(rota)
+        self._oferecer_janela_flutuante()
         self._medir_rota_em_uso(rota)   # (a escolhida na prévia quase sempre já vem medida)
         self.fundo.comecou()  # notificação + Android deixa seguir minimizado
 
@@ -603,6 +605,21 @@ class GTHudApp(App):
         aberto), a cada leitura do GPS e pela thread de segundo plano."""
         if self._fim_em is not None and self.nav is not None and time.monotonic() >= self._fim_em:
             self.encerrar_navegacao(chegou=True)
+
+    def _oferecer_janela_flutuante(self):
+        """A janela ao minimizar (painel ou bolha) precisa da permissão
+        "Exibir sobre outros apps". Sem ela nada aparece e a pessoa não sabe
+        por quê: no começo da rota, uma vez por abertura do app, avisa e
+        oferece abrir a tela do Android para liberar."""
+        android = self.fundo.android
+        if (self._ofereceu_janela or not self.ajustes["bolha"] or not self.ajustes["segundo_plano"]
+                or getattr(android, "bolha", None) is None or android.bolha_permitida()):
+            return
+        self._ofereceu_janela = True
+        from widgets.comuns import escolher
+        escolher("Janela ao minimizar", [("Liberar agora", android.pedir_bolha), ("Agora não", None)],
+                 texto="Para o painel da rota aparecer por cima dos outros apps quando você minimizar, "
+                       "o Android precisa da permissão \"Exibir sobre outros apps\" para o GT-HUD.")
 
     def encerrar_navegacao(self, chegou=False):
         """Pode rodar na thread de segundo plano (chegada com o app
