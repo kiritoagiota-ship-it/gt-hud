@@ -419,6 +419,9 @@ public class PainelFlutuante {
                 degradeAltura = h;
                 degradeClaro = claro;
             }
+            // (com degradê, a transparência da tinta ainda vale: sem voltar a cor para
+            // opaca, o corpo saía com os 31% da linha de brilho e dava para ver os apps atrás)
+            tinta.setColor(Color.BLACK);
             tinta.setShader(degrade);
             tela.drawPath(moldura, tinta);
             tinta.setShader(null);
