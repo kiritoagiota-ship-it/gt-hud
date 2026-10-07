@@ -134,10 +134,21 @@ def achar_subidas(elevacao, passo=ELEVACAO_PASSO_M):
 #   shortest:  a menor distância, ignorando o resto
 PERFIS = [
     ("rapida", "Mais rápida", {"use_roads": 0.75, "use_hills": 0.5, "avoid_bad_surfaces": 0.25}),
-    ("tranquila", "Mais tranquila", {"use_roads": 0.1, "use_hills": 0.5, "avoid_bad_surfaces": 0.5}),
+    ("tranquila", "Mais tranquila", {"use_roads": 0.0, "use_hills": 0.5, "avoid_bad_surfaces": 0.5}),
     ("plana", "Menos subida", {"use_roads": 0.5, "use_hills": 0.0, "avoid_bad_surfaces": 0.25}),
-    ("curta", "Mais curta", {"use_roads": 0.75, "use_hills": 0.5, "shortest": True}),
 ]
+# ROTA TRANQUILA (pedido do dono, 06/10/2026: a moto elétrica dele chega a
+# ~50 km/h e ele quer sempre uma opção por ruas calmas, longe das avenidas).
+# Só pedir "use_roads: 0" ao servidor NÃO basta: medido em rotas reais de
+# Goiânia, às vezes volta a mesma rota da "rápida" (71% em avenida). O que
+# funciona: pedir também as rotas alternativas, MEDIR em cada uma quanto do
+# caminho é em via movimentada (o servidor diz a classe de cada trecho) e
+# ficar com a mais calma que não seja absurda de longa.
+ATRIBUTOS = "https://valhalla1.openstreetmap.de/trace_attributes"
+MOVIMENTADAS = ("motorway", "trunk", "primary", "secondary")   # avenidas e vias expressas
+ESPERA_ENTRE_S = 1.1          # o servidor gratuito aceita ~1 pedido por segundo
+TRANQUILA_MAIS_LONGA = 1.6    # a tranquila pode levar até isso (x o tempo da rápida) + 3 min
+TRANQUILA_GANHO = 0.08        # só é "tranquila" se tiver pelo menos isso a menos de avenida
 NOMES_PERFIS = {p[0]: p[1] for p in PERFIS}
 
 
@@ -153,6 +164,7 @@ class Rota:
         self.total_m = self.acumulado[-1]
         self.tempo_base_s = tempo_s      # o que o servidor previu
         self.reserva = False             # True: veio do servidor reserva
+        self.movimentada = None          # fração (0..1) em avenida/via expressa; None = não medida
         self.destino_nome = destino_nome
         self.elevacao = elevacao
         self.subidas = achar_subidas(elevacao)
@@ -262,6 +274,58 @@ def _pedir_reserva(origem, destino, destino_nome):
     return Rota.do_osrm(dados, destino_nome)
 
 
+def medir_movimento(rota):
+    """Quanto da rota é em via movimentada (0..1), perguntando ao servidor a
+    classe de cada trecho. Guarda em rota.movimentada. None se não deu."""
+    if rota.movimentada is not None:
+        return rota.movimentada
+    corpo = {"encoded_polyline": codificar_polyline(rota.pontos, 1e6), "costing": "bicycle",
+             "shape_match": "map_snap",
+             "filters": {"attributes": ["edge.road_class", "edge.length"], "action": "include"}}
+    try:
+        dados = rede.enviar(ATRIBUTOS, corpo, "POST", ESPERA_PRINCIPAL_S)
+    except Exception as e:
+        print("[rota] nao deu para medir as avenidas:", e)
+        return None
+    total = movimentado = 0.0
+    for trecho in dados.get("edges", []):
+        comprimento = trecho.get("length") or 0.0
+        total += comprimento
+        if trecho.get("road_class") in MOVIMENTADAS:
+            movimentado += comprimento
+    if total <= 0:
+        return None
+    rota.movimentada = movimentado / total
+    return rota.movimentada
+
+
+def mais_tranquila(origem, destino, rumo=None, destino_nome="", rapida=None, esperar=time.sleep):
+    """A rota mais calma até o destino: a que tem menos avenida entre as que
+    o servidor oferece (principal + alternativas), sem passar de
+    TRANQUILA_MAIS_LONGA vezes o tempo da rápida. Mede também a `rapida`
+    (para mostrar a diferença). None se não houver nenhuma."""
+    candidatas = _pedir_principal(origem, destino, rumo, destino_nome, "tranquila", alternativas=2)
+    if rapida is not None:
+        esperar(ESPERA_ENTRE_S)
+        medir_movimento(rapida)
+    limite_s = None if rapida is None else rapida.tempo_base_s * TRANQUILA_MAIS_LONGA + 180
+    melhor = None
+    for c in candidatas:
+        if rapida is not None and parecidas(c, rapida):
+            c.movimentada = rapida.movimentada      # é a mesma rota: não gasta um pedido
+        else:
+            esperar(ESPERA_ENTRE_S)
+            medir_movimento(c)
+        if limite_s is not None and c.tempo_base_s > limite_s:
+            continue
+        if c.movimentada is None:
+            continue
+        if melhor is None or c.movimentada < melhor.movimentada - 0.02:
+            melhor = c
+    # sem medida nenhuma (servidor não respondeu): fica a primeira, como antes
+    return melhor if melhor is not None else (candidatas[0] if candidatas else None)
+
+
 def pedir_rota(origem, destino, rumo=None, destino_nome="", perfil="rapida"):
     """Chamada que espera a resposta (use rede.em_segundo_plano). Se o
     servidor principal não responder, a rota mais rápida vem do reserva."""
@@ -282,7 +346,8 @@ def pedir_rota(origem, destino, rumo=None, destino_nome="", perfil="rapida"):
             raise erro
 
 
-def _pedir_principal(origem, destino, rumo, destino_nome, perfil):
+def _pedir_principal(origem, destino, rumo, destino_nome, perfil, alternativas=0):
+    """Uma Rota; com `alternativas` > 0, a lista [principal, alternativas...]."""
     opcoes = {"bicycle_type": "Hybrid", "cycling_speed": 22}   # bike elétrica na cidade
     opcoes.update(dict((p[0], p[2]) for p in PERFIS)[perfil])
     partida = {"lat": origem[0], "lon": origem[1]}
@@ -297,6 +362,8 @@ def _pedir_principal(origem, destino, rumo, destino_nome, perfil):
         "directions_options": {"language": "pt-BR", "units": "kilometers"},
         "elevation_interval": ELEVACAO_PASSO_M,
     }
+    if alternativas:
+        pedido["alternates"] = alternativas
     url = VALHALLA + "?json=" + urllib.parse.quote(json.dumps(pedido))
     try:
         try:
@@ -318,9 +385,10 @@ def _pedir_principal(origem, destino, rumo, destino_nome, perfil):
                 raise SemRota("Longe demais: rota de bike vai até 150 km.")
             raise SemRota("Não achei um caminho de bike até esse lugar.")
         raise
-    rota = Rota.do_valhalla(dados, destino_nome)
-    rota.perfil = perfil
-    return rota
+    todas = [Rota.do_valhalla(d, destino_nome) for d in [dados] + list(dados.get("alternates") or [])]
+    for rota in todas:
+        rota.perfil = perfil
+    return todas if alternativas else todas[0]
 
 
 def _dist_segmento(p, a, b):
@@ -354,9 +422,15 @@ def pedir_alternativas(origem, destino, rumo=None, destino_nome="", ja=()):
         if perfil in tem:
             continue
         try:
-            nova = pedir_rota(origem, destino, rumo, destino_nome, perfil)
+            if perfil == "tranquila":
+                nova = mais_tranquila(origem, destino, rumo, destino_nome, rotas[0] if rotas else None)
+            else:
+                time.sleep(ESPERA_ENTRE_S)
+                nova = pedir_rota(origem, destino, rumo, destino_nome, perfil)
         except Exception as e:
             print("[rota] perfil", perfil, "falhou:", e)
+            continue
+        if nova is None:
             continue
         igual = next((r for r in rotas if parecidas(r, nova)), None)
         if igual is None:
@@ -387,7 +461,10 @@ def rotular(rotas):
         if r is plana and r.subida_total_m < rapida.subida_total_m - 5:
             nomes.append("menos subida")
         if (r.perfil == "tranquila" or getattr(r, "perfil_tranquilo", False)) and r is not rapida:
-            nomes.append("tranquila")
+            # com as duas medidas, só é "tranquila" se tiver mesmo menos avenida
+            medidas = r.movimentada is not None and rapida.movimentada is not None
+            if not medidas or r.movimentada <= rapida.movimentada - TRANQUILA_GANHO:
+                nomes.append("tranquila")
         if nomes:
             if nomes[0] == "menos subida":
                 r.nome_perfil = "Menos subida" + "".join(" e " + n for n in nomes[1:])
@@ -396,4 +473,9 @@ def rotular(rotas):
                 r.nome_perfil = "Mais " + texto.replace(" e menos subida", ", menos subida")
             boas.append(r)
     boas.sort(key=lambda r: r is not rapida)
+    if not any("tranquila" in r.nome_perfil for r in boas) and (
+            getattr(rapida, "perfil_tranquilo", False)
+            or (rapida.movimentada is not None and any(r.perfil == "tranquila" for r in rotas))):
+        # procurou e não há caminho mais calmo: a pessoa fica sabendo
+        rapida.nome_perfil = "Mais rápida (não achei mais calma)"
     return boas

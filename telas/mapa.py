@@ -122,7 +122,8 @@ class EscolhaRotas(BoxLayout):
 
     @staticmethod
     def nome_curto(rota):
-        n = rota.nome_perfil.replace("Mais ", "").replace("Menos subida", "plana")
+        n = rota.nome_perfil.replace(" (não achei mais calma)", "")
+        n = n.replace("Mais ", "").replace("Menos subida", "plana")
         return n[:1].upper() + n[1:]
 
     def mostrar(self, rotas, escolhida, ao_escolher):
@@ -432,11 +433,10 @@ class TelaMapa(Screen):
             self.escolha.add_widget(Texto(text="Buscando outras\nrotas...", font_size=tema.T_ROTULO,
                                           color=tema.CIANO_FRACO, halign="center"))
         self.mapa.definir_alternativas([r.pontos for r in rotas if r is not rota])
-        n = len(rota.subidas)
-        self.lbl_resumo.text = "%s  |  %s  |  sobe %d m  |  %d %s" % (
-            fmt_dist_nav(rota.total_m), fmt_duracao(rota.tempo_s), rota.subida_total_m,
-            n, "subida" if n == 1 else "subidas") if n else "%s  |  %s  |  sobe %d m" % (
+        self.lbl_resumo.text = "%s  |  %s  |  sobe %d m" % (
             fmt_dist_nav(rota.total_m), fmt_duracao(rota.tempo_s), rota.subida_total_m)
+        if rota.movimentada is not None:   # quanto do caminho é em avenida (medido)
+            self.lbl_resumo.text += "  |  %d%% avenida" % round(rota.movimentada * 100)
         self.lbl_resumo.color = tema.BRANCO
         self.perfil.subidas = rota.subidas
         self.perfil.elevacao = rota.elevacao

@@ -96,7 +96,7 @@ class Alternar(BotaoHUD):
 # foram sendo criadas): seção -> títulos das linhas, na ordem da tela.
 SECOES = [
     ("Voz", ["Voz do assistente", "Qual voz", "Tom da voz", "Efeito de IA", "Testar a voz"]),
-    ("Navegação", ["Avisar subidas e descidas", "Avisar semáforos", "Continuar em segundo plano",
+    ("Navegação", ["Rota preferida", "Avisar subidas e descidas", "Avisar semáforos", "Continuar em segundo plano",
                    "Bolha flutuante", "Corrida ao vivo"]),
     ("Mapa e tela", ["Aparência", "Mapa gira com a direção", "Mapa offline de Goiânia",
                      "Tela deitada", "Manter tela ligada"]),
@@ -211,6 +211,13 @@ class TelaConfig(Screen):
                                "Fala \"Semáforo à frente\" no caminho (lombada é sempre avisada).",
                                self._centralizar(self.alt_semaforos)))
 
+        self.btn_rota = BotaoHUD(text="", size_hint_x=None, width=dp(130), font_size=tema.T_ROTULO + 2,
+                                 on_release=lambda *a: self._mudar_rota_preferida())
+        lista.add_widget(Linha("Rota preferida",
+                               "A que já vem escolhida ao buscar um destino. Tranquila: foge das "
+                               "avenidas (costuma demorar uns minutos a mais). As duas sempre aparecem.",
+                               self._centralizar(self.btn_rota)))
+
         self.alt_fundo = Alternar(lambda v: self._mudar_simples("segundo_plano", self.alt_fundo, v))
         lista.add_widget(Linha("Continuar em segundo plano",
                                "Com rota ativa ou viagem gravando, minimizar o app (ou apagar a "
@@ -319,6 +326,7 @@ class TelaConfig(Screen):
         self.sel_alfa.mostrar(aj["alfa"])
         self.alt_sim.mostrar(aj["simulador"])
         self.btn_tema.text = _NOMES_TEMA.get(aj["tema"], "Automático")
+        self.btn_rota.text = "Tranquila" if aj["rota_preferida"] == "tranquila" else "Mais rápida"
         self._mostrar_vivo()
         self.lbl_versao.text = ("GT-HUD versão %s\nMapa (c) OpenStreetMap, OpenFreeMap  |  "
                                 "Lugares (c) Overture Maps Foundation" % _versao())
@@ -528,6 +536,12 @@ class TelaConfig(Screen):
                                   lambda e: self._mostrar_vivo("Não consegui testar o banco."))
         pedir_nome(salvar, sugestao=app.ajustes["firebase"], titulo="Endereço do banco (Firebase)",
                    botao="Salvar e testar", dica="https://...firebaseio.com", limite=200)
+
+    def _mudar_rota_preferida(self):
+        app = App.get_running_app()
+        nova = "rapida" if app.ajustes["rota_preferida"] == "tranquila" else "tranquila"
+        app.ajustes["rota_preferida"] = nova
+        self.btn_rota.text = "Tranquila" if nova == "tranquila" else "Mais rápida"
 
     def _mudar_tema(self):
         app = App.get_running_app()

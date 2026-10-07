@@ -122,6 +122,7 @@ class GTHudApp(App):
         self.destino = None
         self._recalculando = False
         self._t_falha_recalculo = 0.0
+        self._escolheu_rota = False    # a pessoa tocou numa das rotas da prévia
         self._fim_agendado = False
         self._fim_em = None            # time.monotonic() em que a rota se encerra depois de chegar
         self._saudou = False
@@ -465,6 +466,7 @@ class GTHudApp(App):
 
     # --- destino, rota e navegação --------------------------------------------
     def escolher_destino(self, lugar):
+        self._escolheu_rota = False
         self.destino = lugar
         self._guardar_recente(lugar)
         self._pilha_telas.clear()
@@ -504,9 +506,15 @@ class GTHudApp(App):
         self.rotas_previa = lista or [self.rota_previa]
         if self.rota_previa not in self.rotas_previa:
             self.rota_previa = self.rotas_previa[0]
+        if self.ajustes["rota_preferida"] == "tranquila" and not self._escolheu_rota:
+            # quem prefere a tranquila já a encontra escolhida (se existir uma)
+            calma = next((r for r in self.rotas_previa if "tranquila" in r.nome_perfil), None)
+            if calma is not None:
+                self.rota_previa = calma
         self.sm.get_screen("mapa").mostrar_previa(self.rota_previa, self.rotas_previa, enquadrar=True)
 
     def escolher_rota_previa(self, rota):
+        self._escolheu_rota = True
         self.rota_previa = rota
         self.sm.get_screen("mapa").mostrar_previa(rota, self.rotas_previa, enquadrar=False)
 
@@ -649,9 +657,23 @@ class GTHudApp(App):
         self._recalculando = True
         self.voz.falar(["recalculando"], 2)
         origem, rumo, destino = self.posicao, self.rumo_recente(), self.destino
-        rede.em_segundo_plano(
-            lambda: rotas.pedir_rota(origem, (destino["lat"], destino["lon"]), rumo, destino["nome"]),
-            self._recalculou, self._recalculo_falhou)
+        alvo = (destino["lat"], destino["lon"])
+        tranquila = "tranquila" in self.nav.rota.nome_perfil or self.nav.rota.perfil == "tranquila"
+
+        def pedir():
+            # saiu da rota TRANQUILA: a nova também evita avenida (antes o
+            # recálculo vinha sempre pela mais rápida e devolvia a pessoa às avenidas)
+            if tranquila:
+                try:
+                    nova = rotas.pedir_rota(origem, alvo, rumo, destino["nome"], "tranquila")
+                    nova.nome_perfil = "Mais tranquila"
+                    return nova
+                except rotas.SemRota:
+                    raise
+                except Exception as e:
+                    print("[rota] recalculo tranquilo falhou, indo pela rapida:", e)
+            return rotas.pedir_rota(origem, alvo, rumo, destino["nome"])
+        rede.em_segundo_plano(pedir, self._recalculou, self._recalculo_falhou)
 
     def _recalculou(self, rota):
         self._recalculando = False
