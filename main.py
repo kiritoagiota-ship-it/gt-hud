@@ -583,7 +583,7 @@ class GTHudApp(App):
             return
         for r in novas:
             r._informada = True
-        chave = (self.ajustes["tomtom"] or "").strip()
+        chave = transito.chave_em_uso(self.ajustes)
         quer_chuva = chuva and self.ajustes["avisar_chuva"] and origem is not None
 
         def olhar():
@@ -649,7 +649,7 @@ class GTHudApp(App):
         nav, destino = self.nav, self.destino
         if nav is None:
             return
-        chave = (self.ajustes["tomtom"] or "").strip()
+        chave = transito.chave_em_uso(self.ajustes)
         if chave and agora - self._t_transito >= TRANSITO_A_CADA_S:
             self._t_transito = agora
             rota = nav.rota

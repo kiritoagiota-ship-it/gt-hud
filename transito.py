@@ -20,6 +20,7 @@ import time
 import urllib.error
 import urllib.parse
 
+import chaves
 import goiania
 import rede
 from rota import _dist_segmento, distancia_m
@@ -39,6 +40,14 @@ CATEGORIAS = {
 INTERDITADA = 8
 
 _guardado = None         # (hora, [ocorrências])
+
+
+def chave_em_uso(ajustes):
+    """A chave da TomTom: a que o dono colou nos Ajustes ou, se não colou
+    nenhuma, a que veio dentro do APK (secret TOMTOM_KEY do GitHub, gravado
+    em chaves.json na montagem; o repositório é público e a chave nunca vai
+    para o código). "" = sem trânsito ao vivo."""
+    return (ajustes["tomtom"] or "").strip() or chaves.chave("tomtom") or ""
 
 
 class SemChave(Exception):

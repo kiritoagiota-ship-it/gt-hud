@@ -585,7 +585,8 @@ class TelaConfig(Screen):
 
     # --- trânsito ao vivo: a chave da TomTom do dono ------------------------------------
     def _mostrar_transito(self, aviso=None):
-        tem = bool((App.get_running_app().ajustes["tomtom"] or "").strip())
+        import transito
+        tem = bool(transito.chave_em_uso(App.get_running_app().ajustes))
         self.btn_transito.text = "Trocar" if tem else "Configurar"
         self.linha_transito.explicacao.text = aviso or (
             "Ligado: acidentes, trânsito lento e obras aparecem na rota e são avisados por voz."

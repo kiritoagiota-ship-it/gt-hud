@@ -184,5 +184,19 @@ class TesteTransito(unittest.TestCase):
         self.assertIn("bbox=-49.45000%2C-16.86000%2C-49.07000%2C-16.48000", pedidos[0])   # lon, lat, lon, lat
 
 
+class TesteChaveEmUso(unittest.TestCase):
+    def test_a_dos_ajustes_vale_mais_que_a_do_apk(self):
+        import chaves
+        original = chaves._cache
+        try:
+            chaves._cache = {"tomtom": "DO-APK"}
+            self.assertEqual(transito.chave_em_uso({"tomtom": ""}), "DO-APK")
+            self.assertEqual(transito.chave_em_uso({"tomtom": " DOS-AJUSTES "}), "DOS-AJUSTES")
+            chaves._cache = {}
+            self.assertEqual(transito.chave_em_uso({"tomtom": ""}), "")
+        finally:
+            chaves._cache = original
+
+
 if __name__ == "__main__":
     unittest.main()

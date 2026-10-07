@@ -158,11 +158,14 @@ jobs:
       - name: Chaves dos servicos
         env:
           GOOGLE_PLACES_KEY: ${{ secrets.GOOGLE_PLACES_KEY }}
+          TOMTOM_KEY: ${{ secrets.TOMTOM_KEY }}
         run: |
           python - <<'PY'
           import json, os
           chave = os.environ.get("GOOGLE_PLACES_KEY", "").strip()
-          json.dump({"google_places": chave}, open("chaves.json", "w"))
+          tomtom = os.environ.get("TOMTOM_KEY", "").strip()
+          json.dump({"google_places": chave, "tomtom": tomtom}, open("chaves.json", "w"))
+          print("TomTom (transito ao vivo):", "configurado" if tomtom else "sem chave (o dono cola nos Ajustes)")
           print("Google Places:", "configurado" if chave else "sem chave (busca so no mapa aberto)")
           PY
 
