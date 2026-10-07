@@ -123,3 +123,37 @@ class TesteNomeDoColado(unittest.TestCase):
 
     def test_sem_lugar_conhecido_nao_inventa_nome(self):
         self.assertEqual(busca.nome_perto(-16.84, -49.44, 30), "")
+
+
+class TesteRadares(unittest.TestCase):
+    """Radares de Goiânia (do OpenStreetMap), com o limite de cada um."""
+
+    def test_radares_carregados_com_limite(self):
+        import sinais
+        todos = [p for cel in sinais._carregar().values() for p in cel if sinais.e_radar(p[2])]
+        self.assertGreater(len(todos), 100)
+        self.assertTrue(any(sinais.limite_do_radar(p[2]) == 60 for p in todos))
+        self.assertEqual(sinais.limite_do_radar("radar0"), 0)
+        self.assertFalse(sinais.e_radar("semaforo"))
+        lat, lon, _ = todos[0]
+        perto = sinais.na_caixa(lat - 0.001, lon - 0.001, lat + 0.001, lon + 0.001, so_radares=True)
+        self.assertTrue(perto and all(sinais.e_radar(p[2]) for p in perto))
+
+    def test_navegacao_avisa_radar_com_o_limite(self):
+        import sinais
+        from navegacao import Navegacao
+        from testes.apoio import Fala, rota_reta
+        rota = rota_reta(600)
+        fala = Fala()
+        nav = Navegacao(rota, fala)
+        nav.alertas = [(300.0, "radar40")]
+        nav._alertas_ditos = set()
+        agora, estado = 0.0, None
+        for k in range(0, 40):                 # anda a 50 km/h (acima do limite)
+            lat, lon = rota.pontos[min(k, len(rota.pontos) - 1)]
+            agora += 0.72
+            estado = nav.atualizar(lat, lon, 50.0, agora)
+            if any("Radar" in t for t in fala.textos()):
+                break
+        self.assertIn("Radar de 40 à frente, reduza.", fala.textos())
+        self.assertTrue(sinais.e_radar(estado["alerta"]["tipo"]))

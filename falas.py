@@ -63,6 +63,7 @@ FALAS.update({
     "rota_trocada": "Rota alterada.",
     "semaforo": "Semáforo à frente.",
     "lombada": "Lombada à frente, reduza.",
+    "radar": "Radar à frente.",
     "sem_rota": "Não encontrei um caminho de bike até esse destino.",
 })
 

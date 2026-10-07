@@ -153,7 +153,15 @@ class Navegacao:
             if falta > janela:
                 break
             self._alertas_ditos.add(k)
-            if tipo == "lombada":
+            if sinais.e_radar(tipo):
+                # radar sempre (multa): com o limite, se o mapa informa; e manda
+                # reduzir se a pessoa está acima dele
+                limite = sinais.limite_do_radar(tipo)
+                texto = "Radar de %d à frente." % limite if limite else "Radar à frente."
+                if limite and vel_kmh > limite:
+                    texto = "Radar de %d à frente, reduza." % limite
+                self.falar(["radar"], P_AVISO, texto)
+            elif tipo == "lombada":
                 self.falar(["lombada"], P_AVISO)
             elif (self.avisar_semaforos
                   and dist - self._ultimo_semaforo_m >= SEMAFORO_FALADO_A_CADA_M
@@ -269,7 +277,7 @@ class Navegacao:
             estado["subida"] = melhor[1]
         for dist, tipo in self.alertas:
             em = dist - self.dist_feita
-            if 0 <= em <= 200:
+            if 0 <= em <= (350 if sinais.e_radar(tipo) else 200):   # radar aparece de mais longe
                 estado["alerta"] = {"tipo": tipo, "em_m": em}
                 break
         return estado

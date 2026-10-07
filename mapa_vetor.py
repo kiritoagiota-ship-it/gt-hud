@@ -63,15 +63,20 @@ FATIA_S = 0.003
 PAUSA_S = 0.003
 
 # --- estilo (cores RGBA; larguras em dp no zoom 16) ---------------------------
-FUNDO = [0.016, 0.027, 0.043, 1]   # (lista: aplicar_tema troca o conteúdo no lugar)
+# Tema escuro no estilo do Waze (pedido do dono, com um print do Waze,
+# 06/10/2026): fundo azul-acinzentado (não mais quase preto), ruas LARGAS num
+# tom um pouco mais claro que o fundo, hierarquia só pelo brilho e pela
+# largura (sem avenidas cor de areia). O mapa fica calmo e a rota, o que
+# tem cor, salta.
+FUNDO = [0.118, 0.141, 0.188, 1]   # (lista: aplicar_tema troca o conteúdo no lugar)
 # (a ordem é a do desenho: o prédio fica por cima do terreno)
 AREAS = {
-    "residencial": (0.030, 0.045, 0.062, 1),
-    "comercial": (0.070, 0.058, 0.040, 1),       # comércio: tom quente discreto
-    "institucional": (0.040, 0.055, 0.095, 1),   # escola, faculdade, hospital: azulado
-    "verde": (0.035, 0.135, 0.095, 1),           # praça, parque, campo
-    "agua": (0.025, 0.115, 0.205, 1),
-    "predio": (0.085, 0.118, 0.155, 1),
+    "residencial": (0.128, 0.153, 0.203, 1),
+    "comercial": (0.142, 0.152, 0.198, 1),
+    "institucional": (0.150, 0.188, 0.275, 1),   # escola, faculdade, hospital: bloco azulado
+    "verde": (0.160, 0.385, 0.310, 1),           # praça, parque, campo
+    "agua": (0.150, 0.290, 0.560, 1),
+    "predio": (0.152, 0.180, 0.238, 1),
 }
 # Tema claro (dia): mapa de fundo cinza-claro com ruas brancas e avenidas
 # amarelas, como os mapas de papel; o escuro são os valores deste arquivo.
@@ -100,9 +105,9 @@ _USO_DO_SOLO = {
 ZOOM_SETAS = 16
 SETA_PASSO_DP = 120.0
 SETA_TAM_DP = 6.5          # metade do comprimento da seta
-SETAS = {  # nome do grupo -> cor (clara nas ruas cinza, escura nas avenidas cor de areia)
-    "setas": (0.90, 0.94, 1.0, 0.85),
-    "setas_escuras": (0.05, 0.07, 0.10, 0.85),
+SETAS = {  # nome do grupo -> cor (discretas: informam o sentido sem sujar o mapa)
+    "setas": (0.60, 0.68, 0.80, 0.55),
+    "setas_escuras": (0.64, 0.72, 0.84, 0.55),
 }
 _SETA_ESCURA = ("primaria", "secundaria")
 _COM_SETA = ("rua", "terciaria", "secundaria", "primaria")
@@ -111,14 +116,14 @@ _COM_SETA = ("rua", "terciaria", "secundaria", "primaria")
 # a partir do zoom 14; avenidas e vias expressas num tom areia que se
 # destaca de longe (como os mapas de navegação), o resto em cinza-azulado.
 RUAS = collections.OrderedDict([
-    ("servico", (2.2, (0.22, 0.27, 0.33, 1), 15)),
-    ("caminho", (1.8, (0.20, 0.26, 0.30, 1), 15)),
-    ("ciclovia", (2.6, (0.20, 0.66, 0.46, 1), 14)),
-    ("rua", (4.0, (0.36, 0.42, 0.49, 1), 14)),
-    ("terciaria", (5.2, (0.50, 0.56, 0.63, 1), 13)),
-    ("secundaria", (6.2, (0.64, 0.69, 0.76, 1), 10)),
-    ("primaria", (6.8, (0.80, 0.74, 0.58, 1), 8)),
-    ("expressa", (7.6, (0.93, 0.78, 0.48, 1), 6)),
+    ("servico", (3.0, (0.196, 0.236, 0.302, 1), 15)),
+    ("caminho", (2.2, (0.184, 0.222, 0.284, 1), 15)),
+    ("ciclovia", (3.0, (0.200, 0.620, 0.450, 1), 14)),
+    ("rua", (6.0, (0.248, 0.298, 0.380, 1), 14)),
+    ("terciaria", (7.2, (0.278, 0.334, 0.422, 1), 13)),
+    ("secundaria", (8.4, (0.308, 0.370, 0.466, 1), 10)),
+    ("primaria", (9.4, (0.342, 0.410, 0.516, 1), 8)),
+    ("expressa", (10.4, (0.382, 0.458, 0.574, 1), 6)),
 ])
 _CLASSE_RUA = {
     "motorway": "expressa", "trunk": "expressa", "primary": "primaria",

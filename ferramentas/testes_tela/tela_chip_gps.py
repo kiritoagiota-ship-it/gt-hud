@@ -88,9 +88,10 @@ def conferir(nome):
     def f(dt):
         tela = App.get_running_app().sm.get_screen("mapa")
         c, m = tela.status, tela.menu
-        checar(c.right <= m.x, "%s: chip (%.0f..%.0f, alt %.0f) nao invade o menu (x=%.0f)"
-               % (nome, c.x, c.right, c.height, m.x))
-        checar(c.top <= m.top + 1 and abs(c.top - m.top) < 2, "%s: topo alinhado com o menu" % nome)
+        # (layout novo: o botão de menu fica à esquerda e o chip do GPS ao lado dele)
+        checar(c.x >= m.right and c.right <= tela.width, "%s: chip (%.0f..%.0f, alt %.0f) ao lado do menu (ate x=%.0f) e dentro da tela"
+               % (nome, c.x, c.right, c.height, m.right))
+        checar(c.top <= m.top + 1, "%s: chip nao passa do topo do menu" % nome)
         foto(nome)
     return f
 

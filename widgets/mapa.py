@@ -77,6 +77,7 @@ ZOOM_LUGARES = 16.5
 CONF_POR_ZOOM = ((18.3, 0.75), (17.5, 0.86), (16.5, 0.94))   # (zoom mínimo, confiança mínima)
 MAX_CELULAS_LUGARES = 24
 # (16 enchia a tela de semáforos no centro da cidade, andando livre)
+ZOOM_RADARES = 14.5        # radares aparecem bem antes
 ZOOM_SINAIS = 17.0         # fora da navegação, semáforos e lombadas a partir desse zoom
 MAX_SINAIS = 40
 
@@ -218,6 +219,7 @@ class MapaHUD(Widget):
         self._sinais = []                     # [(x local, y local, Translate)]
         self._icones = {}                     # (lat, lon) -> (grupo, Translate)
         self.sinais_rota = None               # navegando: só os do caminho [(lat, lon, tipo)]
+        self.marcos = []                      # pinos fixos: [(lat, lon, "casa"/"trabalho")]
         self._g_rotulos = InstructionGroup()  # nomes, em coordenadas de tela
         self.canvas.add(self._g_rotulos)
         self._g_tela = InstructionGroup()     # seta e destino
@@ -681,7 +683,38 @@ class MapaHUD(Widget):
         g, tr = InstructionGroup(), Translate(0, 0)
         g.add(PushMatrix())
         g.add(tr)
-        if tipo == "semaforo":  # caixinha escura com as três luzes
+        if tipo in ("casa", "trabalho"):
+            # pino do atalho (como o da casa no Waze): gota na cor do app com o desenho dentro
+            cor, fundo = tema.CIANO, tema.FUNDO
+            g.add(Color(*tema.com_alfa(fundo, 0.9)))
+            g.add(Ellipse(pos=(-dp(17), -dp(3)), size=(dp(34), dp(34))))
+            g.add(Color(*cor))
+            g.add(Ellipse(pos=(-dp(14.5), -dp(0.5)), size=(dp(29), dp(29))))
+            g.add(Mesh(vertices=[-dp(7), dp(3), 0, 0, dp(7), dp(3), 0, 0, 0, -dp(9), 0, 0],
+                       indices=[0, 1, 2], mode="triangles"))                 # a ponta da gota
+            g.add(Color(*fundo))
+            if tipo == "casa":
+                g.add(Mesh(vertices=[-dp(8), dp(14), 0, 0, dp(8), dp(14), 0, 0, 0, dp(22), 0, 0],
+                           indices=[0, 1, 2], mode="triangles"))             # telhado
+                g.add(Rectangle(pos=(-dp(5.5), dp(6)), size=(dp(11), dp(8.5))))
+            else:
+                g.add(Rectangle(pos=(-dp(8), dp(7)), size=(dp(16), dp(11))))  # maleta
+                g.add(Line(points=[-dp(3.5), dp(18), -dp(3.5), dp(21.5), dp(3.5), dp(21.5), dp(3.5), dp(18)],
+                           width=dp(1.3)))
+        elif sinais.e_radar(tipo):
+            # placa de limite: disco branco, aro vermelho e o número (ou "R" sem limite informado)
+            g.add(Color(0.85, 0.10, 0.16, 1))
+            g.add(Ellipse(pos=(-dp(13), -dp(13)), size=(dp(26), dp(26))))
+            g.add(Color(1, 1, 1, 1))
+            g.add(Ellipse(pos=(-dp(9.5), -dp(9.5)), size=(dp(19), dp(19))))
+            limite = sinais.limite_do_radar(tipo)
+            rotulo = CoreLabel(text=str(limite) if limite else "R", font_size=sp(11), bold=True,
+                               color=(0.05, 0.07, 0.10, 1))
+            rotulo.refresh()
+            tw, th = rotulo.texture.size
+            g.add(Color(1, 1, 1, 1))
+            g.add(Rectangle(texture=rotulo.texture, size=(tw, th), pos=(-tw / 2.0, -th / 2.0)))
+        elif tipo == "semaforo":  # caixinha escura com as três luzes
             g.add(Color(0.02, 0.03, 0.05, 0.95))
             g.add(RoundedRectangle(pos=(-dp(5), -dp(11)), size=(dp(10), dp(22)), radius=[dp(3)]))
             for k, cor in enumerate(((0.95, 0.25, 0.25, 1), (1.0, 0.78, 0.2, 1), (0.25, 0.9, 0.45, 1))):
@@ -702,7 +735,7 @@ class MapaHUD(Widget):
         """Ícones dos semáforos/lombadas à vista (de perto: de longe poluiria)."""
         self._g_sinais.clear()
         self._sinais = []
-        if self.sinais_rota is None and self.zoom < ZOOM_SINAIS:
+        if self.sinais_rota is None and self.zoom < ZOOM_RADARES and not self.marcos:
             return
         cantos = [self._local_para_geo(*self._tela_para_local(px, py))
                   for px, py in ((self.x, self.y), (self.right, self.y), (self.x, self.top),
@@ -711,11 +744,17 @@ class MapaHUD(Widget):
         if len(self._icones) > 400:
             self._icones.clear()
         postos = []
+        la0, la1, lo0, lo1 = min(lats), max(lats), min(lons), max(lons)
         if self.sinais_rota is not None:
-            la0, la1, lo0, lo1 = min(lats), max(lats), min(lons), max(lons)
             fonte = [p for p in self.sinais_rota if la0 <= p[0] <= la1 and lo0 <= p[1] <= lo1]
+        elif self.zoom < ZOOM_RADARES:
+            fonte = []
         else:
-            fonte = sinais.na_caixa(min(lats), min(lons), max(lats), max(lons), 300)
+            # de mais longe só os radares (são poucos e importam); semáforo e lombada, de perto
+            fonte = sinais.na_caixa(min(lats), min(lons), max(lats), max(lons), 300,
+                                    so_radares=self.zoom < ZOOM_SINAIS)
+        # Casa e Trabalho: sempre à vista (são referência), por cima dos outros
+        fonte = list(fonte) + [p for p in self.marcos if la0 <= p[0] <= la1 and lo0 <= p[1] <= lo1]
         for lat, lon, tipo in fonte:
             if len(postos) >= MAX_SINAIS:
                 break
@@ -724,9 +763,9 @@ class MapaHUD(Widget):
             if any(t == tipo and abs(sx - x) < dp(30) and abs(sy - y) < dp(30) for x, y, t in postos):
                 continue
             postos.append((sx, sy, tipo))
-            item = self._icones.get((lat, lon))
+            item = self._icones.get((lat, lon, tipo))
             if item is None:
-                item = self._icones[(lat, lon)] = self._icone(tipo)
+                item = self._icones[(lat, lon, tipo)] = self._icone(tipo)
             self._g_sinais.add(item[0])
             lx, ly = self._local(lat, lon)
             self._sinais.append((lx, ly, item[1]))

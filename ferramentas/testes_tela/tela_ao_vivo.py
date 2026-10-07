@@ -102,7 +102,7 @@ def livre(dt):
     app().ajustes["corridas_abertas"] = []
     checar(not botoes("Gravar viagem"), "modo livre sem botao de gravar")
     checar(app().viagem.estado == Viagem.PARADA, "andando livre nao grava")
-    checar(tela().col_dist.rotulo.text == "hoje", "barra livre mostra o total de hoje")
+    checar(tela().busca.parent is not None and tela().menu.icone == "menu", "modo livre: folha com a busca e um botao de menu")
     foto("50_livre_sem_gravar")
     app().escolher_destino({"nome": "Destino teste", "endereco": "", "lat": -16.7310, "lon": -49.3050})
 

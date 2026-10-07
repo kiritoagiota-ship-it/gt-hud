@@ -132,7 +132,8 @@ def gerar_sinais(caminho):
     caixa = "(%s,%s,%s,%s)" % (lat0, lon0, lat1, lon1)
     consulta = ("[out:json][timeout:180];(node[\"highway\"=\"traffic_signals\"]%s;"
                 "node[\"highway\"=\"crossing\"][\"crossing\"=\"traffic_signals\"]%s;"
-                "node[\"traffic_calming\"]%s;);out body;" % (caixa, caixa, caixa))
+                "node[\"traffic_calming\"]%s;node[\"highway\"=\"speed_camera\"]%s;);out body;"
+                % (caixa, caixa, caixa, caixa))
     pedido = urllib.request.Request(OVERPASS, data=urllib.parse.urlencode({"data": consulta}).encode(),
                                     headers={"User-Agent": "GT-HUD/1.0 (app pessoal de bike)"})
     try:
@@ -142,16 +143,20 @@ def gerar_sinais(caminho):
     except ImportError:
         ctx = None
     dados = json.loads(urllib.request.urlopen(pedido, context=ctx, timeout=300).read())
-    semaforos, lombadas = [], []
+    semaforos, lombadas, radares = [], [], []
     for e in dados["elements"]:
         t = e.get("tags", {})
         ponto = [round(e["lat"], 6), round(e["lon"], 6)]
-        if t.get("traffic_calming") in ("hump", "bump", "table", "cushion", "yes"):
+        if t.get("highway") == "speed_camera":
+            numero = "".join(c for c in str(t.get("maxspeed", "")).split(" ")[0] if c.isdigit())
+            radares.append(ponto + [int(numero) if numero else 0])   # 0 = limite não informado
+        elif t.get("traffic_calming") in ("hump", "bump", "table", "cushion", "yes"):
             lombadas.append(ponto)
         elif t.get("highway") == "traffic_signals" or t.get("crossing") == "traffic_signals":
             semaforos.append(ponto)
     with open(caminho, "w", encoding="utf-8") as f:
-        json.dump({"semaforos": semaforos, "lombadas": lombadas}, f, separators=(",", ":"))
+        json.dump({"semaforos": semaforos, "lombadas": lombadas, "radares": radares}, f,
+                  separators=(",", ":"))
     return len(semaforos), len(lombadas)
 
 

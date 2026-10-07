@@ -16,7 +16,9 @@ from kivy.clock import Clock
 from kivy.graphics import Color, Ellipse, Line, RoundedRectangle
 from kivy.metrics import dp, sp
 from kivy.properties import NumericProperty
+from kivy.uix.behaviors import ButtonBehavior
 from kivy.uix.boxlayout import BoxLayout
+from kivy.uix.scrollview import ScrollView
 from kivy.uix.floatlayout import FloatLayout
 from kivy.uix.label import Label
 from kivy.uix.screenmanager import Screen
@@ -24,6 +26,7 @@ from kivy.uix.widget import Widget
 
 import android_utils
 import busca
+import sinais
 import goiania
 import tema
 from falas import texto_manobra
@@ -152,6 +155,36 @@ class Coluna(BoxLayout):
         self.add_widget(self.rotulo)
 
 
+class CampoBusca(ButtonBehavior, Widget):
+    """O "Para onde?" da folha de baixo: parece um campo de busca (lupa +
+    texto), mas é um botão que abre a tela de busca."""
+
+    def __init__(self, **kw):
+        super().__init__(**kw)
+        self.lbl = Label(text="Para onde?", font_size=tema.T_BOTAO, color=tema.CIANO_FRACO,
+                         halign="left", valign="middle")
+        self.add_widget(self.lbl)
+        self.bind(pos=self._d, size=self._d, state=self._d)
+
+    def on_press(self):
+        from widgets.botao import vibrar_toque
+        vibrar_toque()
+
+    def _d(self, *a):
+        from widgets import icones
+        x, y, w, h = self.x, self.y, self.width, self.height
+        self.lbl.pos, self.lbl.size = (x + dp(50), y), (max(0, w - dp(60)), h)
+        self.lbl.text_size = self.lbl.size
+        tocado = self.state == "down"
+        self.canvas.before.clear()
+        with self.canvas.before:
+            Color(*tema.com_alfa(tema.CIANO, 0.22 if tocado else 0.10))
+            RoundedRectangle(pos=(x, y), size=(w, h), radius=[h / 2.0])
+            Color(*tema.com_alfa(tema.CIANO, 0.9 if tocado else 0.55))
+            Line(rounded_rectangle=(x, y, w, h, h / 2.0), width=dp(1.2))
+            icones.desenhar("lupa", x + dp(27), y + h / 2.0, dp(22), tema.CIANO)
+
+
 class TelaMapa(Screen):
     def __init__(self, **kw):
         super().__init__(**kw)
@@ -171,15 +204,20 @@ class TelaMapa(Screen):
         self.raiz.add_widget(self.mapa)
         self.mapa.bind(seguindo=lambda *a: self._montar())
 
-        # --- livre: busca, status do GPS e menu ---
-        self.busca = BotaoHUD(text="Para onde, senhor?", destaque=True, size_hint=(None, None),
-                              on_release=lambda *a: app.abrir("busca"))
+        # --- livre (organizado como o Waze, a pedido do dono): UM botão de menu
+        # em cima, o mapa livre, e embaixo uma folha com a busca e os atalhos.
+        # O aviso do GPS só aparece quando há algo a dizer (sinal bom: nada).
+        self.menu = BotaoHUD(text="", icone="menu", opaco=True, size_hint=(None, None),
+                             on_release=lambda *a: self._abrir_menu())
         self.status = ChipStatus()
         self.ponto, self.lbl_gps = self.status.ponto, self.status.lbl
-        self.menu = BoxLayout(size_hint=(None, None), spacing=dp(6))
-        for texto, tela in (("Painel", "hud"), ("Viagens", "viagens"), ("Ajustes", "config")):
-            self.menu.add_widget(BotaoHUD(text=texto, font_size=tema.T_ROTULO + 1, opaco=True,
-                                          on_release=lambda *a, t=tela: app.abrir(t)))
+        self._gps_a_vista = True
+        self.busca = CampoBusca(size_hint_y=None, height=dp(52),
+                                on_release=lambda *a: app.abrir("busca"))
+        self.atalhos = BoxLayout(size_hint=(None, None), height=dp(44), spacing=dp(8))
+        self.atalhos.bind(minimum_width=self.atalhos.setter("width"))
+        rolagem = ScrollView(do_scroll_y=False, bar_width=0, size_hint_y=None, height=dp(44))
+        rolagem.add_widget(self.atalhos)
 
         # --- navegando: faixa da manobra, "depois", subida ---
         self.faixa = PainelHUD(size_hint=(None, None))
@@ -216,13 +254,10 @@ class TelaMapa(Screen):
                                   on_release=lambda *a: self.mapa.mudar_zoom(-1))
         self.lbl_msg = Aviso(text="", font_size=tema.T_ROTULO + 1, bold=True, size_hint=(None, None))
 
-        # --- barra de baixo: livre (viagem) ---
-        self.barra_livre = PainelHUD(size_hint=(None, None))
-        self.col_dist = Coluna("Distância")
-        self.col_tempo = Coluna("Tempo")
-        self.controles = BoxLayout(spacing=dp(8), size_hint_x=1.6)
-        for w in (self.col_dist, self.col_tempo, self.controles):
-            self.barra_livre.add_widget(w)
+        # --- folha de baixo: livre (busca + atalhos) ---
+        self.barra_livre = PainelHUD(orientation="vertical", size_hint=(None, None), spacing=dp(8))
+        self.barra_livre.add_widget(self.busca)
+        self.barra_livre.add_widget(rolagem)
 
         # --- barra de baixo: navegando ---
         self.barra_nav = PainelHUD(size_hint=(None, None))
@@ -321,8 +356,8 @@ class TelaMapa(Screen):
             self._ouvindo = True
         self.mapa.girar = app.ajustes["girar_mapa"]
         self.disco.velo.limite = app.ajustes["limite_kmh"]
-        self._montar_controles()
-        self._atualizar_viagem()
+        self._montar_atalhos()
+        self._tique(0)
         if self._ev_tique is None:
             self._ev_tique = Clock.schedule_interval(self._tique, 1.0)
         self.mapa.retomar()
@@ -343,6 +378,7 @@ class TelaMapa(Screen):
         self.mapa.definir_rota([])
         self.mapa.definir_destino(None)
         self.mapa.recentralizar()
+        self._montar_atalhos()
         self._montar()
         if mensagem:
             self.mensagem(mensagem, cor or tema.VERDE)
@@ -495,15 +531,16 @@ class TelaMapa(Screen):
         visiveis = [self.mapa, self.disco, self.lbl_msg, self.btn_mais, self.btn_menos]
         if not self.mapa.seguindo:
             visiveis.append(self.btn_centro)
+        gps = [self.status] if self._gps_a_vista else []
         if self.estado == LIVRE and self._marca is not None:
-            visiveis += [self.busca, self.status, self.menu, self.card_marca]
+            visiveis += gps + [self.menu, self.card_marca]
             visiveis.remove(self.disco)
         elif self.estado == LIVRE:
-            visiveis += [self.busca, self.status, self.menu, self.barra_livre]
+            visiveis += gps + [self.menu, self.barra_livre]
             if self._resumo:
                 visiveis.append(self.card_resumo)
         elif self.estado == PREVIA:
-            visiveis += [self.status, self.card]
+            visiveis += gps + [self.card]
             visiveis.remove(self.disco)
         else:
             visiveis += [self.faixa, self.barra_nav]
@@ -543,7 +580,7 @@ class TelaMapa(Screen):
         deitada = W > H
         topo = H - m
         tam_velo = dp(124) if deitada else dp(150)
-        alt_barra = dp(76)
+        alt_barra = dp(132) if self.estado == LIVRE else dp(76)   # livre: folha com busca + atalhos
 
         # barra de baixo e velocímetro
         if deitada:
@@ -553,20 +590,19 @@ class TelaMapa(Screen):
             bx, bw = m, W - 2 * m
             self.disco.pos = (m, m + alt_barra + m)
         self.disco.size = (tam_velo, tam_velo)
-        for barra in (self.barra_livre, self.barra_nav):
-            barra.pos, barra.size = (bx, m), (bw, alt_barra)
+        self.barra_livre.pos, self.barra_livre.size = (bx, m), (bw, dp(132))
+        self.barra_nav.pos, self.barra_nav.size = (bx, m), (bw, dp(76))
 
         # topo
         larg_topo = min(W - 2 * m, dp(480))
         col = larg_topo
         if deitada:  # coluna da esquerda (curva, avisos); o mapa fica com a direita
             col = min(W * 0.42, dp(400))
-        self.busca.pos, self.busca.size = (m, topo - dp(54)), (larg_topo, dp(54))
-        larg_menu = 3 * dp(74) + 2 * dp(6)
-        self.menu.pos, self.menu.size = (W - m - larg_menu, topo - dp(54) - m - dp(40)), (larg_menu, dp(40))
-        self.status.x = m
-        self.status.topo_alvo = topo - dp(54) - m
-        self.status.largura_max = W - 3 * m - larg_menu
+        lado_menu = dp(56)
+        self.menu.pos, self.menu.size = (m, topo - lado_menu), (lado_menu, lado_menu)
+        self.status.x = m + lado_menu + m
+        self.status.topo_alvo = topo - dp(8)
+        self.status.largura_max = W - 3 * m - lado_menu
         self.faixa.pos, self.faixa.size = (m, topo - dp(132)), (col, dp(132))
         self.depois.pos, self.depois.size = (m, topo - dp(132) - dp(6) - dp(38)), (dp(118), dp(38))
         larg_chip = min(col, dp(330))
@@ -577,6 +613,7 @@ class TelaMapa(Screen):
         y_alerta = y_chip - (dp(50) if self._tem_subida else 0)
         self.chip_alerta.pos, self.chip_alerta.size = (m, y_alerta), (min(larg_chip, dp(250)), dp(44))
         if self.estado == PREVIA:
+            self.status.x = m
             self.status.topo_alvo = topo
             self.status.largura_max = W - 2 * m
 
@@ -667,6 +704,7 @@ class TelaMapa(Screen):
 
         def salvar(nome):
             App.get_running_app().salvar_lugar(nome, lat, lon)
+            self._montar_atalhos()   # o lugar novo já vira ficha na folha de baixo
             self._fechar_marca()
             self.mensagem("Salvo! Ache em \"Para onde, senhor?\"", tema.VERDE)
         # já sugere o lugar conhecido naquele ponto, se houver
@@ -705,30 +743,46 @@ class TelaMapa(Screen):
         self._pintar_vivo()
 
     # --- viagem (modo livre) --------------------------------------------------------
-    def _montar_controles(self):
-        v = App.get_running_app().viagem
-        c = self.controles
-        c.clear_widgets()
-        if v.estado == Viagem.PARADA:
-            # sem botão de gravar (pedido do dono, 06/10/2026): a viagem grava
-            # sozinha em toda rota iniciada, e só nelas
-            aviso = Texto(text="Toda rota iniciada\né gravada sozinha", font_size=tema.T_ROTULO,
-                          color=tema.CIANO_FRACO, halign="center")
-            c.add_widget(aviso)
-        self._estado_viagem = v.estado
-
-    def _atualizar_viagem(self):
+    def _montar_atalhos(self):
+        """Fichas da folha de baixo: Casa, Trabalho e os lugares salvos (um
+        toque traça a rota). E os pinos de Casa/Trabalho no mapa."""
         app = App.get_running_app()
-        v = app.viagem
-        if v.estado == Viagem.PARADA:   # andando livre: o total das rotas de hoje
-            metros, segundos = app.resumo_de_hoje()
-            self.col_dist.valor.text, self.col_dist.rotulo.text = fmt_dist(metros), "hoje"
-            self.col_tempo.valor.text, self.col_tempo.rotulo.text = fmt_tempo(segundos), "andando hoje"
-        else:
-            self.col_dist.valor.text, self.col_dist.rotulo.text = fmt_dist(v.distancia_m), "Distância"
-            self.col_tempo.valor.text, self.col_tempo.rotulo.text = fmt_tempo(v.tempo_total_s), "Tempo"
-        if v.estado != getattr(self, "_estado_viagem", None):
-            self._montar_controles()  # a pausa automática mudou o estado
+        guardados = app.ajustes["atalhos"]
+        self.atalhos.clear_widgets()
+
+        def ficha(texto, ao_tocar, definido=True):
+            b = BotaoHUD(text=texto, font_size=tema.T_ROTULO + 2, size_hint=(None, 1), opaco=True,
+                         cor=tema.CIANO if definido else tema.CIANO_FRACO, on_release=lambda *a: ao_tocar())
+            b.width = max(dp(84), dp(26) + len(texto) * tema.T_ROTULO * 0.68)
+            self.atalhos.add_widget(b)
+        for chave, nome in (("casa", "Casa"), ("trabalho", "Trabalho")):
+            lugar = guardados.get(chave)
+            if lugar is not None:
+                ficha(nome, lambda l=lugar: app.escolher_destino(dict(l, fonte="salvo")))
+            else:
+                ficha("+ " + nome, lambda c=chave: self._definir_atalho(c), definido=False)
+        nos_atalhos = list(guardados.values())
+        for lugar in app.salvos[:8]:
+            if not any(app.mesmo_lugar(lugar, a) for a in nos_atalhos):
+                ficha(lugar["nome"][:22], lambda l=lugar: app.escolher_destino(dict(l, fonte="salvo")))
+        self.mapa.marcos = [(l["lat"], l["lon"], chave) for chave, l in guardados.items()
+                            if chave in ("casa", "trabalho")]
+        self.mapa._pedir_rotulos()
+
+    def _definir_atalho(self, chave):
+        app = App.get_running_app()
+        app.abrir("busca")
+        Clock.schedule_once(lambda dt: app.sm.get_screen("busca")._opcoes_atalho(chave), 0.35)
+
+    def _abrir_menu(self):
+        app = App.get_running_app()
+        metros, segundos = app.resumo_de_hoje()
+        hoje = "Hoje: %s em %s andando." % (fmt_dist(metros), fmt_tempo(segundos)) if metros else \
+            "Nenhuma rota hoje ainda. Toda rota iniciada é gravada sozinha."
+        escolher("GT-HUD", [("Painel (velocímetro grande)", lambda: app.abrir("hud")),
+                            ("Viagens", lambda: app.abrir("viagens")),
+                            ("Ajustes", lambda: app.abrir("config")),
+                            ("Fechar", None)], texto=hoje)
 
     def _encerrar(self):
         if not self._confirmando_fim:
@@ -758,7 +812,6 @@ class TelaMapa(Screen):
             if agora - self._t_trilha >= TRILHA_A_CADA_S:
                 self._t_trilha = agora
                 self.mapa.definir_trilha([(p[0], p[1]) for p in app.viagem.pontos])
-        self._atualizar_viagem()
 
     def _tique(self, dt):
         app = App.get_running_app()
@@ -768,7 +821,12 @@ class TelaMapa(Screen):
         if not app.sinal_ok():
             self.disco.velo.velocidade = 0
             self.disco.velo.alerta = False
-        self._atualizar_viagem()
+        # GPS bom: o aviso some (menos coisa na tela); aparece no simulador,
+        # com sinal fraco, sem sinal ou com o GPS desligado
+        a_vista = not (app.sinal_ok() and app.gps.modo == "GPS" and not app.gps_desligado)
+        if a_vista != self._gps_a_vista:
+            self._gps_a_vista = a_vista
+            self._montar()
 
     def _atualizar_navegacao(self, e):
         m = e["manobra"]
@@ -813,9 +871,13 @@ class TelaMapa(Screen):
                                                                   fmt_dist_nav(s["falta_m"]))
         a = e.get("alerta")
         if a is not None:
-            self.lbl_alerta.text = "%s em %s" % ("Semáforo" if a["tipo"] == "semaforo" else "Lombada",
-                                                 fmt_dist_nav(a["em_m"]))
-            self.chip_alerta.cor_borda = tema.VERMELHO if a["tipo"] == "semaforo" else tema.LARANJA
+            if sinais.e_radar(a["tipo"]):
+                limite = sinais.limite_do_radar(a["tipo"])
+                nome = "Radar %d km/h" % limite if limite else "Radar"
+            else:
+                nome = "Semáforo" if a["tipo"] == "semaforo" else "Lombada"
+            self.lbl_alerta.text = "%s em %s" % (nome, fmt_dist_nav(a["em_m"]))
+            self.chip_alerta.cor_borda = tema.LARANJA if a["tipo"] == "lombada" else tema.VERMELHO
         tem = (depois is not None, s is not None, a is not None)
         if tem != (self._tem_depois, self._tem_subida, self._tem_alerta):
             self._tem_depois, self._tem_subida, self._tem_alerta = tem

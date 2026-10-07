@@ -46,4 +46,13 @@ def desenhar(nome, cx, cy, tam, cor):
             Line(circle=(cx, cy, raio, 230, 310), width=grosso, cap="round")    # esquerda
 
 
-NOMES = ("mais", "menos", "centralizar", "rotas", "vivo")
+    elif nome == "menu":
+        for k in (-1, 0, 1):
+            Line(points=[cx - r * 0.8, cy + k * r * 0.55, cx + r * 0.8, cy + k * r * 0.55],
+                 width=grosso, cap="round")
+    elif nome == "lupa":
+        Line(circle=(cx - r * 0.15, cy + r * 0.15, r * 0.6), width=grosso)
+        Line(points=[cx + r * 0.3, cy - r * 0.3, cx + r * 0.9, cy - r * 0.9], width=grosso, cap="round")
+
+
+NOMES = ("mais", "menos", "centralizar", "rotas", "vivo", "menu", "lupa")

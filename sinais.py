@@ -1,5 +1,8 @@
-"""Semáforos e lombadas de Goiânia (dados/goiania_sinais.json, do
+"""Semáforos, lombadas e radares de Goiânia (dados/goiania_sinais.json, do
 OpenStreetMap, gerado por ferramentas/gerar_goiania.py).
+
+Os tipos: "semaforo", "lombada" e "radarNN" (NN = limite em km/h; "radar0"
+quando o mapa não informa o limite). Use e_radar() e limite_do_radar().
 
 - ao_longo(rota): os que ficam EM CIMA da rota, com a distância desde o
   começo (a navegação avisa "Semáforo à frente" / "Lombada à frente").
@@ -33,16 +36,35 @@ def _carregar():
     for tipo, chave in (("semaforo", "semaforos"), ("lombada", "lombadas")):
         for lat, lon in dados.get(chave, []):
             _grade.setdefault((int(lat // CELULA), int(lon // CELULA)), []).append((lat, lon, tipo))
+    for lat, lon, limite in dados.get("radares", []):
+        _grade.setdefault((int(lat // CELULA), int(lon // CELULA)), []).append(
+            (lat, lon, "radar%d" % limite))
     return _grade
 
 
-def na_caixa(lat0, lon0, lat1, lon1, limite=80):
+def e_radar(tipo):
+    return tipo.startswith("radar")
+
+
+def limite_do_radar(tipo):
+    """km/h do radar, ou 0 se o mapa não informa."""
+    try:
+        return int(tipo[5:])
+    except ValueError:
+        return 0
+
+
+def na_caixa(lat0, lon0, lat1, lon1, limite=80, so_radares=False):
     """[(lat, lon, tipo)] dentro do retângulo (no máximo `limite`)."""
     grade = _carregar()
     achados = []
+    if (lat1 - lat0) / CELULA * ((lon1 - lon0) / CELULA) > 40000:
+        return achados   # área grande demais (mapa muito de longe)
     for i in range(int(lat0 // CELULA), int(lat1 // CELULA) + 1):
         for j in range(int(lon0 // CELULA), int(lon1 // CELULA) + 1):
             for p in grade.get((i, j), ()):
+                if so_radares and not e_radar(p[2]):
+                    continue
                 if lat0 <= p[0] <= lat1 and lon0 <= p[1] <= lon1:
                     achados.append(p)
                     if len(achados) >= limite:
