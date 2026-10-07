@@ -27,6 +27,7 @@ import time
 
 from kivy.clock import Clock
 from kivy.core.text import Label as CoreLabel
+from kivy.animation import Animation
 from kivy.graphics import (Color, Ellipse, InstructionGroup, Line, Mesh, PopMatrix,
                            PushMatrix, Rectangle, Rotate, RoundedRectangle, Scale, Translate)
 from kivy.metrics import Metrics, dp, sp
@@ -40,6 +41,7 @@ import rede
 import sinais
 import tema
 from diagnostico import seguro
+from widgets import icones_mapa
 from mapa_vetor import (AREAS, FUNDO, RUAS, SETAS, FonteVetorial, _Malha, chave_nome, legenda_se_precisa,
                         nivel_de_desenho, origem_padrao, tela_animando, tiles_do_retangulo, z_dados)
 
@@ -49,6 +51,7 @@ TAM = 256.0
 MAX_ROTULOS_RUA = 30
 MAX_ROTULOS_LUGAR = 8
 MAX_ROTULOS_POI = 14
+DIST_NOME_DP = 15          # do centro do emblema do lugar até o começo do nome
 # cor da bolinha de cada tipo de lugar (o nome sai num tom mais claro da mesma cor)
 CORES_POI = {
     "praca": (0.40, 0.90, 0.55, 1), "comida": (1.0, 0.62, 0.25, 1), "compras": (1.0, 0.86, 0.35, 1),
@@ -139,31 +142,37 @@ def _dif_angulo(de, para):
 
 
 class _Rotulo:
-    """Um nome desenhado na tela (posição/ângulo atualizados a cada quadro)."""
+    """Um nome desenhado na tela (posição/ângulo atualizados a cada quadro).
+    Lugar (ponto != None) ganha o emblema da categoria antes do nome, e os
+    dois surgem com um pequeno "pulo" (não aparecem do nada)."""
 
     def __init__(self, info, textura, ponto=None):
         self.info = info
         self.textura = textura
         self.grupo = InstructionGroup()
-        if ponto is not None:
-            self.grupo.add(Color(*FUNDO))   # aro escuro: a bolinha aparece em cima de qualquer cor
-            self.aro = Ellipse(size=(dp(15), dp(15)))
-            self.grupo.add(self.aro)
-            self.grupo.add(Color(*ponto))
-            self.bolinha = Ellipse(size=(dp(11), dp(11)))
-            self.grupo.add(self.bolinha)
-        else:
-            self.bolinha = None
-        self.grupo.add(Color(1, 1, 1, 1))
+        self.bolinha = None
         self.grupo.add(PushMatrix())
         self.mover = Translate(0, 0)
         self.girar = Rotate(angle=0, axis=(0, 0, 1))
         self.grupo.add(self.mover)
         self.grupo.add(self.girar)
         w, h = textura.size
-        deslocar = dp(11) if ponto is not None else -w / 2.0
+        deslocar = -w / 2.0
+        if ponto is not None:
+            self.icone = icones_mapa.qual_icone(info.get("grupo"), info.get("texto"))
+            self.grupo.add(PushMatrix())
+            self.cresce = Scale(0.2, 0.2, 1)
+            self.grupo.add(self.cresce)
+            self.grupo.add(icones_mapa.emblema(self.icone, ponto, FUNDO))
+            self.grupo.add(PopMatrix())
+            Animation(x=1.0, y=1.0, d=0.26, t="out_back").start(self.cresce)
+            deslocar = dp(DIST_NOME_DP)
+        self.cor = Color(1, 1, 1, 0.0)
+        self.grupo.add(self.cor)
         self.grupo.add(Rectangle(texture=textura, size=(w, h), pos=(deslocar, -h / 2.0)))
         self.grupo.add(PopMatrix())
+        Animation(a=1.0, d=0.22, t="out_quad").start(self.cor)
+        self.caixa_nome = (deslocar, -h / 2.0, deslocar + w, h / 2.0)   # em volta do ponto: para o toque
 
 
 class MapaHUD(Widget):
@@ -229,6 +238,7 @@ class MapaHUD(Widget):
         self._ocorr_na_tela = []            # [(x local, y local, ocorrência)] com ícone à vista
         self._larg_geral = []               # linhas dos trechos lentos da cidade
         self.ao_tocar_ocorrencia = None     # ao_tocar_ocorrencia(ocorrência): toque no ícone
+        self.ao_tocar_lugar = None          # ao_tocar_lugar({nome, legenda, icone, lat, lon}): toque num lugar
         self._ev_segurar = None
         self._velocidade = (0.0, 0.0)
         self._movs = []
@@ -416,6 +426,28 @@ class MapaHUD(Widget):
                   for px, py in ((self.x, self.y), (self.right, self.y), (self.x, self.top), (self.right, self.top))]
         return (min(c[0] for c in cantos), min(c[1] for c in cantos),
                 max(c[0] for c in cantos), max(c[1] for c in cantos))
+
+    def lugar_em(self, sx, sy):
+        """O lugar (comércio, praça...) desenhado no ponto (sx, sy) da tela, ou None."""
+        achado = None
+        for rot in self._rotulos:
+            r = rot.info
+            if r.get("tipo") != "poi":
+                continue
+            x, y = self._local_para_tela(r["x"], r["y"])
+            x0, y0, x1, y1 = rot.caixa_nome
+            d = math.hypot(sx - x, sy - y)
+            no_nome = x + x0 - dp(4) <= sx <= x + x1 + dp(4) and y + y0 - dp(8) <= sy <= y + y1 + dp(8)
+            if d <= dp(22) or no_nome:
+                if achado is None or d < achado[0]:
+                    achado = (d, rot)
+        if achado is None:
+            return None
+        rot = achado[1]
+        partes = rot.info["texto"].split(" · ")
+        lat, lon = self._local_para_geo(rot.info["x"], rot.info["y"])
+        return {"nome": partes[0], "legenda": partes[1] if len(partes) > 1 else "",
+                "icone": rot.icone, "lat": lat, "lon": lon}
 
     def definir_ocorrencias(self, ocorrencias):
         """O trânsito de Goiânia agora, mesmo sem rota (pedido do dono, 07/10/2026:
@@ -911,7 +943,7 @@ class MapaHUD(Widget):
             w, h = tex.size
             c, sn = abs(math.cos(math.radians(ang))), abs(math.sin(math.radians(ang)))
             bw, bh = w * c + h * sn + dp(6), w * sn + h * c + dp(6)
-            cx_ = sx + (w / 2.0 + dp(11) if ponto else 0)
+            cx_ = sx + (w / 2.0 + dp(DIST_NOME_DP) if ponto else 0)
             caixa = (cx_ - bw / 2, sy - bh / 2, cx_ + bw / 2, sy + bh / 2)
             if any(caixa[0] < o[2] and o[0] < caixa[2] and caixa[1] < o[3] and o[1] < caixa[3]
                    for o in ocupados):
@@ -1133,9 +1165,6 @@ class MapaHUD(Widget):
             if r["tipo"] == "rua":
                 ang = math.degrees(r["ang"]) + self.rotacao
                 rot.girar.angle = (ang + 90.0) % 180.0 - 90.0
-            if rot.bolinha is not None:
-                rot.bolinha.pos = (sx - dp(5.5), sy - dp(5.5))
-                rot.aro.pos = (sx - dp(7.5), sy - dp(7.5))
 
     # --- rota, trilha, destino e seta ---------------------------------------------
     def _refazer_linhas(self, so_trilha=False):
@@ -1632,6 +1661,15 @@ class MapaHUD(Widget):
             if perto is not None:
                 self._movs = []
                 self.ao_tocar_ocorrencia(perto[1])
+                return True
+        # ... ou em cima de um lugar (o emblema ou o nome): abre o cartão dele
+        if (self.ao_tocar_lugar is not None and not self._toques and inicio
+                and math.hypot(touch.x - inicio[0], touch.y - inicio[1]) < dp(12)
+                and time.time() - touch.time_start < 0.5):
+            lugar = self.lugar_em(touch.x, touch.y)
+            if lugar is not None:
+                self._movs = []
+                self.ao_tocar_lugar(lugar)
                 return True
         # inércia: continua deslizando na velocidade dos últimos movimentos
         agora = time.time()

@@ -362,6 +362,7 @@ class TelaMapa(Screen):
         self.card_marca.add_widget(botoes_marca)
         self.mapa.ao_segurar = self._ao_segurar
         self.mapa.ao_tocar_ocorrencia = self._ver_ocorrencia
+        self.mapa.ao_tocar_lugar = self._ver_lugar
 
         self.add_widget(self.raiz)
         self.bind(size=self._posicionar)
@@ -780,6 +781,26 @@ class TelaMapa(Screen):
         self.mapa.areas_cobertas = [(w.x, w.y, w.right, w.top) for w in self.raiz.children
                                     if w is not self.mapa and w is not self.lbl_msg]
         self.mapa._aplicar()
+
+    # --- tocar num lugar do mapa (emblema ou nome) ---------------------------------------
+    def _ver_lugar(self, lugar):
+        """Cartão do lugar tocado: o que é, a que distância, e ir/salvar."""
+        if self.estado != LIVRE:
+            return   # na prévia e na navegação o toque no mapa é só para olhar
+        from widgets import icones_mapa
+        app = App.get_running_app()
+        linhas = [lugar["legenda"].capitalize() if lugar["legenda"] else icones_mapa.NOMES.get(lugar["icone"], "Lugar")]
+        if app.posicao is not None:
+            from rota import distancia_m
+            linhas.append("A %s daqui, em linha reta." % fmt_dist(distancia_m(app.posicao, (lugar["lat"], lugar["lon"]))))
+        destino = {"nome": lugar["nome"], "endereco": "", "lat": lugar["lat"], "lon": lugar["lon"]}
+
+        def salvar():
+            app.salvar_lugar(lugar["nome"], lugar["lat"], lugar["lon"])
+            self._montar_atalhos()
+            self.mensagem("Salvo! Ache em \"Para onde?\"", tema.VERDE)
+        escolher(lugar["nome"], [("Ir para cá", lambda: app.escolher_destino(destino)),
+                                 ("Salvar", salvar), ("Fechar", None)], "\n".join(linhas))
 
     # --- trânsito ao vivo: tocar no ícone de uma ocorrência -----------------------------
     def _ver_ocorrencia(self, o):
