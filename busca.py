@@ -22,6 +22,7 @@ nenhuma base gratuita): colar aqui o que o Google Maps dá (lugar_colado):
   e endereço; o app procura esse endereço no mapa aberto (aproximado: a
   rua). Link antigo/longo com "@lat,lon" ou "!3d..!4d.." é exato.
 """
+import json
 import math
 import os
 import re
@@ -37,6 +38,7 @@ from rota import distancia_m
 
 GOOGLE = "https://places.googleapis.com/v1/places:searchText"
 PHOTON = "https://photon.komoot.io/api/"
+TOMTOM = "https://api.tomtom.com/search/2/search/"
 PACOTE = "org.kirito.gthud"
 CERT_SHA1 = "4E22C21B14BD3A119E9737C9C7E378CCBD5F569D"   # parte pública do certificado do APK
 BASE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "dados", "goiania_lugares.db")
@@ -299,7 +301,35 @@ def _google(texto, perto, chave):
     return lugares
 
 
-def buscar(texto, perto=None, salvos=()):
+# --- 5) TomTom (com a chave gratuita do dono, a mesma do trânsito ao vivo) -----------------
+def _tomtom(texto, perto, chave, baixar=None):
+    """Comércios e endereços da TomTom dentro do retângulo de Goiânia (pedido
+    do dono em 07/10/2026: a barbearia do amigo não está em base gratuita
+    nenhuma). Feito pela documentação da \"Fuzzy Search\" (v2)."""
+    lat0, lon0, lat1, lon1 = goiania.LIMITES
+    params = {"key": chave, "limit": MAX_RESULTADOS, "countrySet": "BR", "language": "pt-BR",
+              "topLeft": "%.5f,%.5f" % (lat1, lon0), "btmRight": "%.5f,%.5f" % (lat0, lon1),
+              "idxSet": "POI,PAD,Addr"}
+    if perto:
+        params.update(lat="%.5f" % perto[0], lon="%.5f" % perto[1])
+    url = TOMTOM + urllib.parse.quote(texto, safe="") + ".json?" + urllib.parse.urlencode(params)
+    dados = json.loads((baixar or rede.baixar)(url, 12).decode("utf-8"))
+    lugares = []
+    for r in dados.get("results") or []:
+        pos, end = r.get("position") or {}, r.get("address") or {}
+        if "lat" not in pos or not goiania.dentro(pos["lat"], pos["lon"]):
+            continue
+        endereco = (end.get("freeformAddress") or "").replace(", Brasil", "")
+        nome = (r.get("poi") or {}).get("name") or end.get("streetName") or endereco
+        if not nome:
+            continue
+        lugares.append({"nome": nome, "endereco": "" if endereco == nome else endereco[:90],
+                        "lat": pos["lat"], "lon": pos["lon"], "fonte": "TomTom",
+                        "nota": 30 if r.get("type") == "POI" else 14})
+    return lugares
+
+
+def buscar(texto, perto=None, salvos=(), chave_tomtom=None):
     """Chamada que espera a resposta (use rede.em_segundo_plano).
     Devolve [{nome, endereco, lat, lon, dist_m, fonte}], o melhor primeiro."""
     colado = lugar_colado(texto)
@@ -317,7 +347,14 @@ def buscar(texto, perto=None, salvos=()):
             lugares += _google(texto, perto, chave)
         except Exception as e:
             print("[busca] Google falhou:", e)
-    if len(lugares) < POUCOS or _PARECE_ENDERECO.search(normalizar(texto)):
+    falta = len(lugares) < POUCOS
+    chave_tomtom = chave_tomtom or chaves.chave("tomtom")
+    if falta and chave_tomtom:   # a base do app achou pouco: pergunta também à TomTom
+        try:
+            lugares += _tomtom(texto, perto, chave_tomtom)
+        except Exception as e:   # (sem o texto do erro: o endereço consultado leva a chave)
+            print("[busca] TomTom falhou:", type(e).__name__, getattr(e, "code", ""))
+    if falta or _PARECE_ENDERECO.search(normalizar(texto)):
         try:
             lugares += _photon(texto, perto)
         except Exception as e:  # sem internet: fica com o que já achou offline

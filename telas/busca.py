@@ -260,7 +260,8 @@ class TelaBusca(Screen):
         pedido = self._pedido
         self.lbl_status.text = "Buscando..."
         salvos = list(app.salvos)
-        rede.em_segundo_plano(lambda: busca.buscar(texto, app.posicao, salvos),
+        chave_tomtom = (app.ajustes["tomtom"] or "").strip() or None   # (sem ela, vale a que veio no APK)
+        rede.em_segundo_plano(lambda: busca.buscar(texto, app.posicao, salvos, chave_tomtom),
                               lambda lugares: self._resultados(lugares, pedido),
                               lambda erro: self._falhou(erro, pedido))
 

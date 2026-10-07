@@ -157,3 +157,28 @@ class TesteRadares(unittest.TestCase):
                 break
         self.assertIn("Radar de 40 à frente, reduza.", fala.textos())
         self.assertTrue(sinais.e_radar(estado["alerta"]["tipo"]))
+
+
+class TesteBuscaTomTom(unittest.TestCase):
+    def test_le_a_resposta_e_fica_so_com_goiania(self):
+        import json
+        pedidos = []
+        resposta = {"results": [
+            {"type": "POI", "poi": {"name": "Barbearia Imagem"}, "position": {"lat": -16.6190, "lon": -49.3201},
+             "address": {"freeformAddress": "Rua X 10, Goiânia, Brasil", "streetName": "Rua X"}},
+            {"type": "Point Address", "position": {"lat": -16.70, "lon": -49.26},
+             "address": {"freeformAddress": "Rua 9 250, Setor Oeste, Goiânia", "streetName": "Rua 9"}},
+            {"type": "POI", "poi": {"name": "Barbearia de Brasília"}, "position": {"lat": -15.79, "lon": -47.88},
+             "address": {"freeformAddress": "Brasília"}}]}
+
+        def baixar(url, timeout):
+            pedidos.append(url)
+            return json.dumps(resposta).encode("utf-8")
+        achados = busca._tomtom("barbearia imagem", CENTRO, "CHAVE", baixar)
+        self.assertEqual([a["nome"] for a in achados], ["Barbearia Imagem", "Rua 9"])
+        self.assertEqual(achados[0]["endereco"], "Rua X 10, Goiânia")
+        self.assertEqual((achados[0]["fonte"], achados[0]["nota"], achados[1]["nota"]), ("TomTom", 30, 14))
+        self.assertIn("/search/2/search/barbearia%20imagem.json?", pedidos[0])
+        self.assertIn("language=pt-BR", pedidos[0])
+        self.assertIn("topLeft=-16.48000%2C-49.45000", pedidos[0])
+        self.assertIn("btmRight=-16.86000%2C-49.07000", pedidos[0])
