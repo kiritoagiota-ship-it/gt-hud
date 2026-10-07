@@ -95,11 +95,13 @@ FUNDO = [0.118, 0.141, 0.188, 1]   # (lista: aplicar_tema troca o conteúdo no l
 # (a ordem é a do desenho: o prédio fica por cima do terreno)
 AREAS = {
     "residencial": (0.128, 0.153, 0.203, 1),
-    "comercial": (0.142, 0.152, 0.198, 1),
+    "comercial": (0.150, 0.158, 0.210, 1),
     "institucional": (0.150, 0.188, 0.275, 1),   # escola, faculdade, hospital: bloco azulado
-    "verde": (0.160, 0.385, 0.310, 1),           # praça, parque, campo
-    "agua": (0.150, 0.290, 0.560, 1),
-    "predio": (0.152, 0.180, 0.238, 1),
+    "verde": (0.148, 0.410, 0.318, 1),           # praça, parque, campo
+    "agua": (0.128, 0.330, 0.640, 1),
+    # (07/10/2026, pedido do dono de um mapa "mais rico": o prédio quase não se
+    # distinguia do chão; agora tem um degrau claro de brilho, como no Google escuro)
+    "predio": (0.178, 0.210, 0.278, 1),
 }
 # Tema claro (dia): mapa de fundo cinza-claro com ruas brancas e avenidas
 # amarelas, como os mapas de papel; o escuro são os valores deste arquivo.
@@ -110,8 +112,8 @@ _CLARO = {
     "fundo": (0.935, 0.938, 0.925, 1),
     "contorno": (0.775, 0.795, 0.815, 1),
     "areas": {"residencial": (0.948, 0.950, 0.938, 1), "comercial": (0.968, 0.948, 0.905, 1),
-              "institucional": (0.905, 0.920, 0.968, 1), "verde": (0.760, 0.895, 0.765, 1),
-              "agua": (0.640, 0.810, 0.955, 1), "predio": (0.868, 0.868, 0.850, 1)},
+              "institucional": (0.905, 0.920, 0.968, 1), "verde": (0.720, 0.880, 0.732, 1),
+              "agua": (0.600, 0.790, 0.955, 1), "predio": (0.836, 0.840, 0.830, 1)},
     "ruas": {"servico": (0.975, 0.978, 0.982, 1), "caminho": (0.830, 0.850, 0.865, 1),
              "ciclovia": (0.150, 0.640, 0.420, 1), "rua": (1.0, 1.0, 1.0, 1),
              "terciaria": (1.0, 0.985, 0.900, 1), "secundaria": (1.0, 0.930, 0.640, 1),
