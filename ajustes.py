@@ -6,6 +6,8 @@ import threading
 PADRAO = {
     "limite_kmh": 32,
     "alfa": 0.5,
+    "vel_ajuste": 0,         # % somado ao velocímetro (0 = velocidade real do GPS)
+    "alfa_v2": False,        # a "Resposta" antiga em 0,1-0,2 atrasava: volta a 0,5 uma vez
     "firebase": "",          # endereço do banco do dono para a corrida ao vivo (ao_vivo.py)
     "corridas_abertas": [],  # [banco, código, senha] de corrida ao vivo ainda não encerrada no banco
     "atalhos": {},           # {"casa": lugar, "trabalho": lugar}: destinos de um toque na busca

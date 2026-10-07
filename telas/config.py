@@ -100,7 +100,8 @@ SECOES = [
                    "Bolha flutuante", "Corrida ao vivo"]),
     ("Mapa e tela", ["Aparência", "Mapa gira com a direção", "Mapa offline de Goiânia",
                      "Tela deitada", "Manter tela ligada"]),
-    ("Velocímetro e viagem", ["Alerta de velocidade", "Vibrar no limite", "Resposta do velocímetro",
+    ("Velocímetro e viagem", ["Alerta de velocidade", "Vibrar no limite", "Ajuste do velocímetro",
+                              "Resposta do velocímetro",
                               "Pausa automática"]),
     ("Sistema", ["Diagnóstico", "Modo simulador"]),
 ]
@@ -261,9 +262,17 @@ class TelaConfig(Screen):
                                "Evita a tela apagar durante a viagem.",
                                self._centralizar(self.alt_tela)))
 
+        self.sel_ajuste = Seletor("%+d%%", self._mudar_ajuste)
+        lista.add_widget(Linha("Ajuste do velocímetro",
+                               "0% = velocidade real (GPS, a mesma que o radar mede). O painel da moto "
+                               "costuma marcar uns 5 a 10% a mais: aumente aqui se quiser que o app "
+                               "mostre igual a ele.",
+                               self.sel_ajuste))
+
         self.sel_alfa = Seletor("%.1f", self._mudar_alfa)
         lista.add_widget(Linha("Resposta do velocímetro",
-                               "Menor: número mais estável. Maior: reage mais rápido.",
+                               "Maior: acompanha a acelerada mais rápido (pode passar 1 ou 2 km/h do "
+                               "ponto por um instante). Menor: mais calmo. 0.5 é o equilíbrio.",
                                self.sel_alfa))
 
         self.btn_offline = BotaoHUD(text="Baixar", size_hint_x=None, width=dp(130),
@@ -324,6 +333,7 @@ class TelaConfig(Screen):
         self.alt_deitada.mostrar(aj["tela_deitada"])
         self.alt_tela.mostrar(aj["tela_ligada"])
         self.sel_alfa.mostrar(aj["alfa"])
+        self.sel_ajuste.mostrar(aj["vel_ajuste"])
         self.alt_sim.mostrar(aj["simulador"])
         self.btn_tema.text = _NOMES_TEMA.get(aj["tema"], "Automático")
         self.btn_rota.text = "Tranquila" if aj["rota_preferida"] == "tranquila" else "Mais rápida"
@@ -463,6 +473,13 @@ class TelaConfig(Screen):
         app.ajustes["tela_deitada"] = ligado
         app.aplicar_orientacao()
         self.alt_deitada.mostrar(ligado)
+
+    def _mudar_ajuste(self, d):
+        app = App.get_running_app()
+        novo = max(-15, min(15, app.ajustes["vel_ajuste"] + d))
+        app.ajustes["vel_ajuste"] = novo
+        app.filtro.ajuste = 1.0 + novo / 100.0
+        self.sel_ajuste.mostrar(novo)
 
     def _mudar_alfa(self, d):
         app = App.get_running_app()

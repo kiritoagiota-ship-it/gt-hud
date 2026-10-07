@@ -91,7 +91,8 @@ class GPSAndroid:
                          accuracy=loc.precisao,
                          # para o filtro do velocímetro (filtro.py)
                          speed_acc=loc.precisaoVelocidade if loc.precisaoVelocidade > 0 else None,
-                         t=loc.tempo if loc.tempo > 0 else None)
+                         t=loc.tempo if loc.tempo > 0 else None,
+                         age=loc.idade if loc.idade >= 0 else None)
             depois = loc.contador
             if depois == n:
                 break

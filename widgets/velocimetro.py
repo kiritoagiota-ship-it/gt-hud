@@ -20,7 +20,7 @@ import tema
 
 # No Kivy, 0 grau é o topo e o ângulo cresce no sentido horário.
 INICIO, FIM = -135.0, 135.0
-SUAVE = 7.0  # rapidez do anel/número indo até a velocidade nova (1/s)
+SUAVE = 12.0  # rapidez do anel/número indo até a velocidade nova (1/s); era 7: somava atraso
 VARREDURA_S = 1.1  # ao ligar, o anel vai até o fim e volta (como painel de moto)
 
 

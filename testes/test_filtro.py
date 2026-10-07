@@ -70,6 +70,35 @@ class TesteFiltro(unittest.TestCase):
         self.assertAlmostEqual(f.atualizar(5.0), 18.0, places=3)
         self.assertFalse(math.isnan(f.atualizar(5.2)))
 
+    def test_arrancada_nao_espera(self):
+        f = FiltroVelocidade()
+        for t in range(1, 6):
+            f.atualizar(0.0, t=float(t), idade_s=0.4, agora=t + 0.4)       # parado no semáforo
+        v = f.atualizar(1.2, t=6.0, idade_s=0.4, agora=6.4)                # saiu: média de 0 a 2,4 m/s
+        self.assertGreater(v, 4.3)                                         # já mostra o que leu (4,3 km/h) ou mais
+        self.assertGreater(f.previsto(7.0), v)                             # e segue subindo até a próxima leitura
+
+    def test_entre_leituras_segue_a_tendencia_e_para_sem_gps(self):
+        f = FiltroVelocidade()
+        for t in range(1, 9):
+            f.atualizar(1.0 * t, t=float(t), idade_s=0.3, agora=t + 0.3)   # acelerando 1 m/s2
+        logo, depois = f.previsto(8.4), f.previsto(9.2)
+        self.assertGreater(depois, logo + 0.5)                             # o número anda sem leitura nova
+        self.assertAlmostEqual(f.previsto(60.0), f.previsto(9.6), places=3)   # GPS sumiu: para de prever
+        parado = FiltroVelocidade()
+        for t in range(1, 9):
+            parado.atualizar(7.0, t=float(t), idade_s=0.3, agora=t + 0.3)
+        self.assertAlmostEqual(parado.previsto(8.9), parado.previsto(8.3), delta=0.3)   # ritmo constante: quieto
+
+    def test_ajuste_para_igualar_ao_painel(self):
+        real, painel = FiltroVelocidade(), FiltroVelocidade()
+        painel.ajuste = 1.08
+        for t in range(1, 12):
+            a = real.atualizar(8.0, t=float(t))
+            b = painel.atualizar(8.0, t=float(t))
+        self.assertAlmostEqual(b / a, 1.08, places=3)
+        self.assertAlmostEqual(a, 28.8, delta=0.3)                         # sem ajuste: a velocidade do GPS
+
 
 if __name__ == "__main__":
     unittest.main()

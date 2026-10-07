@@ -77,7 +77,15 @@ class GTHudApp(App):
         mapa_vetor.aplicar_tema(tema.claro())
         Window.clearcolor = tema.FUNDO
         self.banco = Banco(pasta)
+        if not self.ajustes["alfa_v2"]:
+            # o filtro mudou (07/10/2026): quem tinha baixado a "Resposta" para o
+            # número não tremer estava só ganhando atraso; volta ao meio uma vez
+            self.ajustes["alfa_v2"] = True
+            if self.ajustes["alfa"] < 0.5:
+                self.ajustes["alfa"] = 0.5
         self.filtro = FiltroVelocidade(alfa=self.ajustes["alfa"])
+        self.filtro.ajuste = 1.0 + self.ajustes["vel_ajuste"] / 100.0
+        self._gps_medidas = [0, 0.0, 0.0, 0.0, 0.0]   # leituras, soma dos intervalos, das idades, das incertezas; hora da última
         self.ritmo = Ritmo(self.ajustes["ritmo"])
         self.corrida = None          # corrida ao vivo em andamento (ao_vivo.AoVivo)
         self.ultimo_resumo = None    # números da última viagem finalizada (cartão de chegada)
@@ -415,7 +423,8 @@ class GTHudApp(App):
         if d.get("speed") is None:
             vel = self.filtro.valor  # fix sem velocidade: mantém a última
         else:
-            vel = self.filtro.atualizar(d["speed"], d.get("t"), d.get("speed_acc"))
+            vel = self.filtro.atualizar(d["speed"], d.get("t"), d.get("speed_acc"), d.get("age"))
+            self._medir_gps(d, agora)
         self.posicao = (d["lat"], d["lon"])
         if d.get("bearing") is not None and vel >= RUMO_MIN_KMH:
             self.rumo = d["bearing"]
@@ -431,6 +440,30 @@ class GTHudApp(App):
             self._navegar(d["lat"], d["lon"], vel, agora)
             self.conferir_fim()
         return vel
+
+    def _medir_gps(self, d, agora):
+        """Para o diagnóstico: de quanto em quanto tempo o GPS deste celular
+        entrega a velocidade, com que atraso e com que incerteza (é o que
+        limita a rapidez do velocímetro). Uma linha a cada 120 leituras."""
+        m = self._gps_medidas
+        if m[4] and agora - m[4] < 5:
+            m[0] += 1
+            m[1] += agora - m[4]
+            m[2] += d.get("age") or 0.0
+            m[3] += d.get("speed_acc") or 0.0
+        m[4] = agora
+        if m[0] >= 120:
+            print("[gps] leitura a cada %.2f s, atraso do chip %.2f s, incerteza da velocidade %.2f m/s" % (
+                m[1] / m[0], m[2] / m[0], m[3] / m[0]))
+            m[0], m[1], m[2], m[3] = 0, 0.0, 0.0, 0.0
+
+    def velocidade_agora(self):
+        """Velocidade para o mostrador NESTE instante (o GPS dá 1 leitura por
+        segundo; entre elas o filtro segue a tendência). As telas chamam isto
+        algumas vezes por segundo."""
+        if not self.sinal_ok():
+            return 0.0
+        return self.filtro.previsto()
 
     def _checar_limite(self, vel):
         limite = self.ajustes["limite_kmh"]

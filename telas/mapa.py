@@ -39,6 +39,7 @@ from widgets.mapa import MapaHUD
 from widgets.perfil import PerfilAltimetria
 from widgets.velocimetro import Velocimetro
 
+VELO_A_CADA_S = 0.2    # o velocímetro pega a velocidade prevista 5x por segundo
 RESUMO_FICA_S = 20.0   # o cartão de resumo da rota some sozinho depois disso
 LIVRE, PREVIA, NAVEGANDO = "livre", "previa", "navegando"
 TRILHA_A_CADA_S = 3
@@ -193,6 +194,7 @@ class TelaMapa(Screen):
         self.estado = LIVRE
         self._deitada = None
         self._ev_tique = None
+        self._ev_velo = None
         self._ev_msg = None
         self._t_trilha = 0
         self._confirmando_fim = False
@@ -361,12 +363,17 @@ class TelaMapa(Screen):
         self._tique(0)
         if self._ev_tique is None:
             self._ev_tique = Clock.schedule_interval(self._tique, 1.0)
+        if self._ev_velo is None:
+            self._ev_velo = Clock.schedule_interval(self._passo_velo, VELO_A_CADA_S)
         self.mapa.retomar()
 
     def on_leave(self, *a):
         if self._ev_tique is not None:
             self._ev_tique.cancel()
             self._ev_tique = None
+        if self._ev_velo is not None:
+            self._ev_velo.cancel()
+            self._ev_velo = None
         self.mapa.pausar()  # fora de vista o mapa não anima (bateria e fluidez)
 
     # --- modos (chamados pelo app) -----------------------------------------------
@@ -818,6 +825,14 @@ class TelaMapa(Screen):
             if agora - self._t_trilha >= TRILHA_A_CADA_S:
                 self._t_trilha = agora
                 self.mapa.definir_trilha([(p[0], p[1]) for p in app.viagem.pontos])
+
+    def _passo_velo(self, dt):
+        """Entre uma leitura e outra do GPS o número segue a tendência."""
+        app = App.get_running_app()
+        v = app.velocidade_agora()
+        if abs(v - self.disco.velo.velocidade) >= 0.2:
+            self.disco.velo.velocidade = v
+            self.disco.velo.alerta = v > app.ajustes["limite_kmh"]
 
     def _tique(self, dt):
         app = App.get_running_app()

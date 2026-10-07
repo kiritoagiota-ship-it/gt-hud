@@ -7,6 +7,7 @@ import android.location.LocationManager;
 import android.os.Build;
 import android.os.Bundle;
 import android.os.Looper;
+import android.os.SystemClock;
 
 /**
  * Recebe as posições do GPS (só satélite) e guarda a última em campos
@@ -34,6 +35,9 @@ public class Localizacao implements LocationListener {
     // (m/s; -1 = não informou) e a hora exata da leitura (s desde o boot)
     public static volatile double precisaoVelocidade = -1;
     public static volatile double tempo = 0;
+    // há quanto tempo (s) a leitura tinha sido feita quando chegou aqui: o
+    // atraso do chip do GPS, que o filtro do velocímetro compensa
+    public static volatile double idade = -1;
 
     private static Localizacao instancia;
 
@@ -52,6 +56,7 @@ public class Localizacao implements LocationListener {
         }
         precisaoVelocidade = pv;
         tempo = loc.getElapsedRealtimeNanos() / 1e9;
+        idade = (SystemClock.elapsedRealtimeNanos() - loc.getElapsedRealtimeNanos()) / 1e9;
         contador++;  // por último: o Python só lê quando isto muda
     }
 

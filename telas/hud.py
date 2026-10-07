@@ -105,11 +105,24 @@ class TelaHUD(Screen):
         self._atualizar_numeros()
         if self._ev_relogio is None:
             self._ev_relogio = Clock.schedule_interval(self._tique, 1.0)
+        if getattr(self, "_ev_velo", None) is None:
+            self._ev_velo = Clock.schedule_interval(self._passo_velo, 0.2)
 
     def on_leave(self, *a):
         if self._ev_relogio is not None:
             self._ev_relogio.cancel()
             self._ev_relogio = None
+        if getattr(self, "_ev_velo", None) is not None:
+            self._ev_velo.cancel()
+            self._ev_velo = None
+
+    def _passo_velo(self, dt):
+        """Entre uma leitura e outra do GPS o número segue a tendência."""
+        app = App.get_running_app()
+        v = app.velocidade_agora()
+        if abs(v - self.velo.velocidade) >= 0.2:
+            self.velo.velocidade = v
+            self.velo.alerta = v > app.ajustes["limite_kmh"]
 
     # --- dados do GPS ----------------------------------------------------
     def _ao_ler(self, vel):
