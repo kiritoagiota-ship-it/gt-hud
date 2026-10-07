@@ -655,7 +655,8 @@ class GTHudApp(App):
         self.estado_nav = e = nav.atualizar(lat, lon, vel, agora)
         self.ritmo.leitura(nav, vel, agora)  # aprende o ritmo do dono (tempo de chegada)
         if self.corrida is not None and e:
-            self.corrida.leitura(lat, lon, vel, self.rumo, e["restante_m"], e["restante_s"])
+            self.corrida.leitura(lat, lon, vel, self.rumo, e["restante_m"], e["restante_s"],
+                                 nav.dist_feita, e.get("fora_da_rota", False))
         fora = bool(e and e.get("fora_da_rota"))
         if fora and not self._estava_fora:
             android_utils.vibrar_padrao("fora")

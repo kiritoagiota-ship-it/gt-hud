@@ -184,8 +184,10 @@ class AoVivo:
             self._rota = (versao, codificar_polyline(rota.pontos, 1e5), fim[0], fim[1])
         self._acordar.set()
 
-    def leitura(self, lat, lon, vel_kmh, rumo, restante_m, restante_s):
-        """A cada posição boa do GPS durante a navegação."""
+    def leitura(self, lat, lon, vel_kmh, rumo, restante_m, restante_s, dist_m=None, fora=False):
+        """A cada posição boa do GPS durante a navegação. dist_m: metros já
+        andados na rota (a página usa para a seta deslizar pela linha, em vez
+        de pular de ponto em ponto); fora: saiu da rota."""
         if not self.ativo:
             return
         agora = self._relogio()
@@ -196,6 +198,8 @@ class AoVivo:
             self._pos = {"lat": round(lat, 6), "lon": round(lon, 6), "v": int(round(vel_kmh or 0)),
                          "r": None if rumo is None else int(rumo) % 360,
                          "fm": int(restante_m or 0), "fs": int(restante_s or 0), "t": int(agora)}
+            if dist_m is not None and not fora:
+                self._pos["d"] = int(dist_m)
             espera = ENVIAR_A_CADA_S if (vel_kmh or 0) >= 2 else PARADO_A_CADA_S
             devido = agora - self._t_envio >= espera
         if devido:

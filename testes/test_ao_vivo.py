@@ -62,10 +62,11 @@ class TesteAoVivo(unittest.TestCase):
         for k in range(1, 6):   # anda 100 m, 5 leituras
             lat, lon = rota.pontos[k * 2]
             n = corrida.enviados
-            corrida.leitura(lat, lon, 25.4, 0, 600 - k * 20, 120 - k * 4)
+            corrida.leitura(lat, lon, 25.4, 0, 600 - k * 20, 120 - k * 4, k * 20.0)
             self.assertTrue(esperar(lambda: corrida.enviados > n))
         pub = self._pub(corrida)
         self.assertEqual((pub["pos"]["v"], pub["pos"]["fm"], pub["pos"]["e"]), (25, 500, "indo"))
+        self.assertEqual(pub["pos"]["d"], 100)        # metros andados na rota: a página desliza a seta pela linha
         self.assertAlmostEqual(pub["pos"]["lat"], rota.pontos[10][0], places=5)
         feito = [p for k in sorted(pub["tr"]) for p in rotas.decodificar_polyline(pub["tr"][k], 1e5)]
         self.assertEqual(len(feito), 5)

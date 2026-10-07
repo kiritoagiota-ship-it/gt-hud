@@ -24,9 +24,9 @@ from falas import texto_manobra
 from util import fmt_dist, fmt_dist_nav, fmt_duracao, fmt_hora_chegada, fmt_tempo
 
 PAINEL_A_CADA_S = 0.9      # painel flutuante: acompanha cada leitura do GPS
-DESENHO_FRENTE_M = 280     # quanto de rota à frente vai no desenho do painel
-DESENHO_ATRAS_M = 60
-DESENHO_PASSO_M = 12
+DESENHO_FRENTE_M = 420     # quanto de rota à frente vai para o painel (ele mostra ~260 m e anda sozinho)
+DESENHO_ATRAS_M = 70
+DESENHO_PASSO_M = 10
 INTERVALO_S = 0.2          # a thread confere o GPS 5x/s (o GPS manda 1x/s)
 AVISO_A_CADA_S = 2.0       # notificação/bolha: no máximo 1 atualização a cada isso
 VIGIA_A_CADA_S = 2.0       # "perdi o sinal do GPS" (no app aberto é o Clock)
@@ -63,41 +63,51 @@ def textos(app):
 
 
 def desenho_da_rota(nav):
-    """O caminho dos próximos metros visto de cima, com a FRENTE para cima e
-    a pessoa na origem: "x,y;x,y;..." em metros inteiros (x = direita, y =
-    frente). É o que o painel flutuante desenha no lugar do mapa."""
+    """O trecho da rota em volta da pessoa, para o painel flutuante desenhar
+    no lugar do mapa: ("x,y;x,y;...", início m, aqui m).
+    Os pontos são metros (leste, norte) a partir do primeiro, tirados da rota
+    a cada DESENHO_PASSO_M em distâncias "redondas" (os mesmos pontos a cada
+    envio: o desenho não treme); o primeiro fica a `início` metros do começo
+    da rota e a pessoa está em `aqui`. Quem gira (frente para cima) e faz o
+    desenho andar entre uma posição e outra é o painel."""
     rota = nav.rota
     if rota is None or len(rota.pontos) < 2 or rota.total_m <= 0:
-        return ""
+        return "", 0.0, 0.0
     aqui = max(0.0, min(rota.total_m, nav.dist_feita))
-    lat0, lon0, rumo = rota.ponto_em(aqui, nav.seg)
-    r = math.radians(rumo)
-    sen, cos = math.sin(r), math.cos(r)
-    k = math.cos(math.radians(lat0)) * 111320.0
-    pontos = []
-    d = max(0.0, aqui - DESENHO_ATRAS_M)
+    inicio = max(0.0, math.floor((aqui - DESENHO_ATRAS_M) / DESENHO_PASSO_M) * DESENHO_PASSO_M)
     fim = min(rota.total_m, aqui + DESENHO_FRENTE_M)
+    lat0, lon0, _ = rota.ponto_em(inicio)
+    grau = 111195.0   # metros por grau na mesma esfera das distâncias da rota (o painel soma os trechos)
+    k = math.cos(math.radians(lat0)) * grau
+    pontos = []
+    d = inicio
     while True:
-        lat, lon, _ = rota.ponto_em(d, nav.seg if d >= aqui else 0)
-        leste, norte = (lon - lon0) * k, (lat - lat0) * 110540.0
-        pontos.append("%d,%d" % (round(leste * cos - norte * sen), round(leste * sen + norte * cos)))
+        lat, lon, _ = rota.ponto_em(d)
+        pontos.append("%.1f,%.1f" % ((lon - lon0) * k, (lat - lat0) * grau))
         if d >= fim:
             break
         d = min(fim, d + DESENHO_PASSO_M)
-    return ";".join(pontos)
+    return ";".join(pontos), inicio, aqui
 
 
 def dados_do_painel(app):
-    """(distância, instrução, rua, velocidade, resto, desenho, nível de alerta)
-    para o painel flutuante; None se não há rota."""
+    """(distância, instrução, rua, velocidade, resto, desenho, nível de alerta,
+    início m, aqui m, velocidade m/s) para o painel flutuante; None se não há
+    rota. Os três últimos servem para o desenho andar entre as posições."""
     nav, e = app.nav, app.estado_nav
     if nav is None:
         return None
     vel = "%d" % round(app.filtro.previsto()) if getattr(app, "filtro", None) is not None else "0"
     if nav.chegou:
-        return ("Chegou", "Você chegou ao destino", "", vel, "", "", 0)
+        return ("Chegou", "Você chegou ao destino", "", vel, "", "", 0, 0.0, 0.0, 0.0)
+    pontos, inicio, aqui = desenho_da_rota(nav)
+    fora = bool(e and e.get("fora_da_rota"))
+    andar = (pontos, 0, inicio, aqui, 0.0 if fora else float(getattr(nav, "_vel_ms", 0.0)))
+
+    def desenho_da_rota_(nivel):   # (desenho, alerta, início, aqui, m/s)
+        return (andar[0], nivel) + andar[2:]
     if not e:
-        return ("...", "Esperando o GPS", "", vel, "", desenho_da_rota(nav), 0)
+        return ("...", "Esperando o GPS", "", vel, "") + desenho_da_rota_(0)
     resto = "%s · %s · %s" % (fmt_duracao(e["restante_s"]), fmt_dist_nav(e["restante_m"]),
                               fmt_hora_chegada(e["restante_s"]))
     m = e.get("manobra")
@@ -107,11 +117,11 @@ def dados_do_painel(app):
         alerta = 2 if a.get("nivel", 2) >= 3 else 1      # andando numa avenida
     if e.get("fora_da_rota"):
         return ("Fora da rota", "Recalculando..." if app.recalculando else "Volte para a rota", "",
-                vel, resto, desenho_da_rota(nav), 2)
+                vel, resto) + desenho_da_rota_(2)
     if m is None:
-        return ("", "Siga em frente", "", vel, resto, desenho_da_rota(nav), alerta)
+        return ("", "Siga em frente", "", vel, resto) + desenho_da_rota_(alerta)
     return (fmt_dist_nav(e["dist_manobra"]), texto_manobra(m["acao"], m.get("saida")), m.get("ruas") or "",
-            vel, resto, desenho_da_rota(nav), alerta)
+            vel, resto) + desenho_da_rota_(alerta)
 
 
 def feito(app):
@@ -212,9 +222,9 @@ class _Android:
 
     def atualizar_painel(self, dados, claro):
         if self.painel is not None and dados is not None:
-            distancia, instrucao, rua, vel, resto, desenho, alerta = dados
+            distancia, instrucao, rua, vel, resto, desenho, alerta, inicio, aqui, vel_ms = dados
             self._chamar(self.painel.atualizar, distancia, instrucao, rua, vel, resto, desenho,
-                         bool(claro), int(alerta))
+                         bool(claro), int(alerta), float(inicio), float(aqui), float(vel_ms))
 
     def esconder_painel(self):
         if self.painel is not None:

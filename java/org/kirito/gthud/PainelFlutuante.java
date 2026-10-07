@@ -54,7 +54,16 @@ public class PainelFlutuante {
     private static volatile String rua = "";
     private static volatile String velocidade = "0";
     private static volatile String resto = "";
-    private static volatile float[] rota = new float[0];   // x, y em metros (x = direita, y = frente)
+    // O caminho: x, y em metros (leste, norte) a partir do 1o ponto, que fica a
+    // `distInicio` metros do começo da rota. O Python manda 1 posição por segundo
+    // (`distAqui`, com a velocidade); ENTRE elas o desenho segue andando sozinho
+    // (antes ele só mudava a cada segundo: dava "trancos" para a frente).
+    private static volatile float[] rota = new float[0];
+    private static volatile float[] acumulado = new float[0];   // metros até cada ponto
+    private static volatile double distInicio = 0;
+    private static volatile double distAqui = 0;
+    private static volatile float velMs = 0;
+    private static volatile long recebidoNs = 0;
     private static volatile boolean claro = false;
     private static volatile int alerta = 0;                 // 0 normal, 1 laranja, 2 vermelho
     // para o diagnóstico (o Python lê): 0 = fechado, 1 = na tela, -1 = não abriu
@@ -89,10 +98,13 @@ public class PainelFlutuante {
         });
     }
 
-    /** pontos: "x,y;x,y;..." em metros inteiros (frente = +y, origem = a pessoa). */
+    /** pontos: "x,y;x,y;..." em metros (leste, norte) a partir do 1o ponto, que
+     *  está a `inicioM` metros do começo da rota; a pessoa está em `aquiM`,
+     *  andando a `velocidadeMs`. */
     public static void atualizar(String novaDistancia, String novaInstrucao, String novaRua,
                                  String novaVelocidade, String novoResto, String pontos,
-                                 boolean temaClaro, int nivelAlerta) {
+                                 boolean temaClaro, int nivelAlerta,
+                                 float inicioM, float aquiM, float velocidadeMs) {
         distancia = novaDistancia == null ? "" : novaDistancia;
         instrucao = novaInstrucao == null ? "" : novaInstrucao;
         rua = novaRua == null ? "" : novaRua;
@@ -100,7 +112,19 @@ public class PainelFlutuante {
         resto = novoResto == null ? "" : novoResto;
         claro = temaClaro;
         alerta = nivelAlerta;
-        rota = ler(pontos);
+        float[] novos = ler(pontos);
+        float[] soma = new float[novos.length / 2];
+        for (int k = 1; k < soma.length; k++) {
+            float dx = novos[2 * k] - novos[2 * k - 2];
+            float dy = novos[2 * k + 1] - novos[2 * k - 1];
+            soma[k] = soma[k - 1] + (float) Math.sqrt(dx * dx + dy * dy);
+        }
+        acumulado = soma;
+        rota = novos;
+        distInicio = inicioM;
+        distAqui = aquiM;
+        velMs = Math.max(0f, velocidadeMs);
+        recebidoNs = System.nanoTime();
         principal.post(new Runnable() {
             @Override
             public void run() {
@@ -236,6 +260,37 @@ public class PainelFlutuante {
         private final TextPaint letra = new TextPaint(Paint.ANTI_ALIAS_FLAG);
         private final Path caminho = new Path();
         private final RectF caixa = new RectF();
+        private final float[] ponto = new float[2];
+        private double mostrada = -1;     // metros da rota em que a seta está desenhada agora
+        private long quadroNs = 0;
+
+        /** (x, y) do caminho a `s` metros do 1o ponto. */
+        private void pontoEm(float[] p, float[] ac, float s) {
+            int n = ac.length;
+            if (n == 0) {
+                ponto[0] = 0f;
+                ponto[1] = 0f;
+                return;
+            }
+            if (s <= 0f || n == 1) {
+                ponto[0] = p[0];
+                ponto[1] = p[1];
+                return;
+            }
+            if (s >= ac[n - 1]) {
+                ponto[0] = p[2 * n - 2];
+                ponto[1] = p[2 * n - 1];
+                return;
+            }
+            int i = 0;
+            while (i < n - 2 && ac[i + 1] < s) {
+                i++;
+            }
+            float trecho = ac[i + 1] - ac[i];
+            float f = trecho > 0f ? (s - ac[i]) / trecho : 0f;
+            ponto[0] = p[2 * i] + (p[2 * i + 2] - p[2 * i]) * f;
+            ponto[1] = p[2 * i + 1] + (p[2 * i + 3] - p[2 * i + 1]) * f;
+        }
 
         Vista(Context c) {
             super(c);
@@ -293,13 +348,51 @@ public class PainelFlutuante {
             float ox = qx + lado / 2f;
             float oy = qy + lado - METROS_ATRAS * escala;
             float[] p = rota;
+            float[] ac = acumulado;
+            boolean animando = false;
             tela.save();
             tela.clipRect(caixa);
-            if (p.length >= 4) {
+            if (p.length >= 4 && ac.length * 2 == p.length) {
+                // onde a seta deveria estar AGORA: a última posição recebida mais o que
+                // andou desde então; o desenho vai até lá suave, sem pular
+                long agora = System.nanoTime();
+                float dt = quadroNs == 0 ? 0f : Math.min(0.1f, (agora - quadroNs) / 1e9f);
+                quadroNs = agora;
+                double alvo = distAqui + velMs * Math.min(2.0, (agora - recebidoNs) / 1e9);
+                double erro = alvo - mostrada;
+                if (mostrada < 0 || Math.abs(erro) > 60) {
+                    mostrada = alvo;
+                } else {
+                    mostrada += Math.max(0.0, velMs + erro * 1.5) * dt;
+                }
+                animando = velMs > 0.3f || Math.abs(alvo - mostrada) > 0.5;
+                float s = (float) (mostrada - distInicio);
+                pontoEm(p, ac, s);
+                float px = ponto[0], py = ponto[1];
+                // "frente" = para onde o caminho vai nos próximos metros (vira suave nas curvas)
+                pontoEm(p, ac, s - 4f);
+                float ax = ponto[0], ay = ponto[1];
+                pontoEm(p, ac, s + 14f);
+                float ux = ponto[0] - ax, uy = ponto[1] - ay;
+                float tam = (float) Math.sqrt(ux * ux + uy * uy);
+                if (tam < 0.01f) {
+                    ux = 0f;
+                    uy = 1f;
+                } else {
+                    ux /= tam;
+                    uy /= tam;
+                }
                 caminho.reset();
-                caminho.moveTo(ox + p[0] * escala, oy - p[1] * escala);
-                for (int k = 2; k + 1 < p.length; k += 2) {
-                    caminho.lineTo(ox + p[k] * escala, oy - p[k + 1] * escala);
+                for (int k = 0; k + 1 < p.length; k += 2) {
+                    float dx = p[k] - px, dy = p[k + 1] - py;
+                    float frente = dx * ux + dy * uy;
+                    float direita = dx * uy - dy * ux;
+                    float sx = ox + direita * escala, sy = oy - frente * escala;
+                    if (k == 0) {
+                        caminho.moveTo(sx, sy);
+                    } else {
+                        caminho.lineTo(sx, sy);
+                    }
                 }
                 tinta.setStyle(Paint.Style.STROKE);
                 tinta.setStrokeCap(Paint.Cap.ROUND);
@@ -327,6 +420,9 @@ public class PainelFlutuante {
             tinta.setColor(destaque);
             tela.drawPath(caminho, tinta);
             tela.restore();
+            if (animando) {
+                postInvalidateOnAnimation();   // segue andando até a próxima posição chegar
+            }
 
             // --- direita: curva, rua, velocidade, chegada ---
             float x = qx + lado + dp(c, 12);

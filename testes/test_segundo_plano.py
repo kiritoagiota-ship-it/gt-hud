@@ -162,18 +162,35 @@ class TestePainelFlutuante(unittest.TestCase):
         nav.atualizar(r.pontos[10][0], r.pontos[10][1], 25.0, 1.0)     # 100 m depois do começo
         return nav
 
-    def test_desenho_reto_fica_na_vertical_com_a_pessoa_na_origem(self):
-        pontos = [tuple(map(int, p.split(","))) for p in segundo_plano.desenho_da_rota(self._nav()).split(";")]
-        self.assertTrue(all(abs(x) <= 1 for x, _ in pontos))            # reta: tudo em cima do eixo
-        self.assertAlmostEqual(pontos[0][1], -60, delta=3)              # 60 m para trás
-        self.assertAlmostEqual(pontos[-1][1], 280, delta=3)             # 280 m para a frente
-        self.assertTrue(any(abs(y) <= 6 for _, y in pontos))            # passa pela pessoa
+    def _pontos(self, nav):
+        texto, inicio, aqui = segundo_plano.desenho_da_rota(nav)
+        return [tuple(map(float, p.split(","))) for p in texto.split(";")], inicio, aqui
 
-    def test_curva_a_direita_aparece_para_a_direita(self):
-        pontos = [tuple(map(int, p.split(","))) for p in segundo_plano.desenho_da_rota(self._nav(curva=True)).split(";")]
+    def test_desenho_reto_em_metros_com_inicio_e_posicao(self):
+        pontos, inicio, aqui = self._pontos(self._nav())
+        self.assertAlmostEqual(aqui, 100, delta=2)                      # a pessoa está 100 m depois do começo
+        self.assertIn(inicio, (20.0, 30.0))                             # uns 70 m para trás, em distância "redonda"
+        self.assertEqual(pontos[0], (0.0, 0.0))                         # medidos a partir do primeiro ponto
+        self.assertTrue(all(abs(x) < 0.5 for x, _ in pontos))           # rota para o norte: só o y cresce
+        passos = [round(b[1] - a[1]) for a, b in zip(pontos, pontos[1:])]
+        self.assertTrue(all(p == 10 for p in passos[:-1]), passos)      # um ponto a cada 10 m
+        self.assertAlmostEqual(inicio + pontos[-1][1], 520, delta=3)    # 420 m à frente da pessoa
+
+    def test_mesmos_pontos_de_um_envio_para_o_outro(self):
+        nav = self._nav()
+        a, inicio_a, _ = self._pontos(nav)
+        nav.atualizar(nav.rota.pontos[11][0], nav.rota.pontos[11][1], 25.0, 2.2)   # andou só 10 m
+        b, inicio_b, _ = self._pontos(nav)
+        # os pontos são tirados das mesmas distâncias da rota: o desenho não treme
+        em_a = {round(inicio_a + y) for _, y in a}
+        em_b = {round(inicio_b + y) for _, y in b}
+        self.assertGreaterEqual(len(em_a & em_b), len(a) - 4)
+
+    def test_curva_a_direita_vai_para_o_leste(self):
+        pontos, inicio, aqui = self._pontos(self._nav(curva=True))
         x_fim, y_fim = pontos[-1]
-        self.assertGreater(x_fim, 120)                                  # depois da curva, o caminho vai para a direita
-        self.assertAlmostEqual(y_fim, 100, delta=8)                     # a curva está 100 m à frente
+        self.assertGreater(x_fim, 250)                                  # depois da curva, o caminho segue para o leste
+        self.assertAlmostEqual(inicio + y_fim, 200, delta=6)            # a curva fica a 200 m do começo da rota
 
     def test_minimizado_mostra_o_painel_e_nao_a_bolha(self):
         app, android = AppFalso(), AndroidFalso()
@@ -191,8 +208,10 @@ class TestePainelFlutuante(unittest.TestCase):
         chamadas = dict((c[0], c[1:]) for c in android.chamadas)
         self.assertIn("mostrar_painel", chamadas)
         self.assertNotIn("mostrar_bolha", chamadas)
-        distancia, instrucao, rua, vel, resto, desenho, alerta = chamadas["mostrar_painel"][0]
+        distancia, instrucao, rua, vel, resto, desenho, alerta, inicio, aqui, vel_ms = chamadas["mostrar_painel"][0]
         self.assertEqual((distancia, instrucao, rua, vel, alerta), ("200 m", "Vire à direita", "Rua 5", "32", 0))
+        self.assertAlmostEqual(aqui, 100, delta=2)
+        self.assertAlmostEqual(vel_ms, 25 / 3.6, places=2)              # para o desenho andar entre as posições
         self.assertTrue(resto.startswith("8 min · 2,3 km · "))
         self.assertGreater(len(desenho.split(";")), 10)
         fundo.ao_voltar()

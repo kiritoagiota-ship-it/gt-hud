@@ -56,7 +56,7 @@ def main():
         d = rota.total_m * f
         lat, lon, rumo = rota.ponto_em(d)
         vel = 24 + 6 * math.sin(f * 20)
-        corrida.leitura(lat, lon, vel, rumo, rota.total_m - d, rota.tempo_s * (1 - f))
+        corrida.leitura(lat, lon, vel, rumo, rota.total_m - d, rota.tempo_s * (1 - f), d)
         time.sleep(1.0)
     corrida.terminar(chegou=True)
     corrida.esperar_fim()

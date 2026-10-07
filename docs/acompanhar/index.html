@@ -132,6 +132,45 @@ let seguindo = true, pedacos = 0, versaoRota = 0, feito = [], acabou = false;
 let ultimoT = null, vistoEm = 0, ultimaPos = null, enquadrou = false;
 let canal = null, canalEm = 0;          // canal ao vivo (o banco avisa na hora) e a última vez que ele falou
 let desliza = null;                     // animação da seta indo de um ponto ao outro
+// A seta anda PELA LINHA DA ROTA, na velocidade informada, entre uma posição e
+// outra (o app manda uma a cada ~2,5 s e a rede entrega em rajadas: sem isso a
+// seta dava "trancos" para a frente). rotaPts/rotaAcum: a rota e os metros até
+// cada ponto; alvo: a última posição recebida, em metros da rota.
+let rotaPts = [], rotaAcum = [], alvo = null, dMostrada = null, quadroAntes = 0, trilhaEm = 0, giroEl = null;
+const ADIANTAR_MAX_S = 6;               // sem posição nova por isso: a seta para de andar sozinha
+
+function medirRota(pontos) {
+  rotaPts = pontos; rotaAcum = [0];
+  for (let i = 1; i < pontos.length; i++) rotaAcum.push(rotaAcum[i - 1] + mapa.distance(pontos[i - 1], pontos[i]));
+}
+
+function pontoNaRota(d) {               // -> [lat, lon, rumo em graus]
+  const n = rotaPts.length;
+  d = Math.max(0, Math.min(rotaAcum[n - 1], d));
+  let i = 0;
+  while (i < n - 2 && rotaAcum[i + 1] < d) i++;
+  const a = rotaPts[i], b = rotaPts[i + 1], trecho = rotaAcum[i + 1] - rotaAcum[i];
+  const f = trecho > 0 ? (d - rotaAcum[i]) / trecho : 0;
+  const rumo = Math.atan2((b[1] - a[1]) * Math.cos(a[0] * Math.PI / 180), b[0] - a[0]) * 180 / Math.PI;
+  return [a[0] + (b[0] - a[0]) * f, a[1] + (b[1] - a[1]) * f, rumo];
+}
+
+function quadroDaRota(agora) {
+  requestAnimationFrame(quadroDaRota);
+  const dt = Math.min(0.1, (agora - quadroAntes) / 1000);
+  quadroAntes = agora;
+  if (acabou || !alvo || !eu || rotaPts.length < 2 || document.hidden) return;
+  const adiantado = alvo.d + alvo.v * Math.min(ADIANTAR_MAX_S, (agora - alvo.em) / 1000);
+  const erro = adiantado - dMostrada;
+  if (dMostrada === null || Math.abs(erro) > 250) dMostrada = adiantado;        // muito longe: vai direto
+  else dMostrada += Math.max(0, alvo.v + erro * 0.9) * dt;                     // anda e corrige aos poucos
+  const p = pontoNaRota(dMostrada);
+  const aqui = [p[0], p[1]];
+  eu.setLatLng(aqui);
+  if (giroEl) giroEl.style.transform = "rotate(" + p[2].toFixed(0) + "deg)";
+  if (seguindo) mapa.panTo(aqui, { animate: false });
+  if (agora - trilhaEm > 500) { trilhaEm = agora; linhaFeito.setLatLngs(feito.concat([aqui])); }
+}
 
 function montarMapa() {
   mapa = L.map("mapa", { zoomControl: false, attributionControl: false }).setView([-16.6799, -49.2550], 13);
@@ -153,6 +192,8 @@ function mostrarRota(rota) {
   versaoRota = rota.rv || 0;
   const pontos = decodificar(rota.linha);
   linhaRota.setLatLngs(pontos);
+  medirRota(pontos);
+  alvo = null; dMostrada = null;          // rota nova: as distâncias recomeçam
   if (marcaDestino) marcaDestino.remove();
   marcaDestino = L.marker([rota.dlat, rota.dlon], {
     icon: L.divIcon({ className: "", html: '<div class="chegada"></div>', iconSize: [22, 22], iconAnchor: [11, 11] }),
@@ -186,6 +227,10 @@ function deslizar(de, para, ms) {
   desliza = requestAnimationFrame(quadro);
 }
 
+function semAnimarAgora() {
+  return document.hidden || (window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches);
+}
+
 function mostrarPosicao(pos) {
   const anterior = ultimaPos, intervalo = Date.now() - vistoAntes;
   vistoAntes = Date.now();
@@ -196,8 +241,20 @@ function mostrarPosicao(pos) {
     '<path d="M17 4 L27 27 L17 21.5 L7 27 Z" fill="#19e3ff"/></svg></div>';
   const icone = L.divIcon({ className: "", html: html, iconSize: [34, 34], iconAnchor: [17, 17] });
   const primeira = !eu;
+  const naRota = typeof pos.d === "number" && rotaPts.length > 1 && (pos.rv || 0) === versaoRota;
   if (!eu) eu = L.marker(ultimaPos, { icon: icone, keyboard: false, alt: "Posição atual", zIndexOffset: 500 }).addTo(mapa);
-  else eu.setIcon(icone);
+  else if (!naRota || !alvo) eu.setIcon(icone);   // (andando pela rota, quem gira a seta é a animação)
+  giroEl = eu.getElement() ? eu.getElement().querySelector(".eu") : null;
+  if (naRota && !semAnimarAgora()) {
+    // a seta desliza pela linha da rota até aqui e segue na velocidade informada
+    if (desliza) { cancelAnimationFrame(desliza); desliza = null; }
+    alvo = { d: pos.d, v: (pos.v || 0) / 3.6, em: performance.now() };
+    if (primeira) {
+      dMostrada = pos.d;
+      if (seguindo && !enquadrou) { mapa.setView(ultimaPos, 16); enquadrou = true; }
+    }
+  } else {
+    alvo = null; dMostrada = null;       // fora da rota (ou app antigo): o jeito de antes, de ponto a ponto
   const perto = anterior && mapa.distance(anterior, ultimaPos) < 400;
   const semAnimar = window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches;
   if (primeira || !perto || semAnimar || document.hidden) {
@@ -211,6 +268,7 @@ function mostrarPosicao(pos) {
     if (seguindo && !enquadrou) { mapa.setView(anterior, 16); enquadrou = true; }
     deslizar(eu.getLatLng() ? [eu.getLatLng().lat, eu.getLatLng().lng] : anterior, ultimaPos,
              Math.max(600, Math.min(3500, intervalo)));
+  }
   }
   el("numeros").hidden = false;
   el("vel").textContent = pos.v;
@@ -323,6 +381,7 @@ async function comecar() {
     estado("erro", "Não consegui abrir a corrida. Confira a internet.");
   }
   setInterval(relogio, 1000);
+  requestAnimationFrame(quadroDaRota);
   if (!acabou) { abrirCanal(); setTimeout(ciclo, LER_A_CADA_MS); }
 }
 comecar();
