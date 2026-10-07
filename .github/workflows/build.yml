@@ -152,6 +152,19 @@ jobs:
             echo "::warning::Sem DEBUG_KEYSTORE_B64: o APK sai com chave temporaria (vai exigir desinstalar para atualizar)"
           fi
 
+      # O mapa de Goiania ja DESENHADO (geometria pronta) dos zooms que o app usa:
+      # ~150 MB, montado aqui com o codigo de desenho deste build (nao vai para
+      # o git). Sem ele o app funciona, so desenha cada pedaco na primeira vez.
+      - name: Mapa ja desenhado (dados/mapa_pronto.db)
+        env:
+          KIVY_NO_ARGS: "1"
+          KIVY_NO_FILELOG: "1"
+          KIVY_LOG_MODE: "PYTHON"
+        run: |
+          pip install "kivy==2.3.1"
+          python ferramentas/empacotar_prontos.py || echo "::warning::Sem o mapa pronto: o app vai desenhar os pedacos no celular"
+          ls -la dados/
+
       # Chaves de servicos pagos/limitados (ex.: Google Places) ficam nos
       # secrets do GitHub e entram so no APK, num chaves.json (fora do git:
       # o repositorio e publico). Sem o secret, o app usa so servicos sem conta.

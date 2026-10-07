@@ -299,6 +299,7 @@ class GTHudApp(App):
         Clock.schedule_interval(self.atualizar_transito_do_mapa, TRANSITO_MAPA_A_CADA_S)
 
     def on_pause(self):
+        self._guardar_posicao()
         self.fundo.ao_pausar()  # rota ativa: segue navegando minimizado
         return True  # não fecha o app ao trocar de tela no celular
 
@@ -313,10 +314,19 @@ class GTHudApp(App):
         self.atualizar_transito_do_mapa()
 
     def on_stop(self):
+        self._guardar_posicao()
         self.parar_corrida()
         self.fundo.terminou()
         self.salvar_viagem_atual()  # não perde a viagem se o app fechar
         self.gps.parar()
+
+    def _guardar_posicao(self):
+        """Onde a pessoa está ao sair: na próxima abertura o mapa já nasce ali."""
+        try:
+            if self.posicao is not None:
+                self.ajustes["ultima_posicao"] = [round(self.posicao[0], 5), round(self.posicao[1], 5)]
+        except Exception as e:
+            print("[app] ultima posicao:", e)
 
     # --- navegação entre telas ---------------------------------------------
     def abrir(self, nome):

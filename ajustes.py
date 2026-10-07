@@ -13,6 +13,7 @@ PADRAO = {
     "atalhos": {},           # {"casa": lugar, "trabalho": lugar}: destinos de um toque na busca
     "tomtom": "",                 # chave da TomTom DO DONO para o trânsito ao vivo (transito.py)
     "avisar_chuva": True,         # previsão de chuva no caminho (clima.py)
+    "ultima_posicao": None,      # [lat, lon] de onde a pessoa estava ao sair: o mapa já abre (pronto) ali
     "aprendeu_v1": False,         # já aprendeu com as viagens antigas guardadas (aprendizado.py)
     "rota_preferida": "rapida",   # "rapida" ou "tranquila": a que já vem escolhida na prévia
     "tema": "auto",          # "auto" (claro de dia, escuro à noite), "claro" ou "escuro"

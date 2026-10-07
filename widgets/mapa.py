@@ -40,7 +40,7 @@ import rede
 import sinais
 import tema
 from diagnostico import seguro
-from mapa_vetor import (AREAS, FUNDO, RUAS, SETAS, FonteVetorial, chave_nome, legenda_se_precisa,
+from mapa_vetor import (AREAS, FUNDO, RUAS, SETAS, FonteVetorial, chave_nome, legenda_se_precisa, origem_padrao,
                         tela_animando, tiles_do_retangulo, z_dados)
 
 ZOOM_MIN, ZOOM_MAX = 11.0, 19.0   # o app é só de Goiânia: de longe, a cidade inteira
@@ -69,6 +69,12 @@ SUAVE_GIRO = 4.0           # rapidez do mapa girando com a direção (1/s)
 ZOOM_NAV_PERTO, ZOOM_NAV_LONGE = 17.4, 16.6
 HISTERESE_ZOOM = 0.75      # só troca o nível de desenho com essa folga
 ORCAMENTO_TILES_S = 0.006  # por quadro, no máximo isso montando tiles
+# Mapa sem buraco (pedido do dono, 07/10/2026): de perto (zoom de desenho >= ZOOM_COM_FUNDO),
+# enquanto o pedaço detalhado não fica pronto, aparece no lugar o mesmo pedaço no
+# desenho do zoom RZ_FUNDO, esticado (ele já vem pronto dentro do app).
+ZOOM_COM_FUNDO = 15
+RZ_FUNDO = 14
+ADIANTAR_POR_VEZ = 14      # pedaços vizinhos/de outros zooms pedidos "para depois" a cada vista nova
 # animações da prévia da rota (pedido do dono, 07/10/2026: escolher um destino
 # dava uma travada e o caminho aparecia seco)
 RADAR_VOLTA_S = 1.7        # cada onda do "procurando caminho" leva isso
@@ -127,6 +133,19 @@ def _dif_angulo(de, para):
     return (para - de + 180.0) % 360.0 - 180.0
 
 
+def nivel_de_desenho(zoom):
+    """O zoom (inteiro) em que o mapa é DESENHADO para o zoom da tela. Só os
+    que vêm prontos dentro do app (mapa_vetor.ZOOMS_PRONTOS: 11 a 14, 16 e
+    17), para o celular nunca precisar desenhar um pedaço na hora:
+    - entre 14 e 16 usa o 14 esticado ou o 16 encolhido, o que estiver mais perto;
+    - de 18 para cima usa o 17 esticado (as ruas ficam com a largura que têm
+      de verdade nessa aproximação, como no Google Maps)."""
+    rz = int(max(ZOOM_MIN, min(17, round(zoom))))
+    if rz == 15:
+        rz = 16 if zoom >= 15.3 else 14
+    return rz
+
+
 class _Rotulo:
     """Um nome desenhado na tela (posição/ângulo atualizados a cada quadro)."""
 
@@ -169,13 +188,15 @@ class MapaHUD(Widget):
         self.eu = None                      # (lat, lon, rumo ou None, precisão m)
         self._navegando = False
         self._escala = Metrics.density      # px de tela por px do mundo no zoom 14
-        self._origem = mundo(self.centro[0], self.centro[1], 14)
+        self._origem = origem_padrao()      # fixo (centro de Goiânia): os pedaços prontos dependem dele
         self._rota, self._trilha, self._destino = [], [], None
         self._trechos = []                  # avenidas da rota: [(pontos, nível)]
         self._transito = []                 # trânsito de agora na rota: [(pontos, magnitude)]
         self._larg_rota = []
         self._alternativas = []
         self._desenhados = {}               # (dz, tx, ty, rz) -> [(grupo, instrução), ...]
+        self._fundo_desenhado = {}          # (dz, tx, ty, RZ_FUNDO) -> instrução (o pedaço esticado)
+        self._faltando = True               # ainda falta pedaço detalhado na vista de agora
         self._nivel = None                  # (dz, rz) atual
         self._rotulos = []
         self._texturas = collections.OrderedDict()
@@ -228,6 +249,8 @@ class MapaHUD(Widget):
             self._m_rot = Rotate(angle=0, axis=(0, 0, 1))
             self._m_esc = Scale(1, 1, 1)
             self._m_centro = Translate(0, 0)
+        self._g_fundo = InstructionGroup()    # pedaços esticados que tapam buraco (por baixo de tudo)
+        self.canvas.add(self._g_fundo)
         self._g_areas = InstructionGroup()
         self.canvas.add(self._g_areas)
         self._g_ruas = {"contorno": InstructionGroup()}   # a borda das ruas, por baixo de todas elas
@@ -441,7 +464,7 @@ class MapaHUD(Widget):
                              "para": (para, zoom, ancora), "centro": meio}
                 # já desenha (e pede) o mapa no zoom de CHEGADA: os pedaços do zoom
                 # atual ficam na tela, esticados, até os novos cobrirem tudo
-                self._rz_fixo = int(max(ZOOM_MIN, min(ZOOM_MAX, round(zoom))))
+                self._rz_fixo = nivel_de_desenho(zoom)
                 self._pedir_tiles_de(para, zoom, ancora)
                 self._ligar_animacao()
                 return
@@ -458,18 +481,28 @@ class MapaHUD(Widget):
         self._voo = None
         self._rz_fixo = None
 
-    def _pedir_tiles_de(self, centro_local, zoom, ancora):
-        """Pede já o preparo dos pedaços do mapa da vista de CHEGADA do voo
-        (norte para cima): quando a câmera chega, o mapa está pronto ou quase."""
-        rz = self._rz_fixo
+    def preaquecer(self, largura, altura):
+        """Na abertura do app (a tela do mapa ainda nem apareceu): já pede os
+        pedaços do mapa de onde a pessoa estava da última vez, no zoom em que
+        o mapa abre. Quando a abertura termina, o mapa está na tela."""
+        rz = nivel_de_desenho(self.zoom)
+        self._pedir_tiles_de(self._local(*self.centro), self.zoom, self.ancora, rz, largura, altura)
+
+    def _pedir_tiles_de(self, centro_local, zoom, ancora, rz=None, largura=None, altura=None):
+        """Pede já o preparo dos pedaços do mapa de uma vista que AINDA não é a
+        da tela (a chegada do voo da câmera, a abertura do app), norte para
+        cima: quando a câmera chega, o mapa está pronto ou quase."""
+        rz = self._rz_fixo if rz is None else rz
+        largura = self.width if largura is None else largura
+        altura = self.height if altura is None else altura
         dz = z_dados(rz)
         s = self._escala * 2.0 ** (zoom - 14)
         cx, cy = centro_local
-        ax, ay = self.width * ancora[0], self.height * ancora[1]
+        ax, ay = largura * ancora[0], altura * ancora[1]
         margem = dp(40)
         x0 = cx + (-margem - ax) / s + self._origem[0]
-        x1 = cx + (self.width + margem - ax) / s + self._origem[0]
-        y0 = self._origem[1] - (cy + (self.height + margem - ay) / s)
+        x1 = cx + (largura + margem - ax) / s + self._origem[0]
+        y0 = self._origem[1] - (cy + (altura + margem - ay) / s)
         y1 = self._origem[1] - (cy + (-margem - ay) / s)
         gx0, gy0, gx1, gy1 = self._caixa_goiania
         lado = 256.0 * 2 ** (14 - dz)
@@ -480,6 +513,8 @@ class MapaHUD(Widget):
             chave = (dz, tx, ty, rz)
             if chave not in self._desenhados:
                 self.fonte.pedir(chave)
+                if rz >= ZOOM_COM_FUNDO:   # (pedido por último = feito primeiro: é rápido e tapa o buraco)
+                    self.fonte.pedir((dz, tx, ty, RZ_FUNDO))
 
     def ao_voltar(self):
         """App voltou do segundo plano: no Android as texturas dos nomes podem
@@ -568,7 +603,7 @@ class MapaHUD(Widget):
         if self._rz_fixo is not None:
             self._rz = self._rz_fixo
         elif self._rz is None or abs(self.zoom - self._rz) > HISTERESE_ZOOM:
-            self._rz = int(max(ZOOM_MIN, min(ZOOM_MAX, round(self.zoom))))
+            self._rz = nivel_de_desenho(self.zoom)
         return self._rz
 
     def _atualizar_tiles(self):
@@ -600,20 +635,44 @@ class MapaHUD(Widget):
         mx, my = (cx + self._origem[0]) / lado, (self._origem[1] - cy) / lado
         faltando = adiado = False
         t0 = time.perf_counter()
+        pedir = []
         for chave in sorted(precisa, key=lambda c: (c[1] + 0.5 - mx) ** 2 + (c[2] + 0.5 - my) ** 2):
             if chave in self._desenhados:
                 continue
             preparado = self.fonte.pronto(chave)
             if preparado is None:
-                self.fonte.pedir(chave)
+                pedir.append(chave)
                 faltando = True
             elif time.perf_counter() - t0 > ORCAMENTO_TILES_S:
                 faltando = adiado = True  # monta no próximo quadro (sem tranco)
             else:
                 self._desenhar_tile(chave, preparado)
+        # a fila atende o pedido MAIS RECENTE primeiro: pede de fora para dentro (o do
+        # meio da tela por último) e, depois de todos, os de fundo (rápidos; tapam o buraco)
+        for chave in reversed(pedir):
+            self.fonte.pedir(chave)
+        com_fundo = rz >= ZOOM_COM_FUNDO
+        quer_fundo = set()
+        if com_fundo:
+            for chave in precisa:
+                if chave not in self._desenhados:
+                    quer_fundo.add((chave[0], chave[1], chave[2], RZ_FUNDO))
+            for chave in sorted(quer_fundo, key=lambda c: -((c[1] + 0.5 - mx) ** 2 + (c[2] + 0.5 - my) ** 2)):
+                if chave in self._fundo_desenhado:
+                    continue
+                preparado = self.fonte.pronto(chave)
+                if preparado is None:
+                    self.fonte.pedir(chave)
+                else:
+                    self._desenhar_fundo(chave, preparado)
+        for chave in [c for c in self._fundo_desenhado if c not in quer_fundo]:
+            self._g_fundo.remove(self._fundo_desenhado.pop(chave))   # o detalhado chegou (ou saiu da tela)
         if adiado:
             self._tiles_sujo = True
             Clock.schedule_once(lambda dt: self._aplicar(), 0)
+        self._faltando = faltando
+        if not adiado and not faltando:
+            self._adiantar(precisa, dz, rz, (min(xs), min(ys), max(xs), max(ys)))
         for chave in list(self._desenhados):
             mesmo_nivel = (chave[0], chave[3]) == nivel
             # desenho de outro zoom só sai quando o novo já cobriu a tela
@@ -623,12 +682,56 @@ class MapaHUD(Widget):
             self._nivel = nivel
             self._t_rotulos = 0.0
 
+    def _adiantar(self, precisa, dz, rz, caixa):
+        """A tela está completa: deixa prontos (sem pressa, quando a fila do
+        mapa estiver livre) os pedaços vizinhos e os da mesma vista um zoom
+        para dentro e um para fora. Arrastar e dar zoom já acham o mapa pronto."""
+        if self.fonte.ocupada():
+            return
+        gx0, gy0, gx1, gy1 = self._caixa_goiania
+        x0, y0, x1, y1 = (max(caixa[0], gx0), max(caixa[1], gy0), min(caixa[2], gx1), min(caixa[3], gy1))
+        candidatos = []
+        niveis = sorted(set(nivel_de_desenho(z) for z in range(int(ZOOM_MIN), int(ZOOM_MAX) + 1)))
+        aqui = niveis.index(rz) if rz in niveis else 0
+        for outro in niveis[aqui + 1:aqui + 2] + niveis[max(0, aqui - 1):aqui]:   # um nível para dentro e um para fora
+            if True:
+                dzo = z_dados(outro)
+                candidatos += [(dzo, tx, ty, outro) for tx, ty in tiles_do_retangulo(x0, y0, x1, y1, dzo)]
+        lado = 256.0 * 2 ** (14 - dz)        # um pedaço a mais para cada lado
+        for tx, ty in tiles_do_retangulo(max(caixa[0] - lado, gx0), max(caixa[1] - lado, gy0),
+                                         min(caixa[2] + lado, gx1), min(caixa[3] + lado, gy1), dz):
+            if (dz, tx, ty, rz) not in precisa:
+                candidatos.append((dz, tx, ty, rz))
+        for chave in reversed(candidatos[:ADIANTAR_POR_VEZ]):   # (o último pedido é o primeiro a ser feito)
+            self.fonte.pedir(chave, adiantado=True)
+
+    def _desenhar_fundo(self, chave, preparado):
+        """O pedaço no desenho de longe, esticado, onde o detalhado ainda não chegou."""
+        g = InstructionGroup()
+        for nome, listas in preparado["areas"]:
+            if listas:
+                g.add(Color(*AREAS[nome]))
+                for vertices, indices in listas:
+                    g.add(Mesh(vertices=vertices, indices=indices, mode="triangles"))
+        for nome, cor_rua, listas in preparado["ruas"]:
+            if listas and nome in RUAS:
+                g.add(Color(*cor_rua))
+                for vertices, indices in listas:
+                    g.add(Mesh(vertices=vertices, indices=indices, mode="triangles"))
+        self._g_fundo.add(g)
+        self._fundo_desenhado[chave] = g
+
     def _desenhar_tile(self, chave, preparado):
         """Cada camada do tile vira UM subgrupo: tirar o tile depois é tirar
         poucos itens (antes eram centenas de malhas, cada uma procurada na
         lista inteira da camada)."""
         itens = []
         sub = InstructionGroup()
+        if chave[3] >= ZOOM_COM_FUNDO:   # chão do pedaço: tapa o desenho esticado que estava no lugar
+            lado = 256.0 * 2 ** (14 - chave[0])
+            sub.add(Color(*FUNDO))
+            sub.add(Rectangle(pos=(chave[1] * lado - self._origem[0], self._origem[1] - (chave[2] + 1) * lado),
+                              size=(lado, lado)))
         for nome, listas in preparado["areas"]:
             if listas:
                 sub.add(Color(*AREAS[nome]))
@@ -653,7 +756,8 @@ class MapaHUD(Widget):
             grupo.remove(sub)
 
     def _tile_pronto(self, chave):
-        if (chave[0], chave[3]) == self._nivel:
+        if (chave[0], chave[3]) == self._nivel or (chave[3] == RZ_FUNDO and self._nivel is not None
+                                                    and self._nivel[1] >= ZOOM_COM_FUNDO):
             self._tiles_sujo = True
             self._aplicar()
 
@@ -682,7 +786,9 @@ class MapaHUD(Widget):
         return tex
 
     def _pedir_rotulos(self):
-        if self._voo is not None:   # no voo os nomes só acompanham; a escolha (cara) fica para a chegada
+        # no voo e com o dedo arrastando/dando zoom, os nomes só acompanham o mapa; a
+        # escolha de quais cabem (cara) fica para quando o movimento para
+        if self._voo is not None or self._toques:
             return
         if self._ev_rotulos is None:
             espera = max(0.0, REPOSICIONAR_S - (time.time() - self._t_rotulos))
@@ -1499,4 +1605,6 @@ class MapaHUD(Widget):
             self._velocidade = (sum(m[1] for m in recentes) / dur, sum(m[2] for m in recentes) / dur)
             self._ligar_animacao()
         self._movs = []
+        if not self._toques:
+            self._pedir_rotulos()   # soltou o dedo: os nomes da vista nova entram
         return True

@@ -8,3 +8,5 @@ chaves.json
 ferramentas/testes_tela/fotos*/
 ferramentas/testes_tela/.tmp/
 diagnostico.txt
+dados/mapa_pronto.db
+dados/*.novo

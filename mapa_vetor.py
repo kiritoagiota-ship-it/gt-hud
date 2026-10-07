@@ -22,6 +22,7 @@ Coordenadas "locais": pixels do Web Mercator no zoom 14, menos uma origem
 fixa, com Y para cima (como no Kivy).
 """
 import collections
+import marshal
 import math
 import unicodedata
 from array import array
@@ -52,9 +53,25 @@ TRABALHADORES = 1          # mais threads = a tela espera mais pela vez (GIL)
 # preparado ocupava ~8,5 MB em listas de float do Python e cabiam 64 (fora os
 # decodificados) -> centenas de MB no celular. Agora os vértices vão em
 # array (4 bytes por número, ~8x menos) e cabem menos tiles.
-MAX_PREPARADOS = 40
+MAX_PREPARADOS = 56
+# Pedaços do mapa JÁ DESENHADOS ficam guardados no celular (pedido do dono,
+# 07/10/2026: "o app já abre com o mapa carregado; dou zoom, movo e ele já está
+# carregado"). Preparar um pedaço no zoom de navegação leva ~0,3 s no PC e
+# mais de 2 s no celular; ler o pronto do disco leva milésimos. Mudou
+# preparar() ou o estilo (larguras, zoom mínimo de cada rua)? Suba este número:
+VERSAO_PREPARO = 1
+# formato do marshal fixo (2 = o que todo Python lê): o pacote é montado no PC/GitHub
+# com um Python e lido no celular com outro
+FORMATO_MARSHAL = 2
+# ... e os zooms mais usados da cidade INTEIRA já vêm prontos dentro do APK
+# (dados/mapa_pronto.db, montado a cada build por ferramentas/empacotar_prontos.py):
+# a cidade vista de longe (11 a 14), o mapa livre (16) e a navegação (17). Os outros
+# zooms são desenhados na primeira vez e guardados no celular.
+PRONTOS = os.path.join(os.path.dirname(os.path.abspath(__file__)), "dados", "mapa_pronto.db")
+ZOOMS_PRONTOS = (11, 12, 13, 14, 16, 17)
+DENSIDADE_PRONTOS = 2.75   # celular comum; só muda detalhes menores que 1 px
 MAX_DECODIFICADOS = 12
-LIMITE_DISCO_MB = 200
+LIMITE_DISCO_MB = 450
 MAX_VERTICES_MESH = 60000  # índices do Mesh são de 16 bits
 MAX_INDICES_MESH = 60000   # e o Kivy recusa (erro!) Mesh com mais de 65535 índices
 # os nomes candidatos do tile ficam numa grade de GRADE x GRADE quadrados: a
@@ -661,6 +678,85 @@ def preparar(camadas, dz, tx, ty, rz, origem, escala, densidade):
     }
 
 
+# --- pedaços prontos guardados no disco ------------------------------------------
+def empacotar(preparado):
+    """O pedaço preparado em bytes (as cores ficam de fora: dependem do tema)."""
+    def cru(listas):
+        return [(v.tobytes(), i.tobytes()) for v, i in listas]
+    return zlib.compress(marshal.dumps({
+        "areas": [(nome, cru(listas)) for nome, listas in preparado["areas"]],
+        "ruas": [(nome, cru(listas)) for nome, _, listas in preparado["ruas"]],
+        "rotulos": preparado["rotulos"], "celula": preparado["celula"]}, FORMATO_MARSHAL), 1)
+
+
+def desempacotar(dados, rz):
+    """O contrário de empacotar(), com as cores do tema de agora."""
+    d = marshal.loads(zlib.decompress(dados))
+
+    def listas(crus):
+        saida = []
+        for vb, ib in crus:
+            v, i = array("f"), array("H")
+            v.frombytes(vb)
+            i.frombytes(ib)
+            saida.append((v, i))
+        return saida
+
+    def cor(nome):
+        if nome == "contorno":
+            return tuple(CONTORNO)
+        return cor_rua(nome, rz) if nome in RUAS else SETAS[nome]
+    celula, grade = d["celula"], {}
+    for r in d["rotulos"]:
+        grade.setdefault((int(r["x"] // celula), int(r["y"] // celula)), []).append(r)
+    return {"areas": [(nome, listas(crus)) for nome, crus in d["areas"]],
+            "ruas": [(nome, cor(nome), listas(crus)) for nome, crus in d["ruas"]],
+            "rotulos": d["rotulos"], "grade": grade, "celula": celula, "ok": True}
+
+
+def origem_padrao():
+    """O ponto (px do mundo no zoom 14) em torno do qual o mapa é desenhado:
+    o centro de Goiânia. Fixo: os pedaços prontos dependem dele."""
+    lat, lon = goiania.CENTRO
+    n = 256.0 * 2.0 ** 14
+    return ((lon + 180.0) / 360.0 * n,
+            (1.0 - math.asinh(math.tan(math.radians(lat))) / math.pi) / 2.0 * n)
+
+
+_prontos_apk = {"con": None, "falta": False, "trava": threading.Lock()}
+
+
+def pronto_do_app(chave):
+    """Os bytes (empacotar) do pedaço (dz, tx, ty, rz) que já veio desenhado
+    dentro do APK, ou None."""
+    if _prontos_apk["falta"]:
+        return None
+    dz, tx, ty, rz = chave
+    try:
+        with _prontos_apk["trava"]:
+            con = _prontos_apk["con"]
+            if con is None:
+                if not os.path.exists(PRONTOS):
+                    _prontos_apk["falta"] = True
+                    return None
+                con = sqlite3.connect(PRONTOS, check_same_thread=False)
+                sobre = dict(con.execute("SELECT chave, valor FROM sobre").fetchall())
+                # feito por outra versão do desenho, ou de outro mapa: não serve
+                if (sobre.get("versao") != str(VERSAO_PREPARO) or sobre.get("mapa") != data_do_pacote()
+                        or sobre.get("marshal") != str(FORMATO_MARSHAL)):
+                    con.close()
+                    _prontos_apk["falta"] = True
+                    print("[mapa] os pedaços prontos do app são de outra versão: ignorados")
+                    return None
+                _prontos_apk["con"] = con
+            linha = con.execute("SELECT dados FROM prontos WHERE rz = ? AND dz = ? AND tx = ? AND ty = ?",
+                                (rz, dz, tx, ty)).fetchone()
+        return linha[0] if linha else None
+    except Exception as e:
+        print("[mapa] prontos do app:", type(e).__name__, e)
+        return None
+
+
 # --- o mapa que vem dentro do app ---------------------------------------------
 _pacote = {"con": None, "falta": False, "trava": threading.Lock()}
 
@@ -683,6 +779,18 @@ def do_pacote(z, x, y):
     except Exception as e:
         print("[mapa] pacote:", e)
         return None
+
+
+def data_do_pacote():
+    """Quando o mapa embutido foi montado ("" sem pacote): pedaço pronto
+    guardado de um mapa mais velho não serve."""
+    do_pacote(0, 0, 0)
+    try:
+        with _pacote["trava"]:
+            linha = _pacote["con"].execute("SELECT valor FROM sobre WHERE chave = 'feito_em'").fetchone()
+        return linha[0] if linha else ""
+    except Exception:
+        return ""
 
 
 def partes_no_pacote():
@@ -708,7 +816,14 @@ class FonteVetorial:
         self._prontos = collections.OrderedDict()       # (dz, tx, ty, rz) -> preparado
         self._decodificados = collections.OrderedDict()  # (dz, tx, ty) -> camadas
         self._pedidos = collections.deque()
+        self._adiantados = collections.deque()   # pedidos "para depois": vizinhos e zooms ao lado
         self._pendentes = set()
+        # (a pasta leva tudo de que o desenho depende: muda um, os guardados antigos não servem)
+        self._pasta_prontos = os.path.join(self.pasta, "prontos", "v%d-%s-%.2f-%s" % (
+            VERSAO_PREPARO, data_do_pacote() or "rede", densidade, FORMATO_MARSHAL))
+        self.lidos_do_disco = 0                  # (para o diagnóstico e os testes)
+        self.lidos_do_app = 0
+        self.preparados_agora = 0
         self._falhas = {}
         self._trava = threading.Lock()
         self._aviso = threading.Condition(self._trava)
@@ -760,11 +875,22 @@ class FonteVetorial:
             self._prontos.move_to_end(chave)
         return p
 
-    def pedir(self, chave):
-        """Pede o preparo do tile (dz, tx, ty, rz) se ainda não tem."""
+    def pedir(self, chave, adiantado=False):
+        """Pede o preparo do tile (dz, tx, ty, rz) se ainda não tem.
+        adiantado=True: ainda não está na tela (vizinho, zoom ao lado); só
+        é feito quando não há nada da tela esperando."""
         if chave in self._prontos:
             return
         with self._trava:
+            if adiantado:
+                if chave in self._pendentes or chave in self._adiantados \
+                        or time.time() - self._falhas.get(chave, 0) < 15:
+                    return
+                self._adiantados.append(chave)
+                while len(self._adiantados) > 40:
+                    self._adiantados.popleft()
+                self._aviso.notify()
+                return
             if chave in self._pendentes or time.time() - self._falhas.get(chave, 0) < 15:
                 return
             self._pendentes.add(chave)
@@ -772,6 +898,10 @@ class FonteVetorial:
             while len(self._pedidos) > 60:
                 self._pendentes.discard(self._pedidos.popleft())
             self._aviso.notify()
+
+    def ocupada(self):
+        """Ainda há pedaço DA TELA esperando o preparo?"""
+        return bool(self._pendentes)
 
     # ------------------------------------------------------------------------
     def _descobrir_versao(self):
@@ -798,6 +928,7 @@ class FonteVetorial:
         with self._trava:
             self._fechada = True
             self._pedidos.clear()
+            self._adiantados.clear()
             self._aviso.notify_all()
         self._prontos.clear()
         self._decodificados.clear()
@@ -805,11 +936,17 @@ class FonteVetorial:
     def _trabalhar(self):
         while True:
             with self._trava:
-                while not self._pedidos and not self._fechada:
+                while not self._pedidos and not self._adiantados and not self._fechada:
                     self._aviso.wait()
                 if self._fechada:
                     return
-                chave = self._pedidos.pop()   # o mais recente (o que está na tela) primeiro
+                if self._pedidos:
+                    chave = self._pedidos.pop()   # o mais recente (o que está na tela) primeiro
+                else:
+                    chave = self._adiantados.pop()
+                    if chave in self._prontos or chave in self._pendentes:
+                        continue
+                    self._pendentes.add(chave)
             try:
                 preparado = self._preparar(chave)
             except Exception as e:
@@ -828,8 +965,42 @@ class FonteVetorial:
             self._prontos.popitem(last=False)
         self.ao_ficar_pronto(chave)
 
+    def _caminho_pronto(self, chave):
+        dz, tx, ty, rz = chave
+        return os.path.join(self._pasta_prontos, str(rz), "%d_%d_%d.bin" % (dz, tx, ty))
+
     def _preparar(self, chave):
         dz, tx, ty, rz = chave
+        caminho = self._caminho_pronto(chave)
+        try:   # já foi desenhado uma vez neste celular: vem pronto do disco
+            with open(caminho, "rb") as f:
+                pronto = desempacotar(f.read(), rz)
+            try:
+                os.utime(caminho)   # usado agora: é dos últimos a sair quando o disco enche
+            except OSError:
+                pass
+            self.lidos_do_disco += 1
+            return pronto
+        except OSError:
+            pass
+        except Exception as e:   # arquivo estragado: prepara de novo e grava por cima
+            print("[mapa] pronto estragado:", type(e).__name__)
+        dados = pronto_do_app(chave)   # veio desenhado dentro do APK
+        if dados is not None:
+            try:
+                pronto = desempacotar(dados, rz)
+                self.lidos_do_app += 1
+                return pronto
+            except Exception as e:
+                print("[mapa] pronto do app estragado:", type(e).__name__)
+        pronto = self._preparar_do_zero(chave)
+        if pronto is not None and pronto.get("ok"):
+            self._gravar(caminho, empacotar(pronto))
+        return pronto
+
+    def _preparar_do_zero(self, chave):
+        dz, tx, ty, rz = chave
+        self.preparados_agora += 1
         n = 2 ** dz
         base = (dz, tx % n, ty)
         camadas = self._decodificados.get(base)

@@ -206,6 +206,11 @@ class TelaMapa(Screen):
 
         self.raiz = FloatLayout()
         self.mapa = MapaHUD(app.user_data_dir, girar=app.ajustes["girar_mapa"])
+        ultima = app.ajustes["ultima_posicao"]
+        if ultima and len(ultima) == 2 and goiania.dentro(ultima[0], ultima[1]):
+            self.mapa.centro = (float(ultima[0]), float(ultima[1]))
+        from kivy.core.window import Window
+        self.mapa.preaquecer(Window.width, Window.height)   # o mapa se prepara durante a abertura
         self.raiz.add_widget(self.mapa)
         self.mapa.bind(seguindo=lambda *a: self._montar())
 
