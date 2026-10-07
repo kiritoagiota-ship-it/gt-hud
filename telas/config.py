@@ -630,7 +630,11 @@ class TelaConfig(Screen):
                 expl.text = ("A TomTom RECUSOU a chave. Confira no site dela se a chave existe e se o "
                              "produto \"Traffic API\" está ligado nela.")
             else:
-                expl.text = "Sem resposta da TomTom (%s): confira a internet e tente de novo." % type(erro).__name__
+                codigo = getattr(erro, "code", None)
+                if codigo:   # a TomTom respondeu, mas com erro: não é a internet
+                    expl.text = "A TomTom respondeu com erro %s. Envie o diagnóstico para o conserto." % codigo
+                else:
+                    expl.text = "Sem resposta da TomTom (%s): confira a internet e tente de novo." % type(erro).__name__
         rede.em_segundo_plano(consultar, pronto, falhou)
 
     def _configurar_transito(self):

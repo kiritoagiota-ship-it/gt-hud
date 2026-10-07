@@ -182,6 +182,8 @@ class TesteTransito(unittest.TestCase):
         transito.da_cidade("CHAVE", agora=1000.0 + transito.VALIDADE_S + 1, baixar=baixar)
         self.assertEqual(len(pedidos), 2)
         self.assertIn("bbox=-49.45000%2C-16.86000%2C-49.07000%2C-16.48000", pedidos[0])   # lon, lat, lon, lat
+        self.assertIn("language=pt-PT", pedidos[0])     # pt-BR a TomTom recusa (erro 400)
+        self.assertIn("timeValidityFilter=present", pedidos[0])
 
 
 class TesteResumoDaCidade(unittest.TestCase):

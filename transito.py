@@ -28,6 +28,9 @@ from rota import _dist_segmento, distancia_m
 URL = "https://api.tomtom.com/traffic/services/5/incidentDetails"
 CAMPOS = ("{incidents{type,geometry{type,coordinates},properties{id,iconCategory,magnitudeOfDelay,"
           "events{description,code,iconCategory},from,to,length,delay,probabilityOfOccurrence}}}")
+# a TomTom NÃO aceita "pt-BR" (só "pt-PT"): com pt-BR ela respondia erro 400 a toda
+# consulta e o trânsito nunca funcionou no celular (achado em 07/10/2026 pelo botão Testar)
+IDIOMA = "pt-PT"
 VALIDADE_S = 180.0       # as ocorrências da cidade valem por isso (não gasta consulta à toa)
 NA_ROTA_M = 28.0         # até isso da linha da rota: está no caminho
 ATRASO_MOTO = 0.6        # do atraso informado (para carro), quanto vale para a moto elétrica
@@ -83,7 +86,7 @@ def buscar(chave, caixa=None, baixar=None):
     lat0, lon0, lat1, lon1 = caixa or goiania.LIMITES
     consulta = urllib.parse.urlencode({
         "key": chave, "bbox": "%.5f,%.5f,%.5f,%.5f" % (lon0, lat0, lon1, lat1),
-        "fields": CAMPOS, "language": "pt-BR", "timeValidityFilter": "present"})
+        "fields": CAMPOS, "language": IDIOMA, "timeValidityFilter": "present"})
     try:
         dados = (baixar or rede.baixar)(URL + "?" + consulta, 12)
     except urllib.error.HTTPError as e:
