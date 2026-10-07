@@ -356,6 +356,7 @@ class TelaMapa(Screen):
         self.card_marca.add_widget(self.lbl_marca)
         self.card_marca.add_widget(botoes_marca)
         self.mapa.ao_segurar = self._ao_segurar
+        self.mapa.ao_tocar_ocorrencia = self._ver_ocorrencia
 
         self.add_widget(self.raiz)
         self.bind(size=self._posicionar)
@@ -774,6 +775,24 @@ class TelaMapa(Screen):
         self.mapa.areas_cobertas = [(w.x, w.y, w.right, w.top) for w in self.raiz.children
                                     if w is not self.mapa and w is not self.lbl_msg]
         self.mapa._aplicar()
+
+    # --- trânsito ao vivo: tocar no ícone de uma ocorrência -----------------------------
+    def _ver_ocorrencia(self, o):
+        import transito
+        nome = transito.CATEGORIAS.get(o["categoria"], ("Ocorrência de trânsito",))[0]
+        linhas = []
+        if o["de"] and o["ate"] and o["de"] != o["ate"]:
+            linhas.append("De %s até %s." % (o["de"], o["ate"]))
+        elif o["de"] or o["ate"]:
+            linhas.append("Em %s." % (o["de"] or o["ate"]))
+        if o["descricao"] and o["descricao"].lower() != nome.lower():
+            linhas.append(o["descricao"] + ".")
+        if o["metros"] >= 100:
+            linhas.append("Trecho de %s." % fmt_dist(o["metros"]))
+        if o["atraso_s"] >= 60:
+            linhas.append("Atrasa cerca de %d min (medido para carro; de moto passa melhor)."
+                          % round(o["atraso_s"] / 60.0))
+        escolher(nome, [("Fechar", None)], "\n".join(linhas) or "Sem mais detalhes da TomTom.")
 
     # --- ponto marcado: segurar o dedo no mapa --------------------------------------
     def _ao_segurar(self, lat, lon):

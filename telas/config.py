@@ -96,7 +96,7 @@ class Alternar(BotaoHUD):
 # foram sendo criadas): seção -> títulos das linhas, na ordem da tela.
 SECOES = [
     ("Voz", ["Voz do assistente", "Qual voz", "Tom da voz", "Efeito de IA", "Testar a voz"]),
-    ("Navegação", ["Rota preferida", "Trânsito ao vivo", "Aviso de chuva", "Avisar subidas e descidas", "Avisar semáforos", "Continuar em segundo plano",
+    ("Navegação", ["Rota preferida", "Trânsito ao vivo", "Testar o trânsito", "Aviso de chuva", "Avisar subidas e descidas", "Avisar semáforos", "Continuar em segundo plano",
                    "Janela ao minimizar", "Tipo de janela", "Corrida ao vivo"]),
     ("Mapa e tela", ["Aparência", "Mapa gira com a direção", "Mapa offline de Goiânia",
                      "Tela deitada", "Manter tela ligada"]),
@@ -223,6 +223,12 @@ class TelaConfig(Screen):
                                      on_release=lambda *a: self._configurar_transito())
         self.linha_transito = Linha("Trânsito ao vivo", "", self._centralizar(self.btn_transito))
         lista.add_widget(self.linha_transito)
+        self.btn_testar_transito = BotaoHUD(text="Testar", size_hint_x=None, width=dp(130),
+                                            on_release=lambda *a: self._testar_transito())
+        self.linha_testar_transito = Linha(
+            "Testar o trânsito", "Consulta a TomTom agora e mostra se o trânsito ao vivo está respondendo.",
+            self._centralizar(self.btn_testar_transito))
+        lista.add_widget(self.linha_testar_transito)
 
         self.alt_chuva = Alternar(lambda v: self._mudar_simples("avisar_chuva", self.alt_chuva, v))
         lista.add_widget(Linha("Aviso de chuva",
@@ -594,6 +600,39 @@ class TelaConfig(Screen):
             "Acidentes, trânsito lento e obras na sua rota. Falta colar aqui a chave gratuita "
             "da TomTom (ela fica só no seu celular).")
 
+    def _testar_transito(self):
+        """Prova de que o trânsito ao vivo funciona: pergunta à TomTom agora."""
+        import rede
+        import transito
+        app = App.get_running_app()
+        expl = self.linha_testar_transito.explicacao
+        chave = transito.chave_em_uso(app.ajustes)
+        if not chave:
+            expl.text = "Falta a chave da TomTom: toque em Configurar, na linha de cima."
+            return
+        if self.btn_testar_transito.disabled:
+            return
+        self.btn_testar_transito.disabled = True
+        expl.text = "Consultando a TomTom..."
+
+        def consultar():
+            transito.esquecer()   # resposta de agora, não a guardada
+            return transito.da_cidade(chave)
+
+        def pronto(lista):
+            self.btn_testar_transito.disabled = False
+            expl.text = "Funcionando: " + transito.resumo_da_cidade(lista) + "."
+            app.sm.get_screen("mapa").mapa.definir_ocorrencias(lista)
+
+        def falhou(erro):
+            self.btn_testar_transito.disabled = False
+            if isinstance(erro, transito.SemChave):
+                expl.text = ("A TomTom RECUSOU a chave. Confira no site dela se a chave existe e se o "
+                             "produto \"Traffic API\" está ligado nela.")
+            else:
+                expl.text = "Sem resposta da TomTom (%s): confira a internet e tente de novo." % type(erro).__name__
+        rede.em_segundo_plano(consultar, pronto, falhou)
+
     def _configurar_transito(self):
         import rede
         import transito
@@ -611,6 +650,7 @@ class TelaConfig(Screen):
                 if problema is None:
                     app.ajustes["tomtom"] = chave
                     transito.esquecer()
+                    app.atualizar_transito_do_mapa()
                     self._mostrar_transito("Funcionou! O trânsito já entra na próxima rota.")
                 else:
                     self._mostrar_transito(problema)

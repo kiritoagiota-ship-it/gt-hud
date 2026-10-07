@@ -56,6 +56,7 @@ VIBRA_FORCAS = [0, 255, 0, 255]
 RUMO_MIN_KMH = 3.0          # parado, o rumo do GPS é ruído: fica o último
 RUMO_VALIDO_S = 6.0         # rumo mais velho que isso não vai no pedido de rota
 GPS_PERDIDO_FALA_S = 10     # navegando sem sinal por isso: o assistente avisa
+TRANSITO_MAPA_A_CADA_S = 240.0  # mapa: o trânsito de Goiânia é olhado de novo a cada isso (~360 consultas/dia no máximo, de 2.500)
 TRANSITO_A_CADA_S = 240.0      # navegando: olha o trânsito da rota de novo a cada isso
 CHUVA_A_CADA_S = 600.0         # ... e a previsão de chuva
 FIM_APOS_CHEGAR_S = 5.0        # chegou: a rota se encerra sozinha depois disso
@@ -235,6 +236,7 @@ class GTHudApp(App):
         gc.collect()   # as telas antigas saem da memória
         gc.freeze()
         print("[tema] agora:", nome)
+        self.atualizar_transito_do_mapa()   # o mapa novo nasce sem o trânsito desenhado
 
     # --- voz -------------------------------------------------------------------
     def indice_voz(self):
@@ -293,6 +295,8 @@ class GTHudApp(App):
         gc.freeze()
         Clock.schedule_once(self._fechar_corridas_esquecidas, 8)
         Clock.schedule_once(self._aprender_com_as_antigas, 12)
+        Clock.schedule_once(self.atualizar_transito_do_mapa, 5)
+        Clock.schedule_interval(self.atualizar_transito_do_mapa, TRANSITO_MAPA_A_CADA_S)
 
     def on_pause(self):
         self.fundo.ao_pausar()  # rota ativa: segue navegando minimizado
@@ -306,6 +310,7 @@ class GTHudApp(App):
         self.aplicar_orientacao()
         self.conferir_tema()
         self.sm.get_screen("mapa").mapa.ao_voltar()
+        self.atualizar_transito_do_mapa()
 
     def on_stop(self):
         self.parar_corrida()
@@ -611,6 +616,23 @@ class GTHudApp(App):
             if self.rota_previa is not None:
                 self.sm.get_screen("mapa").mostrar_previa(self.rota_previa, self.rotas_previa, enquadrar=False)
         rede.em_segundo_plano(olhar, pronto, lambda e: None)
+
+    def atualizar_transito_do_mapa(self, dt=None):
+        """O trânsito de Goiânia desenhado no mapa, mesmo sem rota (acidentes,
+        obras, vias interditadas e trechos lentos). Sem chave: não faz nada."""
+        chave = transito.chave_em_uso(self.ajustes)
+        if not chave or getattr(self, "_buscando_transito", False):
+            return
+        self._buscando_transito = True
+
+        def pronto(lista):
+            self._buscando_transito = False
+            self.na_tela(lambda: self.sm.get_screen("mapa").mapa.definir_ocorrencias(lista))
+
+        def falhou(erro):
+            self._buscando_transito = False
+            print("[transito] mapa:", type(erro).__name__)
+        rede.em_segundo_plano(lambda: transito.da_cidade(chave), pronto, falhou)
 
     def _informar(self, rota, ocorrencias):
         """Histórico e trânsito de UMA rota (roda numa thread)."""

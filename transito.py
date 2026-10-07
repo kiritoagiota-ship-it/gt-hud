@@ -121,6 +121,23 @@ def testar(chave):
         return "Não consegui falar com a TomTom: confira a internet."
 
 
+def resumo_da_cidade(ocorrencias):
+    """"12 ocorrências em Goiânia agora (3 acidentes, 8 de trânsito lento, 1 de obras)"."""
+    if not ocorrencias:
+        return "nenhuma ocorrência em Goiânia agora"
+    plural = {1: "acidentes", 3: "perigos na via", 6: "de trânsito lento", 7: "faixas fechadas",
+              8: "vias interditadas", 9: "de obras", 11: "alagamentos", 14: "veículos quebrados"}
+    um = {1: "acidente", 3: "perigo na via", 6: "de trânsito lento", 7: "faixa fechada",
+          8: "via interditada", 9: "de obras", 11: "alagamento", 14: "veículo quebrado"}
+    conta = {}
+    for o in ocorrencias:
+        conta[o["categoria"]] = conta.get(o["categoria"], 0) + 1
+    partes = ["%d %s" % (n, (um if n == 1 else plural)[c]) for c, n in sorted(conta.items(), key=lambda p: -p[1])]
+    total = len(ocorrencias)
+    return "%d %s em Goiânia agora (%s)" % (total, "ocorrência" if total == 1 else "ocorrências",
+                                            ", ".join(partes))
+
+
 def _na_rota(rota, ponto, perto_de):
     """(metros desde o começo, distância até a linha) do ponto mais perto da
     rota, procurando em volta do índice `perto_de`."""

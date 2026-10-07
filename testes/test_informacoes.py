@@ -184,6 +184,16 @@ class TesteTransito(unittest.TestCase):
         self.assertIn("bbox=-49.45000%2C-16.86000%2C-49.07000%2C-16.48000", pedidos[0])   # lon, lat, lon, lat
 
 
+class TesteResumoDaCidade(unittest.TestCase):
+    def test_conta_por_tipo(self):
+        lista = [{"categoria": c} for c in (6, 6, 6, 1, 9)]
+        self.assertEqual(transito.resumo_da_cidade(lista),
+                         "5 ocorrências em Goiânia agora (3 de trânsito lento, 1 acidente, 1 de obras)")
+        self.assertEqual(transito.resumo_da_cidade([{"categoria": 1}, {"categoria": 1}]),
+                         "2 ocorrências em Goiânia agora (2 acidentes)")
+        self.assertEqual(transito.resumo_da_cidade([]), "nenhuma ocorrência em Goiânia agora")
+
+
 class TesteChaveEmUso(unittest.TestCase):
     def test_a_dos_ajustes_vale_mais_que_a_do_apk(self):
         import chaves

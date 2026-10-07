@@ -90,6 +90,9 @@ MAX_CELULAS_LUGARES = 24
 # faixa de trânsito por baixo da rota, pela gravidade (1 leve ... 3 parado, 4 via interditada)
 CORES_TRANSITO = {1: (1.0, 0.84, 0.16, 0.92), 2: (1.0, 0.52, 0.10, 0.92), 3: (0.92, 0.13, 0.13, 0.95),
                   4: (0.52, 0.05, 0.22, 1.0)}
+ZOOM_OCORRENCIAS = 12.0    # acidente, obra, via interditada (trânsito ao vivo): desde bem longe
+ZOOM_LENTOS = 13.5         # o ícone de trânsito lento, um pouco mais de perto (o trecho pintado, sempre)
+TOQUE_OCORRENCIA_DP = 30   # tocou até isso do ícone: abre o que é
 ZOOM_RADARES = 14.5        # radares aparecem bem antes
 ZOOM_SINAIS = 17.0         # fora da navegação, semáforos e lombadas a partir desse zoom
 MAX_SINAIS = 40
@@ -206,6 +209,11 @@ class MapaHUD(Widget):
         self._radar_t0 = None               # "procurando caminho": ondas saindo de quem pedala
         self._dest_t0 = None                # pino do destino caindo
         self.ao_segurar = None              # ao_segurar(lat, lon): dedo parado no mapa
+        self.ocorrencias = []               # trânsito de Goiânia agora (transito.py), mesmo sem rota
+        self._ocorr_icones = []             # [(lat, lon, tipo do ícone, ocorrência)]
+        self._ocorr_na_tela = []            # [(x local, y local, ocorrência)] com ícone à vista
+        self._larg_geral = []               # linhas dos trechos lentos da cidade
+        self.ao_tocar_ocorrencia = None     # ao_tocar_ocorrencia(ocorrência): toque no ícone
         self._ev_segurar = None
         self._velocidade = (0.0, 0.0)
         self._movs = []
@@ -230,6 +238,8 @@ class MapaHUD(Widget):
         for nome in SETAS:  # setas de mão única: por cima de todas as ruas, por baixo da rota
             self._g_ruas[nome] = InstructionGroup()
             self.canvas.add(self._g_ruas[nome])
+        self._g_transito = InstructionGroup()   # trânsito da cidade: por cima das ruas, por baixo da rota
+        self.canvas.add(self._g_transito)
         self._g_trilha = InstructionGroup()
         self._g_alt = InstructionGroup()      # outras rotas que dá para escolher (cinza)
         self._g_rota = InstructionGroup()
@@ -348,6 +358,33 @@ class MapaHUD(Widget):
         parado, vinho = via interditada). A linha da rota segue por cima."""
         self._transito = [(list(pontos), m) for pontos, m in trechos if len(pontos) >= 2]
         self._refazer_linhas()
+
+    def definir_ocorrencias(self, ocorrencias):
+        """O trânsito de Goiânia agora, mesmo sem rota (pedido do dono, 07/10/2026:
+        \"não vi nada de diferente no mapa\"): trecho lento pintado por magnitude
+        e um ícone por ocorrência (tocar nele abre o que é)."""
+        self.ocorrencias = list(ocorrencias or [])
+        self._g_transito.clear()
+        self._larg_geral = []
+        self._ocorr_icones = []
+        for o in self.ocorrencias:
+            pontos = o["pontos"]
+            magnitude = 4 if o["categoria"] == 8 else max(1, min(4, o["magnitude"] or 1))
+            if len(pontos) >= 2:
+                plano = []
+                for lat, lon in pontos:
+                    plano.extend(self._local(lat, lon))
+                self._g_transito.add(Color(*CORES_TRANSITO[magnitude]))
+                linha = Line(points=plano, width=1, joint="round", cap="round", **LINHA_LEVE)
+                self._g_transito.add(linha)
+                self._larg_geral.append(linha)
+            lat, lon = pontos[len(pontos) // 2]
+            self._ocorr_icones.append((lat, lon, "transito:%d:%d" % (o["categoria"], magnitude), o))
+        # o que mais importa primeiro (se houver ícones demais na tela, os lentos é que ficam de fora)
+        self._ocorr_icones.sort(key=lambda i: (i[3]["categoria"] == 6, -(i[3]["magnitude"] or 0)))
+        self._larg_usada = None
+        self._ajustar_larguras(self._escala_tela())
+        self._escolher_sinais()
 
     def definir_alternativas(self, listas):
         """Rotas que a pessoa pode escolher em vez da atual (desenho cinza)."""
@@ -825,6 +862,36 @@ class MapaHUD(Widget):
                 g.add(Rectangle(pos=(-dp(8), dp(7)), size=(dp(16), dp(11))))  # maleta
                 g.add(Line(points=[-dp(3.5), dp(18), -dp(3.5), dp(21.5), dp(3.5), dp(21.5), dp(3.5), dp(18)],
                            width=dp(1.3)))
+        elif tipo.startswith("transito:"):
+            _, categoria, magnitude = tipo.split(":")
+            categoria, magnitude = int(categoria), int(magnitude)
+            borda = (0.04, 0.05, 0.08, 0.95)
+            if categoria == 8:      # via interditada: placa de "proibido" (disco vermelho, barra branca)
+                g.add(Color(*borda))
+                g.add(Ellipse(pos=(-dp(14), -dp(14)), size=(dp(28), dp(28))))
+                g.add(Color(0.86, 0.10, 0.14, 1))
+                g.add(Ellipse(pos=(-dp(12), -dp(12)), size=(dp(24), dp(24))))
+                g.add(Color(1, 1, 1, 1))
+                g.add(Rectangle(pos=(-dp(8), -dp(2.5)), size=(dp(16), dp(5))))
+            elif categoria == 6:    # trânsito lento: disco na cor do trecho com três "carros" em fila
+                g.add(Color(*borda))
+                g.add(Ellipse(pos=(-dp(12), -dp(12)), size=(dp(24), dp(24))))
+                g.add(Color(*CORES_TRANSITO[magnitude][:3], 1))
+                g.add(Ellipse(pos=(-dp(10), -dp(10)), size=(dp(20), dp(20))))
+                g.add(Color(*borda))
+                for k in (-1, 0, 1):
+                    g.add(Rectangle(pos=(-dp(2) + k * dp(5.5), -dp(4)), size=(dp(4), dp(8))))
+            else:                   # acidente (vermelho), obras e o resto (laranja): triângulo com "!"
+                cor = (0.90, 0.12, 0.14, 1) if categoria == 1 else tuple(tema.LARANJA)
+                fora = [(0, dp(16)), (dp(16), -dp(11)), (-dp(16), -dp(11))]
+                dentro = [(0, dp(12)), (dp(12.5), -dp(9)), (-dp(12.5), -dp(9))]
+                for pts, c in ((fora, borda), (dentro, cor)):
+                    g.add(Color(*c))
+                    g.add(Mesh(vertices=[v for x, y in pts for v in (x, y, 0, 0)], indices=[0, 1, 2],
+                               mode="triangles"))
+                g.add(Color(1, 1, 1, 1))
+                g.add(Rectangle(pos=(-dp(1.5), -dp(2)), size=(dp(3), dp(9))))
+                g.add(Rectangle(pos=(-dp(1.5), -dp(6.5)), size=(dp(3), dp(3))))
         elif sinais.e_radar(tipo):
             # placa de limite: disco branco, aro vermelho e o número (ou "R" sem limite informado)
             g.add(Color(0.85, 0.10, 0.16, 1))
@@ -859,7 +926,9 @@ class MapaHUD(Widget):
         """Ícones dos semáforos/lombadas à vista (de perto: de longe poluiria)."""
         self._g_sinais.clear()
         self._sinais = []
-        if self.sinais_rota is None and self.zoom < ZOOM_RADARES and not self.marcos:
+        self._ocorr_na_tela = []
+        ocorrencias = self._ocorr_icones if self.zoom >= ZOOM_OCORRENCIAS else []
+        if self.sinais_rota is None and self.zoom < ZOOM_RADARES and not self.marcos and not ocorrencias:
             return
         cantos = [self._local_para_geo(*self._tela_para_local(px, py))
                   for px, py in ((self.x, self.y), (self.right, self.y), (self.x, self.top),
@@ -879,6 +948,14 @@ class MapaHUD(Widget):
                                     so_radares=self.zoom < ZOOM_SINAIS)
         # Casa e Trabalho: sempre à vista (são referência), por cima dos outros
         fonte = list(fonte) + [p for p in self.marcos if la0 <= p[0] <= la1 and lo0 <= p[1] <= lo1]
+        # trânsito ao vivo: antes dos outros (cabe pouco ícone na tela e este é o que muda o caminho)
+        de_quem = {}
+        transito_a_vista = []
+        for lat, lon, tipo, o in ocorrencias:
+            if la0 <= lat <= la1 and lo0 <= lon <= lo1 and (o["categoria"] != 6 or self.zoom >= ZOOM_LENTOS):
+                transito_a_vista.append((lat, lon, tipo))
+                de_quem[(lat, lon, tipo)] = o
+        fonte = transito_a_vista[:MAX_SINAIS // 2] + fonte
         eu_na_tela = self._para_tela(self.eu[0], self.eu[1]) if self.eu else None
         for lat, lon, tipo in fonte:
             if len(postos) >= MAX_SINAIS:
@@ -897,6 +974,8 @@ class MapaHUD(Widget):
             self._g_sinais.add(item[0])
             lx, ly = self._local(lat, lon)
             self._sinais.append((lx, ly, item[1]))
+            if (lat, lon, tipo) in de_quem:
+                self._ocorr_na_tela.append((lx, ly, de_quem[(lat, lon, tipo)]))
         self._mover_sinais()
 
     def _mover_sinais(self):
@@ -1027,6 +1106,8 @@ class MapaHUD(Widget):
         self._larg_usada = s
         for linha, px in self._larg_rota:   # faixa de trânsito, halo, linha da rota e trechos de avenida
             linha.width = px / s
+        for linha in self._larg_geral:      # trânsito da cidade
+            linha.width = dp(4.2) / s
         for linha in (i for i in self._g_trilha.children if isinstance(i, Line)):
             linha.width = dp(2.6) / s
         linhas_alt = [i for i in self._g_alt.children if isinstance(i, Line)]
@@ -1395,6 +1476,21 @@ class MapaHUD(Widget):
         self._cancelar_segurar()
         if touch in self._toques:
             self._toques.remove(touch)
+        # toque curto e parado em cima de um ícone do trânsito: abre o que é
+        inicio = touch.ud.get("mapa_inicio")
+        if (self.ao_tocar_ocorrencia is not None and self._ocorr_na_tela and not self._toques and inicio
+                and math.hypot(touch.x - inicio[0], touch.y - inicio[1]) < dp(12)
+                and time.time() - touch.time_start < 0.5):
+            perto = None
+            for lx, ly, o in self._ocorr_na_tela:
+                sx, sy = self._local_para_tela(lx, ly)
+                d = math.hypot(touch.x - sx, touch.y - sy)
+                if d < dp(TOQUE_OCORRENCIA_DP) and (perto is None or d < perto[0]):
+                    perto = (d, o)
+            if perto is not None:
+                self._movs = []
+                self.ao_tocar_ocorrencia(perto[1])
+                return True
         # inércia: continua deslizando na velocidade dos últimos movimentos
         agora = time.time()
         recentes = [m for m in self._movs if agora - m[0] < 0.12]
