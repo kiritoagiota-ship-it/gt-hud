@@ -19,33 +19,58 @@ https://github.com/kiritoagiota-ship-it/gt-hud/releases/latest
 O secret DEBUG_KEYSTORE_B64 (Settings > Secrets and variables > Actions) tem a
 mesma chave do TraveteFocus: todo APK sai assinado igual e atualiza por cima.
 
-## Servicos usados (gratis, sem conta)
-- Mapa: tiles do OpenStreetMap (tile.openstreetmap.org), pintados no tema do
-  app por um shader. Cache de 30 dias no celular.
-- Rota: Valhalla do OpenStreetMap (valhalla1.openstreetmap.de), perfil de bike,
-  instrucoes em portugues e altimetria da rota (para achar as subidas).
-- Busca: Nominatim do OpenStreetMap (1 busca por segundo, sem autocompletar).
-Todos pedem User-Agent identificado e certificados do certifi (rede.py).
+## Servicos usados
+Sem conta nenhuma:
+- Mapa: Goiania inteira vem DENTRO do app. `dados/goiania_mapa.db` sao os dados
+  (OpenFreeMap/OpenStreetMap, montado por `ferramentas/empacotar_mapa.py`) e
+  `dados/mapa_pronto.db` e o mapa ja desenhado nos zooms que o app usa (montado
+  a cada build por `ferramentas/empacotar_prontos.py`; nao vai para o git).
+- Rota: Valhalla do OpenStreetMap (perfil de bike, instrucoes em portugues,
+  altimetria); reserva: OSRM. A "tranquila" mede as avenidas de cada rota.
+- Busca: base offline de lugares (`dados/goiania_lugares.db`) e Photon.
+- Chuva: Open-Meteo.
 
-## Voz
-Falas prontas em voz/ (geradas no PC com Kokoro, voz original no estilo de
-assistente de IA, nao a voz real do Jarvis). Para trocar a voz ou o texto:
-edite falas.py e rode ferramentas/gerar_voz.py (instrucoes no arquivo).
+Com a chave gratuita da TomTom do dono (secret `TOMTOM_KEY` do GitHub, gravado
+em `chaves.json` no build; o repositorio e publico e a chave nunca vai para o
+codigo). Sem a chave, tudo abaixo simplesmente nao aparece:
+- `transito.py`: acidentes, obras, vias interditadas (Incident Details).
+- `fluxo.py`: ruas coloridas pela velocidade de agora (Vector Flow Tiles).
+- `rota_tomtom.py`: rota pelo transito de agora e conferencia do caminho em uso.
+- `busca.py`: busca de lugares (Fuzzy Search) e endereco de um ponto.
+Tudo isso foi feito pela documentacao da TomTom e testado com respostas
+simuladas: a confirmacao de verdade e no celular (Ajustes > Testar o transito).
+
+## Voz e sons
+- Falas prontas em `voz/` (Kokoro, voz original no estilo de assistente de IA,
+  nao a voz real do Jarvis). Trocar voz ou texto: `falas.py` e
+  `ferramentas/gerar_voz.py`.
+- Sons de aviso em `sons/` (sintetizados por `ferramentas/gerar_sons.py`):
+  `sons.py` diz qual som anuncia cada fala.
 
 ## Estrutura
-- main.py: app, GPS, alertas, destino/rota/navegacao, recalculo, voz
-- telas/: boot, mapa (principal), busca, hud (painel), viagens, detalhe, config
-- widgets/: mapa, manobra, perfil (altimetria), velocimetro, trajeto,
-  grafico, botao, componentes comuns
-- mapa_tiles.py / rede.py: download e cache do mapa, internet em 2o plano
-- rota.py / busca.py / navegacao.py: rota e subidas, busca de lugares, logica
-  curva a curva (testavel no PC, sem tela)
-- falas.py / voz.py: o que o assistente fala e como as falas sao tocadas
-- gps_service.py / gps_android.py / simulador.py: GPS real ou falso
-- java/: Localizacao.java (recebe o GPS no Android 12+) e Satelites.java
-- viagem.py / banco.py / filtro.py / ajustes.py: viagem, SQLite, suavizacao,
-  configuracoes
-- icone/ e ferramentas/: icone, abertura e geradores (nao entram no APK)
+- `main.py`: o app (GPS, destino, rotas, navegacao, recalculo, transito, voz).
+- `telas/`: boot, mapa (principal), busca, hud, viagens, detalhe, config.
+- `widgets/mapa.py`: o mapa (camera, toque, nomes, rota, animacoes);
+  `widgets/mapa_camadas.py`: o que vai por cima das ruas (transito em cores,
+  ocorrencias, semaforos/radares, toque nos lugares);
+  `widgets/icones_mapa.py`: os emblemas dos lugares.
+- `mapa_vetor.py` / `mvt.py`: leitura dos dados do mapa, preparo do desenho,
+  pedacos prontos (do app e guardados no celular).
+- `rota.py` / `rota_tomtom.py` / `navegacao.py` / `busca.py`: rotas, logica
+  curva a curva e busca (testaveis no PC, sem tela).
+- `transito.py` / `fluxo.py` / `clima.py` / `aprendizado.py`: transito ao vivo,
+  chuva e o que o app aprende com as viagens do dono.
+- `falas.py` / `voz.py` / `sons.py`: o que o assistente fala e toca.
+- `segundo_plano.py` / `ao_vivo.py`: navegacao minimizada (janela flutuante) e
+  corrida ao vivo.
+- `gps_service.py` / `gps_android.py` / `simulador.py` / `filtro.py`: GPS real
+  ou falso e o filtro do velocimetro.
+- `viagem.py` / `banco.py` / `ajustes.py` / `ritmo.py`: viagens, SQLite,
+  configuracoes, ritmo.
+- `java/`: codigo Android (GPS, voz, servico, bolha, painel flutuante).
+- `testes/`: testes automaticos (rodam no GitHub antes de cada APK).
+- `ferramentas/`: geradores e `testes_tela/` (testes com a janela do app,
+  so no PC); nao entram no APK.
 
 ## Corrida ao vivo (link para alguém acompanhar pela web)
 
