@@ -18,6 +18,7 @@ import goiania
 import mapa_vetor
 import rede
 import rota as rotas
+import rota_tomtom
 import tema
 from ajustes import Ajustes
 from banco import Banco
@@ -57,6 +58,8 @@ RUMO_MIN_KMH = 3.0          # parado, o rumo do GPS é ruído: fica o último
 RUMO_VALIDO_S = 6.0         # rumo mais velho que isso não vai no pedido de rota
 GPS_PERDIDO_FALA_S = 10     # navegando sem sinal por isso: o assistente avisa
 TRANSITO_MAPA_A_CADA_S = 240.0  # mapa: o trânsito de Goiânia é olhado de novo a cada isso (~360 consultas/dia no máximo, de 2.500)
+CAMINHO_A_CADA_S = 300.0       # navegando: a TomTom refaz o caminho com o trânsito de agora a cada isso
+CAMINHO_PRIMEIRA_S = 45.0      # a 1ª conferência, pouco depois de sair
 TRANSITO_A_CADA_S = 240.0      # navegando: olha o trânsito da rota de novo a cada isso
 CHUVA_A_CADA_S = 600.0         # ... e a previsão de chuva
 FIM_APOS_CHEGAR_S = 5.0        # chegou: a rota se encerra sozinha depois disso
@@ -98,6 +101,8 @@ class GTHudApp(App):
         self.chuva_prevista = None   # previsão de chuva para a rota em vista (clima.chuva)
         self._chuva_dita = False
         self._t_transito = 0.0       # time.monotonic() da última conferência do trânsito na navegação
+        self._t_caminho = 0.0        # ... e da última vez que a TomTom refez o caminho
+        self.rota_sugerida = None    # caminho mais rápido que a TomTom achou durante a navegação
         self._t_chuva = 0.0
         self.corrida = None          # corrida ao vivo em andamento (ao_vivo.AoVivo)
         self.ultimo_resumo = None    # números da última viagem finalizada (cartão de chegada)
@@ -562,7 +567,9 @@ class GTHudApp(App):
         def parcial(lista):
             # a primeira rota tranquila aparece em uns 7 s; o refino segue por trás
             rede._entregar(lambda l: self._alternativas_prontas(l, pedido, final=False), lista)
-        rede.em_segundo_plano(lambda: rotas.pedir_alternativas(origem, alvo, rumo, nome, [rota], parcial),
+        chave_tomtom = transito.chave_em_uso(self.ajustes) or None
+        rede.em_segundo_plano(lambda: rotas.pedir_alternativas(origem, alvo, rumo, nome, [rota], parcial,
+                                                               chave_tomtom=chave_tomtom),
                               lambda rs: self._alternativas_prontas(rs, pedido),
                               lambda e: self._alternativas_prontas([rota], pedido))
 
@@ -696,6 +703,22 @@ class GTHudApp(App):
                 self.nav.incidentes = list(r.incidentes)
                 self.na_tela(lambda: self.sm.get_screen("mapa").mapa.definir_transito(r.trechos_transito))
             rede.em_segundo_plano(olhar, pronto, lambda e: None)
+        if chave and self.posicao is not None and agora - self._t_caminho >= CAMINHO_A_CADA_S:
+            self._t_caminho = agora
+            rota, feito, onde, rumo = nav.rota, nav.dist_feita, self.posicao, self.rumo_recente()
+
+            def conferido(r):
+                if r is None or self.nav is None or self.nav.rota is not rota:
+                    return
+                self.nav.definir_vivo(r["atraso_s"] * transito.ATRASO_MOTO, r["falta_s"])
+                if r["melhor"] is not None and self.rota_sugerida is None:
+                    self.rota_sugerida = r["melhor"]
+                    minutos = int(round(r["ganho_s"] / 60.0))
+                    self.voz.falar(["caminho_melhor"], P_INFO)
+                    self.na_tela(lambda: self.sm.get_screen("mapa").mensagem(
+                        "Caminho %d min mais rápido: toque em Rotas" % minutos, tema.VERDE, 12))
+            rede.em_segundo_plano(lambda: rota_tomtom.conferir(chave, rota, feito, onde, rumo),
+                                  conferido, lambda e: None)
         if (self.ajustes["avisar_chuva"] and not self._chuva_dita and destino is not None
                 and self.posicao is not None and agora - self._t_chuva >= CHUVA_A_CADA_S):
             self._t_chuva = agora
@@ -747,6 +770,8 @@ class GTHudApp(App):
         android_utils.vibrar_padrao("inicio")
         agora = time.monotonic()
         self._t_transito = agora          # (a rota acabou de ser olhada na prévia)
+        self._t_caminho = agora - CAMINHO_A_CADA_S + CAMINHO_PRIMEIRA_S
+        self.rota_sugerida = None
         self._t_chuva = agora - CHUVA_A_CADA_S + 90.0
         if self.chuva_prevista is not None and self.ajustes["avisar_chuva"]:
             self._chuva_dita = True       # já está na tela desde a prévia: fala uma vez ao sair
@@ -848,10 +873,18 @@ class GTHudApp(App):
         origem, rumo, d = self.posicao, self.rumo_recente(), self.destino
         alvo = (d["lat"], d["lon"])
 
+        chave_tomtom = transito.chave_em_uso(self.ajustes) or None
+        sugerida, self.rota_sugerida = self.rota_sugerida, None
+
         def todas():
             primeira = rotas.pedir_rota(origem, alvo, rumo, d["nome"])
             # no meio do caminho a resposta precisa vir logo: sem o refino de contornar avenidas
-            return rotas.pedir_alternativas(origem, alvo, rumo, d["nome"], [primeira], voltas=0)
+            lista = rotas.pedir_alternativas(origem, alvo, rumo, d["nome"], [primeira], voltas=0,
+                                            chave_tomtom=chave_tomtom)
+            # o caminho mais rápido que a TomTom tinha acabado de achar entra na lista
+            if sugerida is not None and not any(rotas.parecidas(r, sugerida) for r in lista):
+                lista.append(sugerida)
+            return lista
 
         def prontas(lista):
             if pedido == self._pedido and self.nav is not None:
@@ -873,6 +906,9 @@ class GTHudApp(App):
             self.corrida.trocar_rota(rota)
         self.sm.get_screen("mapa").trocar_rota(rota)
         self.voz.falar(["rota_trocada"], P_INFO)
+        self._medir_rota_em_uso(rota)
+        self._t_transito = 0.0
+        self._t_caminho = time.monotonic() - CAMINHO_A_CADA_S + CAMINHO_PRIMEIRA_S
 
     def _recalcular(self):
         if self.destino is None or self.posicao is None:
@@ -882,10 +918,19 @@ class GTHudApp(App):
         origem, rumo, destino = self.posicao, self.rumo_recente(), self.destino
         alvo = (destino["lat"], destino["lon"])
         tranquila = "tranquila" in self.nav.rota.nome_perfil or self.nav.rota.perfil == "tranquila"
+        viva = self.nav.rota.perfil == "transito"
+        chave_tomtom = transito.chave_em_uso(self.ajustes)
 
         def pedir():
             # saiu da rota TRANQUILA: a nova também evita avenida (antes o
             # recálculo vinha sempre pela mais rápida e devolvia a pessoa às avenidas)
+            if viva and chave_tomtom:   # estava na rota "pelo trânsito de agora": a nova também é
+                try:
+                    nova = rota_tomtom.pedir(chave_tomtom, origem, alvo, rumo, destino["nome"])
+                    if nova is not None:
+                        return nova
+                except Exception as e:
+                    print("[rota] recalculo pela TomTom falhou:", type(e).__name__)
             if tranquila:
                 try:
                     nova = rotas.pedir_rota(origem, alvo, rumo, destino["nome"], "tranquila")
@@ -909,6 +954,7 @@ class GTHudApp(App):
         self.na_tela(lambda: self.sm.get_screen("mapa").trocar_rota(rota))
         self._medir_rota_em_uso(rota)
         self._t_transito = 0.0   # rota nova: olha o trânsito dela na próxima leitura
+        self._t_caminho = time.monotonic() - CAMINHO_A_CADA_S + CAMINHO_PRIMEIRA_S
 
     def _medir_rota_em_uso(self, rota):
         """Rota nova no meio do caminho ainda não tem as avenidas medidas: mede

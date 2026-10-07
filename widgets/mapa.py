@@ -40,7 +40,7 @@ import rede
 import sinais
 import tema
 from diagnostico import seguro
-from mapa_vetor import (AREAS, FUNDO, RUAS, SETAS, FonteVetorial, chave_nome, legenda_se_precisa, origem_padrao,
+from mapa_vetor import (AREAS, FUNDO, RUAS, SETAS, FonteVetorial, chave_nome, legenda_se_precisa, nivel_de_desenho, origem_padrao,
                         tela_animando, tiles_do_retangulo, z_dados)
 
 ZOOM_MIN, ZOOM_MAX = 11.0, 19.0   # o app é só de Goiânia: de longe, a cidade inteira
@@ -131,19 +131,6 @@ def _girar(x, y, graus):
 
 def _dif_angulo(de, para):
     return (para - de + 180.0) % 360.0 - 180.0
-
-
-def nivel_de_desenho(zoom):
-    """O zoom (inteiro) em que o mapa é DESENHADO para o zoom da tela. Só os
-    que vêm prontos dentro do app (mapa_vetor.ZOOMS_PRONTOS: 11 a 14, 16 e
-    17), para o celular nunca precisar desenhar um pedaço na hora:
-    - entre 14 e 16 usa o 14 esticado ou o 16 encolhido, o que estiver mais perto;
-    - de 18 para cima usa o 17 esticado (as ruas ficam com a largura que têm
-      de verdade nessa aproximação, como no Google Maps)."""
-    rz = int(max(ZOOM_MIN, min(17, round(zoom))))
-    if rz == 15:
-        rz = 16 if zoom >= 15.3 else 14
-    return rz
 
 
 class _Rotulo:

@@ -86,7 +86,27 @@ class Navegacao:
 
     def trocar_rota(self, rota):
         """Rota nova depois de recalcular (começa do ponto atual)."""
+        self.vivo = None
         self._iniciar_rota(rota)
+
+    def definir_vivo(self, atraso_s, falta_s):
+        """O trânsito de AGORA no que falta do caminho (rota_tomtom.conferir):
+        o tempo de chegada passa a usar isso até a próxima conferência."""
+        self.vivo = (max(1.0, self.rota.total_m - self.dist_feita), max(0.0, atraso_s), max(0.0, falta_s))
+
+    def _tempo_restante(self, restante):
+        rota = self.rota
+        if not rota.total_m:
+            return 0
+        vivo = getattr(self, "vivo", None)
+        if vivo is None:
+            return rota.tempo_s * restante / rota.total_m
+        m0, atraso, falta = vivo
+        f = min(1.0, restante / m0)
+        if rota.tempo_com_transito:     # rota da TomTom: o tempo dela, atualizado
+            return falta * f
+        # as outras: o ritmo dele no caminho livre + o atraso do trânsito de agora no que falta
+        return (rota.tempo_s - rota.atraso_transito_s) * restante / rota.total_m + atraso * f
 
     def desistir_de_recalcular(self):
         """O recálculo falhou (sem internet): tenta de novo mais tarde."""
@@ -295,7 +315,7 @@ class Navegacao:
         estado = {
             "manobra": None, "dist_manobra": None, "depois": None,
             "restante_m": restante,
-            "restante_s": rota.tempo_s * restante / rota.total_m if rota.total_m else 0,
+            "restante_s": self._tempo_restante(restante),
             "subida_restante_m": rota.subida_restante_m(self.dist_feita),
             "subida": None,
             "alerta": None,

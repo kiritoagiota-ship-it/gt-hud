@@ -82,10 +82,9 @@ class TestePedacosProntos(unittest.TestCase):
             self.assertEqual(primeiro["ruas"], terceiro["ruas"])
 
     def test_niveis_de_desenho_sao_so_os_que_vem_prontos(self):
-        import widgets.mapa as wm
         for decimo in range(110, 191):
-            self.assertIn(wm.nivel_de_desenho(decimo / 10.0), mapa_vetor.ZOOMS_PRONTOS)
-        self.assertEqual([wm.nivel_de_desenho(z) for z in (11, 14.4, 15.0, 15.4, 16, 17.4, 18, 19)],
+            self.assertIn(mapa_vetor.nivel_de_desenho(decimo / 10.0), mapa_vetor.ZOOMS_PRONTOS)
+        self.assertEqual([mapa_vetor.nivel_de_desenho(z) for z in (11, 14.4, 15.0, 15.4, 16, 17.4, 18, 19)],
                          [11, 14, 14, 16, 16, 17, 17, 17])
 
 

@@ -67,6 +67,7 @@ FALAS.update({
     "avenida": "Atenção: avenida movimentada à frente.",
     "incidente": "Atenção: ocorrência de trânsito à frente.",
     "chuva": "Atenção: previsão de chuva no caminho.",
+    "caminho_melhor": "Encontrei um caminho mais rápido. Toque em rotas para ver.",
     "sem_rota": "Não encontrei um caminho de bike até esse destino.",
 })
 

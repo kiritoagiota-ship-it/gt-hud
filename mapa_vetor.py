@@ -714,6 +714,18 @@ def desempacotar(dados, rz):
             "rotulos": d["rotulos"], "grade": grade, "celula": celula, "ok": True}
 
 
+def nivel_de_desenho(zoom):
+    """O zoom (inteiro) em que o mapa é DESENHADO para o zoom da tela. Só os
+    que vêm prontos dentro do app (ZOOMS_PRONTOS: 11 a 14, 16 e 17), para o celular nunca precisar desenhar um pedaço na hora:
+    - entre 14 e 16 usa o 14 esticado ou o 16 encolhido, o que estiver mais perto;
+    - de 18 para cima usa o 17 esticado (as ruas ficam com a largura que têm
+      de verdade nessa aproximação, como no Google Maps)."""
+    rz = int(max(ZOOMS_PRONTOS[0], min(ZOOMS_PRONTOS[-1], round(zoom))))
+    if rz == 15:
+        rz = 16 if zoom >= 15.3 else 14
+    return rz
+
+
 def origem_padrao():
     """O ponto (px do mundo no zoom 14) em torno do qual o mapa é desenhado:
     o centro de Goiânia. Fixo: os pedaços prontos dependem dele."""

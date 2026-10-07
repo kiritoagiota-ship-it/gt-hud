@@ -145,6 +145,7 @@ PERFIS = [
 # caminho é em via movimentada (o servidor diz a classe de cada trecho) e
 # ficar com a mais calma que não seja absurda de longa.
 ATRIBUTOS = "https://valhalla1.openstreetmap.de/trace_attributes"
+ALTURA = "https://valhalla1.openstreetmap.de/height"
 MOVIMENTADAS = ("motorway", "trunk", "primary", "secondary")   # avenidas e vias expressas
 ESPERA_ENTRE_S = 1.1          # o servidor gratuito aceita ~1 pedido por segundo
 TRANQUILA_MAIS_LONGA = 1.6    # a tranquila pode levar até isso (x o tempo da rápida) + 3 min
@@ -152,9 +153,19 @@ TRANQUILA_GANHO = 0.08        # só é "tranquila" se tiver pelo menos isso a me
 NOMES_PERFIS = {p[0]: p[1] for p in PERFIS}
 
 
+def elevacao_de(pontos, enviar=None):
+    """A altitude (m) a cada ELEVACAO_PASSO_M ao longo de um caminho que não
+    veio do servidor de bike (ex.: a rota da TomTom, que não traz o relevo)."""
+    corpo = {"range": False, "encoded_polyline": codificar_polyline(pontos, 1e6),
+             "shape_format": "polyline6", "resample_distance": ELEVACAO_PASSO_M}
+    dados = (enviar or rede.enviar)(ALTURA, corpo, "POST", ESPERA_PRINCIPAL_S)
+    return [float(h) for h in dados.get("height") or [] if h is not None]
+
+
 class Rota:
     perfil = "rapida"
     nome_perfil = "Mais rápida"
+    tempo_com_transito = False   # True: tempo_base_s já considera o trânsito de agora (rota_tomtom.py)
 
     def __init__(self, pontos, manobras, elevacao, tempo_s, destino_nome=""):
         self.pontos = pontos
@@ -190,6 +201,8 @@ class Rota:
     def tempo_s(self):
         """Tempo previsto: pelo histórico dele nos trechos que já conhece (ou o
         do servidor no ritmo dele), mais o atraso do trânsito de agora."""
+        if self.tempo_com_transito:   # calculada pela TomTom com o trânsito deste momento
+            return self.tempo_base_s
         base = self.tempo_pessoal_s if self.tempo_pessoal_s is not None else self.tempo_base_s * fator_ritmo
         return base + self.atraso_transito_s
 
@@ -526,7 +539,8 @@ def parecidas(a, b):
     return True
 
 
-def pedir_alternativas(origem, destino, rumo=None, destino_nome="", ja=(), ao_parcial=None, voltas=EVITAR_VOLTAS):
+def pedir_alternativas(origem, destino, rumo=None, destino_nome="", ja=(), ao_parcial=None, voltas=EVITAR_VOLTAS,
+                       chave_tomtom=None):
     """As outras rotas (perfis de PERFIS que ainda não estão em `ja`), sem as
     repetidas. Uma de cada vez: o servidor é gratuito e compartilhado.
     `ao_parcial(lista)`: chamado (na thread da busca) quando a primeira rota
@@ -537,6 +551,21 @@ def pedir_alternativas(origem, destino, rumo=None, destino_nome="", ja=(), ao_pa
     def parcial(calma):
         if ao_parcial is not None and not any(parecidas(r, calma) for r in rotas):
             ao_parcial(rotular(rotas + [calma]))
+    if chave_tomtom and "transito" not in tem:
+        # a rota que sabe do trânsito de agora (TomTom): um pedido só, chega logo
+        try:
+            import rota_tomtom
+            viva = rota_tomtom.pedir(chave_tomtom, origem, destino, rumo, destino_nome)
+            if viva is not None:
+                igual = next((r for r in rotas if parecidas(r, viva)), None)
+                if igual is None:
+                    rotas.append(viva)
+                    if ao_parcial is not None:
+                        ao_parcial(rotular(rotas))
+                else:   # é o mesmo caminho de uma que já existe: ela ganha o tempo com trânsito
+                    igual.tempo_tomtom_s = viva.tempo_base_s
+        except Exception as e:   # (sem o texto do erro quando for de rede: o endereço leva a chave)
+            print("[rota] TomTom falhou:", type(e).__name__, getattr(e, "code", ""))
     for perfil, nome, _ in PERFIS:
         if perfil in tem:
             continue
@@ -561,6 +590,14 @@ def pedir_alternativas(origem, destino, rumo=None, destino_nome="", ja=(), ao_pa
 
 
 def rotular(rotas):
+    """As rotas com o nome certo, a mais rápida primeiro. A que veio da
+    TomTom ("Pelo trânsito de agora") fica sempre, no fim: o tempo dela é
+    medido de outro jeito (com trânsito), não se compara com o das outras."""
+    vivas = [r for r in rotas if r.perfil == "transito"]
+    return _rotular_bike([r for r in rotas if r.perfil != "transito"]) + vivas
+
+
+def _rotular_bike(rotas):
     """Nome de cada rota pelos NÚMEROS dela (o servidor nem sempre acerta: a
     "menos subida" pedida às vezes sobe mais). Rota que não é a melhor em
     nada sai da lista. A primeira é sempre a mais rápida."""

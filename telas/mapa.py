@@ -126,7 +126,7 @@ class EscolhaRotas(BoxLayout):
     @staticmethod
     def nome_curto(rota):
         n = rota.nome_perfil.replace(" (não achei mais calma)", "")
-        n = n.replace("Mais ", "").replace("Menos subida", "plana")
+        n = n.replace("Mais ", "").replace("Menos subida", "plana").replace("Pelo trânsito de agora", "Trânsito")
         return n[:1].upper() + n[1:]
 
     def mostrar(self, rotas, escolhida, ao_escolher):
