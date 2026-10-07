@@ -18,11 +18,15 @@ import math
 import threading
 import time
 
+import mini_mapa
 import rede
 import tema
+from rota import distancia_m
 from falas import texto_manobra
 from util import fmt_dist, fmt_dist_nav, fmt_duracao, fmt_hora_chegada, fmt_tempo
 
+ANCORA_MAX_M = 1200        # longe disso da âncora, o painel ganha uma âncora nova (números pequenos)
+RUAS_A_CADA_M = 140        # o mini mapa do painel busca as ruas de novo a cada isso andado
 PAINEL_A_CADA_S = 0.9      # painel flutuante: acompanha cada leitura do GPS
 DESENHO_FRENTE_M = 420     # quanto de rota à frente vai para o painel (ele mostra ~260 m e anda sozinho)
 DESENHO_ATRAS_M = 70
@@ -62,10 +66,11 @@ def textos(app):
     return titulo, texto, minutos, km
 
 
-def desenho_da_rota(nav):
+def desenho_da_rota(nav, ancora=None):
     """O trecho da rota em volta da pessoa, para o painel flutuante desenhar
     no lugar do mapa: ("x,y;x,y;...", início m, aqui m).
-    Os pontos são metros (leste, norte) a partir do primeiro, tirados da rota
+    Os pontos são metros (leste, norte) a partir da `ancora` (lat, lon), a
+    mesma das ruas do mini mapa (sem âncora: a partir do primeiro), tirados da rota
     a cada DESENHO_PASSO_M em distâncias "redondas" (os mesmos pontos a cada
     envio: o desenho não treme); o primeiro fica a `início` metros do começo
     da rota e a pessoa está em `aqui`. Quem gira (frente para cima) e faz o
@@ -76,7 +81,7 @@ def desenho_da_rota(nav):
     aqui = max(0.0, min(rota.total_m, nav.dist_feita))
     inicio = max(0.0, math.floor((aqui - DESENHO_ATRAS_M) / DESENHO_PASSO_M) * DESENHO_PASSO_M)
     fim = min(rota.total_m, aqui + DESENHO_FRENTE_M)
-    lat0, lon0, _ = rota.ponto_em(inicio)
+    lat0, lon0 = ancora if ancora is not None else rota.ponto_em(inicio)[:2]
     grau = 111195.0   # metros por grau na mesma esfera das distâncias da rota (o painel soma os trechos)
     k = math.cos(math.radians(lat0)) * grau
     pontos = []
@@ -90,7 +95,7 @@ def desenho_da_rota(nav):
     return ";".join(pontos), inicio, aqui
 
 
-def dados_do_painel(app):
+def dados_do_painel(app, ancora=None):
     """(distância, instrução, rua, velocidade, resto, desenho, nível de alerta,
     início m, aqui m, velocidade m/s) para o painel flutuante; None se não há
     rota. Os três últimos servem para o desenho andar entre as posições."""
@@ -100,7 +105,7 @@ def dados_do_painel(app):
     vel = "%d" % round(app.filtro.previsto()) if getattr(app, "filtro", None) is not None else "0"
     if nav.chegou:
         return ("Chegou", "Você chegou ao destino", "", vel, "", "", 0, 0.0, 0.0, 0.0)
-    pontos, inicio, aqui = desenho_da_rota(nav)
+    pontos, inicio, aqui = desenho_da_rota(nav, ancora)
     fora = bool(e and e.get("fora_da_rota"))
     andar = (pontos, 0, inicio, aqui, 0.0 if fora else float(getattr(nav, "_vel_ms", 0.0)))
 
@@ -226,6 +231,11 @@ class _Android:
             self._chamar(self.painel.atualizar, distancia, instrucao, rua, vel, resto, desenho,
                          bool(claro), int(alerta), float(inicio), float(aqui), float(vel_ms))
 
+    def ruas_painel(self, texto):
+        """As ruas de perto para o mini mapa do painel (mini_mapa.em_texto)."""
+        if self.painel is not None:
+            self._chamar(self.painel.ruas, texto)
+
     def esconder_painel(self):
         if self.painel is not None:
             self._chamar(self.painel.esconder)
@@ -256,6 +266,12 @@ class SegundoPlano:
         self._t_painel = 0.0
         self._painel_a_vista = False
         self._conferir_painel_em = None
+        # mini mapa do painel: âncora das coordenadas e as ruas de perto
+        self._ancora = None             # (lat, lon): origem dos metros mandados ao painel
+        self._ruas_centro = None        # onde as ruas foram tiradas pela última vez
+        self._ruas_prontas = None       # (texto, âncora) esperando para ir ao painel
+        self._ruas_buscando = False
+        self._ler_tile = None           # função que lê um arquivo do mapa (z, x, y)
         self._ligado = False            # o serviço Android está no ar
         self.leituras_no_fundo = 0      # (diagnóstico e testes)
 
@@ -329,7 +345,54 @@ class SegundoPlano:
         if agora - self._t_painel < PAINEL_A_CADA_S:
             return
         self._t_painel = agora
-        self.android.atualizar_painel(dados_do_painel(self.app), tema.claro())
+        self._cuidar_das_ruas()
+        self.android.atualizar_painel(dados_do_painel(self.app, self._ancora), tema.claro())
+
+    # --- mini mapa do painel: as ruas de perto ---------------------------------------
+    def _preparar_mini_mapa(self):
+        """Ao minimizar (thread da tela): pega com o mapa do app a função que
+        lê os arquivos de mapa e zera a âncora."""
+        self._ancora = self._ruas_centro = self._ruas_prontas = None
+        self._ler_tile = None
+        try:
+            self._ler_tile = self.app.sm.get_screen("mapa").mapa.fonte._ler_ou_baixar
+        except Exception:
+            pass                       # sem o mapa (testes): o painel fica só com a rota
+        self._cuidar_das_ruas()
+
+    def _cuidar_das_ruas(self):
+        """Mantém a âncora perto da pessoa e as ruas em dia: a cada
+        RUAS_A_CADA_M andados, tira de novo (numa thread à parte: ler o arquivo
+        do mapa pode demorar) e manda ao painel quando ficar pronto."""
+        nav = self.app.nav
+        if nav is None or nav.rota is None or len(nav.rota.pontos) < 2:
+            return
+        lat, lon, _ = nav.rota.ponto_em(max(0.0, min(nav.rota.total_m, nav.dist_feita)))
+        aqui = (lat, lon)
+        if self._ancora is None or distancia_m(self._ancora, aqui) > ANCORA_MAX_M:
+            self._ancora, self._ruas_centro, self._ruas_prontas = aqui, None, None
+            self.android.ruas_painel("")       # as ruas antigas estavam na outra âncora
+        pronto = self._ruas_prontas
+        if pronto is not None:
+            self._ruas_prontas = None
+            if pronto[1] == self._ancora:
+                self.android.ruas_painel(pronto[0])
+        if (self._ler_tile is None or self._ruas_buscando
+                or (self._ruas_centro is not None and distancia_m(self._ruas_centro, aqui) < RUAS_A_CADA_M)):
+            return
+        self._ruas_buscando = True
+        self._ruas_centro = aqui
+        ancora, ler = self._ancora, self._ler_tile
+
+        def buscar():
+            try:
+                texto = mini_mapa.em_texto(mini_mapa.ruas_perto(ler, lat, lon, ancora))
+                self._ruas_prontas = (texto, ancora)
+            except Exception as e:
+                print("[fundo] ruas do mini mapa:", e)
+            finally:
+                self._ruas_buscando = False
+        threading.Thread(target=buscar, name="mini-mapa", daemon=True).start()
 
     # --- app minimizado / de volta -------------------------------------------------
     def ao_pausar(self):
@@ -347,7 +410,8 @@ class SegundoPlano:
             dados = None
             if tipo == "painel":
                 try:
-                    dados = dados_do_painel(self.app)
+                    self._preparar_mini_mapa()
+                    dados = dados_do_painel(self.app, self._ancora)
                 except Exception as e:
                     print("[fundo] dados do painel:", e)
             if dados is not None and self.android.mostrar_painel(dados, tema.claro()):
