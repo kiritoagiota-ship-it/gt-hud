@@ -352,7 +352,8 @@ class TelaMapa(Screen):
         self._marca = None
         self.card_marca = PainelHUD(orientation="vertical", size_hint=(None, None), spacing=dp(8))
         self.lbl_marca = Texto(text="Ponto marcado", font_size=tema.T_BOTAO, bold=True,
-                               color=tema.CIANO, size_hint_y=None, height=dp(26))
+                               color=tema.CIANO, size_hint_y=None, height=dp(26),
+                               shorten=True, shorten_from="right", max_lines=1)
         botoes_marca = BoxLayout(size_hint_y=None, height=dp(50), spacing=dp(8))
         botoes_marca.add_widget(BotaoHUD(text="Fechar", font_size=tema.T_ROTULO + 2,
                                          on_release=lambda *a: self._fechar_marca()))
@@ -852,6 +853,23 @@ class TelaMapa(Screen):
                 self.lbl_marca.text = endereco
         import rede
         rede.em_segundo_plano(lambda: busca.endereco_de(lat, lon, chave), chegou, lambda e: None)
+
+    def mostrar_ponto_recebido(self, lat, lon, titulo, certo=True):
+        """Endereço vindo de outro app: mostra o pino no lugar achado para a pessoa
+        CONFERIR antes da rota (pedido do dono, 08/10/2026: às vezes caía a algumas
+        quadras). Está errado? É só segurar o dedo no lugar certo: o pino muda."""
+        if self.estado != LIVRE:
+            return
+        self._fechar_resumo(montar=False)
+        self._marca = (lat, lon)
+        self._marca_endereco = titulo
+        self.lbl_marca.text = titulo
+        self.mapa.definir_destino(self._marca, cair=True)
+        self._montar()
+        self.mapa.enquadrar([self._marca], dp(60), (0, dp(130), 0, dp(60)), animado=True, duracao=1.0)
+        self.mensagem("Confira o ponto. Errado? Segure o dedo no lugar certo." if certo else
+                      "Achei a rua, não o número: segure o dedo no lugar certo.",
+                      tema.VERDE if certo else tema.LARANJA, 10)
 
     def _fechar_marca(self):
         self._marca = None

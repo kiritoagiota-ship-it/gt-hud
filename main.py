@@ -350,9 +350,10 @@ class GTHudApp(App):
     # --- endereço recebido de outro app ("Abrir com" do Android) ---------------------
     def abrir_endereco(self, uri):
         """Outro app mandou um endereço (toque num endereço do Instagram, do
-        WhatsApp, de um site...). Ponto exato ou endereço achado com certeza:
-        vai direto para a prévia da rota. Em dúvida: abre a busca com o
-        endereço e as opções. Navegando, não troca o destino sozinho."""
+        WhatsApp, de um site...). O app acha o ponto (CEP -> bairro, busca de
+        endereços) e MOSTRA o pino para a pessoa conferir e tocar em "Ir para
+        cá" (ou corrigir segurando o dedo no lugar certo). Não achou: abre a
+        busca. Navegando, não troca o destino sozinho."""
         recebido = busca.de_geo(uri)
         print("[app] endereco recebido:", "ponto" if recebido and "lat" in recebido else
               "texto" if recebido else "nao entendi")
@@ -370,26 +371,40 @@ class GTHudApp(App):
                 self.sm.current = "mapa"
                 tela.mensagem("O endereço recebido fica fora de Goiânia", tema.LARANJA, 8)
                 return
-            self.escolher_destino({"nome": recebido["nome"], "endereco": "",
-                                   "lat": recebido["lat"], "lon": recebido["lon"]})
+            self._mostrar_recebido(recebido["lat"], recebido["lon"], recebido["nome"], True)
             return
-        texto = busca.texto_de_endereco(recebido["texto"])
+        bruto = recebido["texto"]
+        texto = busca.texto_de_endereco(bruto)
         self.sm.current = "mapa"
         tela.mensagem("Procurando: " + texto[:40], tema.CIANO, 8)
         chave_tomtom = transito.chave_em_uso(self.ajustes) or None
         posicao, salvos = self.posicao, list(self.salvos)
 
-        def achou(lugares):
+        def procurar():
+            achado = busca.resolver_endereco(bruto, posicao, chave_tomtom)
+            if achado is not None:
+                return achado
+            # sem rua reconhecível no texto: a busca comum (lugares salvos, comércios, TomTom)
+            certo = busca.certeza(busca.buscar(texto, posicao, salvos, chave_tomtom, endereco=True))
+            return None if certo is None else {"lugar": certo, "certo": True}
+
+        def achou(achado):
             if self.nav is not None:
                 return
-            certo = busca.certeza(lugares)
-            if certo is not None:
-                tela.mensagem("", tema.CIANO, 0.1)
-                self.escolher_destino(certo)
-            else:   # nada, ou mais de um lugar possível: a pessoa escolhe na busca
+            if achado is None:   # nada, ou mais de um lugar possível: a pessoa escolhe na busca
                 self._buscar_na_tela(texto)
-        rede.em_segundo_plano(lambda: busca.buscar(texto, posicao, salvos, chave_tomtom, endereco=True), achou,
-                              lambda e: self._buscar_na_tela(texto))
+                return
+            lugar = achado["lugar"]
+            self._mostrar_recebido(lugar["lat"], lugar["lon"], lugar["nome"], achado["certo"])
+        rede.em_segundo_plano(procurar, achou, lambda e: self._buscar_na_tela(texto))
+
+    def _mostrar_recebido(self, lat, lon, nome, certo):
+        """O pino no ponto achado, para conferir antes da rota."""
+        if self.destino is not None and self.nav is None:
+            self.cancelar_previa()   # havia outra prévia aberta: o endereço novo passa na frente
+        self._pilha_telas.clear()
+        self.sm.current = "mapa"
+        self.sm.get_screen("mapa").mostrar_ponto_recebido(lat, lon, nome, certo)
 
     def _buscar_na_tela(self, texto):
         """Abre a tela de busca com o texto já digitado e procurando."""

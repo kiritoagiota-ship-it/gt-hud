@@ -384,6 +384,127 @@ def texto_de_endereco(texto):
     return re.sub(r"\s+", " ", t).strip(" ,")
 
 
+# --- endereço recebido: CEP -> bairro, e a busca de ENDEREÇOS da TomTom ------------------
+# (08/10/2026: o dono tocou num endereço do Instagram, "Av T9, 4724, quadra 32, lote 07,
+# Goiânia, 74333-010", e o app caiu a algumas quadras: a Av. T-9 atravessa vários bairros e
+# o app jogava o CEP fora. O CEP diz o bairro, e o bairro diz o trecho da rua.)
+CEP_URL = "https://viacep.com.br/ws/%s/json/"       # serviço público de CEP, sem conta
+GEOCODE = "https://api.tomtom.com/search/2/geocode/"
+_CEP = re.compile(r"\b(\d{5})-?(\d{3})\b")
+_NUMERO = re.compile(r"^\s*(?:n[ºo°.]*\s*)?(\d{1,6})\b", re.I)
+
+
+def partes_do_endereco(texto):
+    """"Av T9, 4724, quadra 32, lote 07, Goiânia, Brazil 74333-010" ->
+    {"rua": "Av T9", "numero": "4724", "cep": "74333010"} (numero e cep podem ser "")."""
+    texto = texto or ""
+    m = _CEP.search(texto)
+    cep = (m.group(1) + m.group(2)) if m else ""
+    partes = [p.strip() for p in _CEP.sub(" ", texto).split(",") if p.strip()]
+    rua = partes[0] if partes else ""
+    numero = ""
+    for p in partes[1:]:
+        n = _NUMERO.match(p)
+        if n:
+            numero = n.group(1)
+            break
+    return {"rua": rua, "numero": numero, "cep": cep}
+
+
+def consultar_cep(cep, baixar_json=None):
+    """{"rua", "bairro", "cidade"} do CEP (ViaCEP), ou None. Espera a resposta (thread)."""
+    if len(cep or "") != 8:
+        return None
+    d = (baixar_json or rede.baixar_json)(CEP_URL % cep, 8)
+    if not isinstance(d, dict) or d.get("erro"):
+        return None
+    return {"rua": d.get("logradouro") or "", "bairro": d.get("bairro") or "", "cidade": d.get("localidade") or ""}
+
+
+def _enderecos_tomtom(consulta, perto, chave, baixar=None):
+    """Busca de ENDEREÇOS da TomTom (Geocode): [{nome, endereco, lat, lon, bairro, exato}]."""
+    lat0, lon0, lat1, lon1 = goiania.LIMITES
+    params = {"key": chave, "limit": 6, "countrySet": "BR", "language": "pt-BR",
+              "topLeft": "%.5f,%.5f" % (lat1, lon0), "btmRight": "%.5f,%.5f" % (lat0, lon1)}
+    if perto:
+        params.update(lat="%.5f" % perto[0], lon="%.5f" % perto[1])
+    url = GEOCODE + urllib.parse.quote(consulta, safe="") + ".json?" + urllib.parse.urlencode(params)
+    dados = json.loads((baixar or rede.baixar)(url, 10).decode("utf-8"))
+    lugares = []
+    for r in dados.get("results") or []:
+        pos, end = r.get("position") or {}, r.get("address") or {}
+        if "lat" not in pos or not goiania.dentro(pos["lat"], pos["lon"]):
+            continue
+        rua = end.get("streetName") or ""
+        nome = (rua + (", " + end["streetNumber"] if end.get("streetNumber") else "")) or \
+            (end.get("freeformAddress") or "").replace(", Brasil", "")
+        if not nome:
+            continue
+        lugares.append({"nome": nome, "endereco": end.get("municipalitySubdivision") or "",
+                        "lat": pos["lat"], "lon": pos["lon"], "fonte": "TomTom",
+                        "bairro": end.get("municipalitySubdivision") or "",
+                        "exato": r.get("type") in ("Point Address", "Address Range"), "nota": 30})
+    return lugares
+
+
+def _mesmo_bairro(a, b):
+    a, b = normalizar(a or "").replace("setor ", ""), normalizar(b or "").replace("setor ", "")
+    return bool(a) and bool(b) and (a in b or b in a)
+
+
+def resolver_endereco(texto, perto=None, chave_tomtom=None, cep_de=None, enderecos=None, photon=None):
+    """O ponto de um endereço escrito, o melhor que os dados gratuitos dão:
+      1. o CEP (se veio) diz o bairro e o nome oficial da rua;
+      2. a busca de endereços da TomTom procura "rua número, bairro, Goiânia";
+      3. sem ela (ou sem resultado), o mapa aberto (Photon) procura a rua naquele bairro.
+    Devolve {"lugar": {nome, endereco, lat, lon}, "certo": achou o NÚMERO?, "bairro"} ou
+    None (não achou: o app abre a busca). Chamada que espera a resposta (thread)."""
+    p = partes_do_endereco(texto)
+    info = None
+    if p["cep"]:
+        try:
+            info = (cep_de or consultar_cep)(p["cep"])
+        except Exception as e:
+            print("[busca] CEP:", type(e).__name__)
+    if info and info["cidade"] and normalizar(info["cidade"]) not in ("goiania", "aparecida de goiania", "trindade",
+                                                                  "senador canedo", "goianira"):
+        return None   # o CEP é de outra cidade
+    bairro = (info or {}).get("bairro") or ""
+    rua = p["rua"] or (info or {}).get("rua") or ""
+    if not rua:
+        return None
+    titulo = rua + (", " + p["numero"] if p["numero"] else "")
+    oficial = (info or {}).get("rua") or rua      # o nome da rua como os Correios escrevem acha melhor
+    consulta = ", ".join(x for x in (oficial + (" " + p["numero"] if p["numero"] else ""), bairro, "Goiânia") if x)
+    candidatos = []
+    chave_tomtom = chave_tomtom or chaves.chave("tomtom")
+    if chave_tomtom:
+        try:
+            candidatos = (enderecos or _enderecos_tomtom)(consulta, perto, chave_tomtom)
+        except Exception as e:   # (sem o texto do erro: o endereço consultado leva a chave)
+            print("[busca] enderecos TomTom:", type(e).__name__, getattr(e, "code", ""))
+    if bairro:   # com o bairro em mãos, só vale candidato DELE (a "Rua 9" existe em vários setores)
+        candidatos = [c for c in candidatos if _mesmo_bairro(bairro, c.get("bairro"))]
+    if not candidatos:
+        # o mapa aberto não tem número de casa: procura a rua (sem o número) naquele bairro
+        try:
+            achados = (photon or _photon)(", ".join(x for x in (oficial, bairro, "Goiânia") if x), perto)
+            candidatos = [dict(c, bairro=c.get("endereco", "")) for c in achados]
+        except Exception as e:
+            print("[busca] enderecos Photon:", type(e).__name__)
+        if bairro:
+            candidatos = [c for c in candidatos if _mesmo_bairro(bairro, c.get("bairro"))]
+    if not candidatos:
+        return None
+    # o do bairro do CEP primeiro; entre eles, o que achou o número
+    candidatos.sort(key=lambda c: (not (bairro and _mesmo_bairro(bairro, c.get("bairro"))), not c.get("exato")))
+    melhor = candidatos[0]
+    no_bairro = not bairro or _mesmo_bairro(bairro, melhor.get("bairro"))
+    return {"lugar": {"nome": titulo[:60], "endereco": bairro or melhor.get("endereco", ""),
+                      "lat": melhor["lat"], "lon": melhor["lon"]},
+            "certo": bool(melhor.get("exato")) and no_bairro, "bairro": bairro}
+
+
 def certeza(lugares):
     """Dos resultados da busca de um endereço recebido, o lugar para ir DIRETO
     (o 1º, se os três primeiros são o mesmo lugar: a até RECEBIDO_PERTO_M um do

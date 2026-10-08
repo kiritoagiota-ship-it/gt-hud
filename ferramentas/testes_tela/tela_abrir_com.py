@@ -73,26 +73,23 @@ def checar(cond, texto):
 import busca  # noqa: E402
 
 PEDIDOS = []
-_buscar = busca.buscar
+T9 = (-16.7105, -49.2970)
 
 
-def buscar_falso(texto, perto=None, salvos=(), chave_tomtom=None, endereco=False):
-    """A busca do teste: o endereço da loja a TomTom "acha com o número"; o outro fica em dúvida."""
-    PEDIDOS.append((texto, endereco))
+def resolver_falso(texto, perto=None, chave_tomtom=None, **k):
+    """O endereço da loja cai no trecho certo (com o número); o "Rua 77" só acha a rua; o resto, nada."""
+    PEDIDOS.append(texto)
     if "T9" in texto:
-        return [{"nome": "Avenida T-9, 4724", "endereco": "Jardim América, Goiânia", "lat": -16.7061, "lon": -49.2780,
-                 "fonte": "TomTom", "exato": True, "nota": 51, "dist_m": 3000},
-                {"nome": "Av. T 9 (01245)", "endereco": "Setor Marista", "lat": -16.6978, "lon": -49.2664,
-                 "fonte": "mapa aberto", "nota": 15, "dist_m": 2000}]
-    if "Rua 10" in texto:
-        return [{"nome": "Rua 10", "endereco": "Setor Oeste", "lat": -16.6850, "lon": -49.2650, "fonte": "mapa aberto",
-                 "nota": 15, "dist_m": 900},
-                {"nome": "Rua 10", "endereco": "Setor Universitário", "lat": -16.6790, "lon": -49.2400,
-                 "fonte": "mapa aberto", "nota": 15, "dist_m": 1700}]
-    return _buscar(texto, perto, salvos, chave_tomtom)
+        return {"lugar": {"nome": "Av T9, 4724", "endereco": "Jardim Planalto", "lat": T9[0], "lon": T9[1]},
+                "certo": True, "bairro": "Jardim Planalto"}
+    if "Rua 77" in texto:
+        return {"lugar": {"nome": "Rua 77, 10", "endereco": "Setor Central", "lat": -16.6700, "lon": -49.2560},
+                "certo": False, "bairro": "Setor Central"}
+    return None
 
 
-busca.buscar = buscar_falso
+busca.resolver_endereco = resolver_falso
+busca.certeza = lambda lugares: None      # (a busca comum do teste nunca "tem certeza")
 
 
 def app():
@@ -103,46 +100,71 @@ def tela():
     return app().sm.get_screen("mapa")
 
 
-def ponto(dt):
-    """Outro app mandou um ponto exato com nome."""
-    app().abrir_endereco("geo:0,0?q=-16.6853,-49.2662(Bosque%20dos%20Buritis)")
-
-
-def ver_ponto(dt):
-    a = app()
-    checar(a.destino is not None and a.destino["nome"] == "Bosque dos Buritis", "ponto recebido vira destino: %s" % (a.destino or {}).get("nome"))
-    checar(a.sm.current == "mapa" and tela().estado == "previa", "já na prévia da rota")
-    checar(a.rota_previa is not None, "rota calculada até o ponto recebido")
-    foto("e0_ponto_recebido")
-    a.cancelar_previa()
-
-
 def endereco(dt):
-    """O endereço do print do dono (Instagram): a TomTom acha com o número -> direto para a rota."""
+    """O endereço do print do dono (Instagram), com quadra, lote e CEP."""
     app().abrir_endereco("geo:0,0?q=Av%20T9%2C%204724%2C%20quadra%2032%2C%20lote%2007%2C%20Goi%C3%A2nia%2C%20Brazil%2074333-010")
 
 
 def ver_endereco(dt):
+    a, t = app(), tela()
+    checar(PEDIDOS[:1] == ["Av T9, 4724, quadra 32, lote 07, Goiânia, Brazil 74333-010"],
+           "o endereço vai INTEIRO para ser resolvido (com o CEP): %s" % PEDIDOS[:1])
+    checar(t._marca == T9 and a.destino is None, "o pino aparece no ponto achado, ainda sem rota")
+    checar(t.lbl_marca.text == "Av T9, 4724", "com o endereço no cartão: " + t.lbl_marca.text)
+    checar("Confira o ponto" in t.lbl_msg.text, "e o pedido para conferir: " + t.lbl_msg.text)
+    checar(t.card_marca.parent is not None, "cartão com Ir para cá à vista")
+    Clock.schedule_once(lambda dt: foto("e0_conferir_o_ponto"), 1.3)
+
+
+def corrigir(dt):
+    """Está errado? Segurar o dedo no lugar certo muda o pino."""
+    t = tela()
+    t._ao_segurar(-16.7120, -49.2990)
+    checar(t._marca == (-16.7120, -49.2990), "segurar o dedo em outro lugar move o pino")
+
+
+def ir(dt):
+    tela()._ir_marca()
+
+
+def ver_ir(dt):
     a = app()
-    checar(PEDIDOS and PEDIDOS[0] == ("Av T9, 4724, Goiânia", True), "buscou o endereço limpo, como endereço: %s" % PEDIDOS[:1])
-    checar(a.destino is not None and a.destino["nome"] == "Avenida T-9, 4724", "foi direto para o endereço com número: %s"
-           % (a.destino or {}).get("nome"))
-    checar(tela().estado == "previa" and a.rota_previa is not None, "prévia da rota até lá")
-    foto("e1_endereco_recebido")
-    a.cancelar_previa()
+    checar(a.destino is not None and abs(a.destino["lat"] + 16.7120) < 1e-6, "Ir para cá calcula a rota até o ponto corrigido")
+    checar(tela().estado == "previa", "prévia da rota aberta")
 
 
-def duvida(dt):
-    app().abrir_endereco("geo:0,0?q=Rua%2010%2C%20Goi%C3%A2nia")
+def outro(dt):
+    """Chega outro endereço com uma prévia aberta: ele passa na frente. Só a rua foi achada."""
+    app().abrir_endereco("geo:0,0?q=Rua%2077%2C%2010%2C%20Centro%2C%20Goi%C3%A2nia")
 
 
-def ver_duvida(dt):
+def ver_outro(dt):
+    a, t = app(), tela()
+    checar(a.destino is None and t.estado == "livre" and t._marca == (-16.6700, -49.2560),
+           "a prévia antiga saiu e o pino novo entrou")
+    checar("não o número" in t.lbl_msg.text, "avisa que achou só a rua: " + t.lbl_msg.text)
+    foto("e1_so_a_rua")
+    t._fechar_marca()
+
+
+def ponto(dt):
+    app().abrir_endereco("geo:0,0?q=-16.6853,-49.2662(Bosque%20dos%20Buritis)")
+
+
+def ver_ponto(dt):
+    t = tela()
+    checar(t._marca == (-16.6853, -49.2662) and t.lbl_marca.text == "Bosque dos Buritis", "ponto exato com nome: pino e nome no cartão")
+    t._fechar_marca()
+
+
+def nada(dt):
+    app().abrir_endereco("geo:0,0?q=Lugar%20Que%20Ninguem%20Conhece%2C%20Goi%C3%A2nia")
+
+
+def ver_nada(dt):
     a = app()
-    b = a.sm.get_screen("busca")
-    checar(a.sm.current == "busca", "dois lugares possíveis: abriu a busca para escolher (tela %s)" % a.sm.current)
-    checar(b.campo.text == "Rua 10, Goiânia", "com o endereço já digitado: " + b.campo.text)
-    checar(len(b.lista.children) >= 2, "e as opções na lista: %d" % len(b.lista.children))
-    foto("e2_em_duvida")
+    checar(a.sm.current == "busca" and "Lugar Que Ninguem Conhece" in a.sm.get_screen("busca").campo.text,
+           "não achou: abre a busca com o texto (tela %s)" % a.sm.current)
     a.voltar()
 
 
@@ -152,9 +174,9 @@ def fora(dt):
 
 def ver_fora(dt):
     a = app()
-    checar(a.destino is None and "fora de Goiânia" in tela().lbl_msg.text, "endereço de outra cidade: avisa e não calcula: " + tela().lbl_msg.text)
-    app().abrir_endereco("tel:123")          # o que não é endereço não faz nada (nem erro)
-    checar(a.destino is None, "pedido que não é endereço é ignorado")
+    checar(tela()._marca is None and "fora de Goiânia" in tela().lbl_msg.text, "outra cidade: avisa e não marca nada")
+    a.abrir_endereco("tel:123")
+    checar(tela()._marca is None, "pedido que não é endereço é ignorado")
 
 
 def navegando(dt):
@@ -175,15 +197,20 @@ def fim(dt):
     app().stop()
 
 
-Clock.schedule_once(ponto, 7)
-Clock.schedule_once(ver_ponto, 13)
-Clock.schedule_once(endereco, 14)
-Clock.schedule_once(ver_endereco, 20)
-Clock.schedule_once(duvida, 21)
-Clock.schedule_once(ver_duvida, 24)
-Clock.schedule_once(fora, 25)
-Clock.schedule_once(ver_fora, 26)
-Clock.schedule_once(navegando, 27)
-Clock.schedule_once(ver_navegando, 37)
-Clock.schedule_once(fim, 38)
+Clock.schedule_once(endereco, 7)
+Clock.schedule_once(ver_endereco, 9)
+Clock.schedule_once(corrigir, 11)
+Clock.schedule_once(ir, 12)
+Clock.schedule_once(ver_ir, 18)
+Clock.schedule_once(outro, 19)
+Clock.schedule_once(ver_outro, 21)
+Clock.schedule_once(ponto, 22)
+Clock.schedule_once(ver_ponto, 23.5)
+Clock.schedule_once(nada, 24)
+Clock.schedule_once(ver_nada, 27)
+Clock.schedule_once(fora, 28)
+Clock.schedule_once(ver_fora, 29)
+Clock.schedule_once(navegando, 30)
+Clock.schedule_once(ver_navegando, 40)
+Clock.schedule_once(fim, 41)
 runpy.run_path("main.py", run_name="__main__")
