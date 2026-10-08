@@ -25,6 +25,7 @@ import urllib.request
 
 RAIZ = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, RAIZ)
+import caminhos  # noqa: E402,F401  (as pastas do código no caminho de busca)
 from goiania import LIMITES  # noqa: E402
 
 DADOS = os.path.join(RAIZ, "dados")

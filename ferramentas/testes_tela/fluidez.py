@@ -23,6 +23,7 @@ PASTA = os.path.dirname(os.path.abspath(__file__))
 RAIZ = os.path.dirname(os.path.dirname(PASTA))  # raiz do projeto
 os.chdir(RAIZ)
 sys.path.insert(0, RAIZ)
+import caminhos  # noqa: E402,F401  (as pastas do código no caminho de busca)
 sys.argv = ["main.py"]
 LIMPAR_CACHE = "--frio" in sys.argv[1:] or os.environ.get("FRIO") == "1"
 

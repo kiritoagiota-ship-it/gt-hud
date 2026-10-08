@@ -30,6 +30,7 @@ import sqlite3
 import unicodedata
 import urllib.parse
 
+import caminhos
 import chaves
 import goiania
 import pluscode
@@ -41,7 +42,7 @@ PHOTON = "https://photon.komoot.io/api/"
 TOMTOM = "https://api.tomtom.com/search/2/search/"
 PACOTE = "org.kirito.gthud"
 CERT_SHA1 = "4E22C21B14BD3A119E9737C9C7E378CCBD5F569D"   # parte pública do certificado do APK
-BASE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "dados", "goiania_lugares.db")
+BASE = os.path.join(caminhos.RAIZ, "dados", "goiania_lugares.db")
 MAX_RESULTADOS = 12
 NOME_PERTO_M = 50          # ponto colado: sugere o nome do lugar conhecido até essa distância
 POUCOS = 4                 # menos que isso na base offline: pergunta também ao Photon

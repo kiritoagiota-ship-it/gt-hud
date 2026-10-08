@@ -16,6 +16,7 @@ import zlib
 
 RAIZ = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, RAIZ)
+import caminhos  # noqa: E402,F401  (as pastas do código no caminho de busca)
 os.environ.setdefault("KIVY_NO_ARGS", "1")
 os.environ.setdefault("KIVY_NO_FILELOG", "1")
 

@@ -3,7 +3,7 @@ title = GT-HUD
 package.name = gthud
 package.domain = org.kirito
 source.dir = .
-# wav = falas do assistente (voz/, geradas por ferramentas/gerar_voz.py)
+# wav = falas e sons do assistente (audio/voz e audio/sons, gerados por ferramentas/gerar_voz.py e gerar_sons.py)
 source.include_exts = py,png,jpg,kv,atlas,json,ttf,wav,db
 # ferramentas/, icone/ e java/ nao entram como arquivos do app (o icone e o
 # Java vao pelas opcoes proprias abaixo)

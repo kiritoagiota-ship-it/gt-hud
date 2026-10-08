@@ -14,7 +14,9 @@ import json
 import math
 import os
 
-ARQUIVO = os.path.join(os.path.dirname(os.path.abspath(__file__)), "dados", "goiania_sinais.json")
+import caminhos
+
+ARQUIVO = os.path.join(caminhos.RAIZ, "dados", "goiania_sinais.json")
 CELULA = 0.001        # graus (~110 m)
 NA_ROTA_M = 14        # até isso da linha da rota: está no caminho
 JUNTAR_M = 80         # cruzamento com vários semáforos (ou dois colados): um aviso só

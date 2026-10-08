@@ -36,6 +36,7 @@ import zlib
 from kivy.clock import Clock
 from kivy.graphics.tesselator import TYPE_POLYGONS, WINDING_ODD, Tesselator
 
+import caminhos
 import goiania
 import mvt
 import rede
@@ -46,7 +47,7 @@ Z_DADOS_MAX = 14
 # Goiânia INTEIRA vem dentro do app (pedido do dono, 07/10/2026: o mapa
 # demorava a aparecer ao arrastar e dar zoom porque cada pedaço era baixado
 # na hora). Feito por ferramentas/empacotar_mapa.py.
-PACOTE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "dados", "goiania_mapa.db")
+PACOTE = os.path.join(caminhos.RAIZ, "dados", "goiania_mapa.db")
 VALIDADE_S = 30 * 86400
 TRABALHADORES = 1          # mais threads = a tela espera mais pela vez (GIL)
 # Memória (o dono relatou o app fechando no zoom, 01/10/2026): um tile
@@ -70,7 +71,7 @@ FORMATO_MARSHAL = 2
 # (dados/mapa_pronto.db, montado a cada build por ferramentas/empacotar_prontos.py):
 # a cidade vista de longe (11 a 14), o mapa livre (16) e a navegação (17). Os outros
 # zooms são desenhados na primeira vez e guardados no celular.
-PRONTOS = os.path.join(os.path.dirname(os.path.abspath(__file__)), "dados", "mapa_pronto.db")
+PRONTOS = os.path.join(caminhos.RAIZ, "dados", "mapa_pronto.db")
 ZOOMS_PRONTOS = (11, 12, 13, 14, 16, 17)
 DENSIDADE_PRONTOS = 2.75   # celular comum; só muda detalhes menores que 1 px
 MAX_DECODIFICADOS = 12

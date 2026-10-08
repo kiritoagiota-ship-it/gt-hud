@@ -20,3 +20,5 @@ os.environ.setdefault("KCFG_KIVY_LOG_LEVEL", "warning")
 os.environ.setdefault("KIVY_METRICS_DENSITY", "1")
 os.environ.setdefault("KIVY_METRICS_FONTSCALE", "1")
 os.environ.setdefault("KIVY_DPI", "96")
+
+import caminhos  # noqa: E402,F401  (as pastas do código no caminho de busca)

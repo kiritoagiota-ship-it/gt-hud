@@ -16,7 +16,7 @@ import wave
 import numpy as np
 
 RAIZ = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-SAIDA = os.path.join(RAIZ, "sons")
+SAIDA = os.path.join(RAIZ, "audio", "sons")
 TAXA = 44100
 PICO = 0.80           # folga para não distorcer no celular
 

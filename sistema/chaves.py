@@ -8,7 +8,9 @@ O repositório é PÚBLICO: a chave nunca vai para o código. Ela fica nos
 import json
 import os
 
-_ARQUIVO = os.path.join(os.path.dirname(os.path.abspath(__file__)), "chaves.json")
+import caminhos
+
+_ARQUIVO = os.path.join(caminhos.RAIZ, "chaves.json")
 _cache = None
 
 

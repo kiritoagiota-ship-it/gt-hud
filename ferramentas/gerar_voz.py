@@ -21,10 +21,11 @@ from kokoro_onnx import Kokoro
 
 RAIZ = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, RAIZ)
+import caminhos  # noqa: E402,F401  (as pastas do código no caminho de busca)
 from falas import FALAS  # noqa: E402
 
 PASTA_KOKORO = r"C:\Users\kirit\travetefocus\ferramentas\voz"
-SAIDA = os.path.join(RAIZ, "voz")
+SAIDA = os.path.join(RAIZ, "audio", "voz")
 TAXA = 24000          # a taxa em que o Kokoro fala: sem reamostrar não perde nitidez (mono 16 bits, ~48 KB/s)
 VELOCIDADE = 0.98     # um pouco mais pausada: soa mais "assistente" e entende melhor
 VOZES = {

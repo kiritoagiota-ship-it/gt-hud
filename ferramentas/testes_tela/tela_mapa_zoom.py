@@ -23,6 +23,7 @@ for f in os.listdir(FOTOS):
 RAIZ = os.path.dirname(os.path.dirname(PASTA))  # raiz do projeto
 os.chdir(RAIZ)
 sys.path.insert(0, RAIZ)
+import caminhos  # noqa: E402,F401  (as pastas do código no caminho de busca)
 sys.argv = ["main.py"]
 
 from kivy.app import App  # noqa: E402

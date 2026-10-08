@@ -1,5 +1,6 @@
 """GT-HUD: navegação de bike (mapa, rota, curva a curva, subidas, voz) e
 velocímetro GPS com registro de viagens, para a Ouxi GT20."""
+import caminhos  # noqa: F401  (o PRIMEIRO import: põe as pastas do código no caminho)
 import gc
 import json
 import threading
