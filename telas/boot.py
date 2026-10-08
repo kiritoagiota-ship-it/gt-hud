@@ -185,6 +185,19 @@ class TelaBoot(Screen):
         Clock.schedule_once(lambda dt: self._ir_para_mapa(), falta + 0.9)
         self._saiu = True
 
+    def posicao_aproximada(self, precisao):
+        """O satélite ainda não chegou, mas o celular já sabe mais ou menos onde
+        está (redes/última posição): abre o mapa já, em vez de segurar aqui."""
+        if self._saiu or self.manager.current != self.name:
+            return
+        self._buscando = False
+        self.status.text = "Posição aproximada (%d m): abrindo o mapa.\nO satélite entra sozinho." % precisao
+        self.status.color = tema.LARANJA
+        falta = max(0.0, ABERTURA_MIN_S - (Clock.get_boottime() - self._t_entrada))
+        Clock.schedule_once(lambda dt: self.anel.concluir(), falta)
+        Clock.schedule_once(lambda dt: self._ir_para_mapa(), falta + 0.9)
+        self._saiu = True
+
     def _ir_para_mapa(self):
         if self.manager.current == self.name:
             self.manager.current = "mapa"

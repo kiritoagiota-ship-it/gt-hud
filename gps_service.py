@@ -9,8 +9,9 @@ from kivy.utils import platform
 
 
 class ServicoGPS:
-    def __init__(self, ao_receber, ao_status=None):
+    def __init__(self, ao_receber, ao_status=None, ao_aproximada=None):
         self.ao_receber = ao_receber
+        self.ao_aproximada = ao_aproximada   # (lat, lon, precisão m, idade s, fonte): posição por rede/última
         self.ao_status = ao_status
         self.ativo = False
         self.modo = None  # "GPS" ou "SIM"
@@ -27,7 +28,8 @@ class ServicoGPS:
             self.modo = "SIM"
         else:
             from gps_android import GPSAndroid
-            self._gps = GPSAndroid(self._on_location, self._on_status)
+            self._gps = GPSAndroid(self._on_location, self._on_status,
+                                   self._on_aproximada if self.ao_aproximada else None)
             # pede 2 leituras/s: a maioria dos celulares só dá 1/s (aí nada
             # muda), mas os que dão mais deixam o velocímetro mais em cima
             self._gps.iniciar(intervalo_ms=500)
@@ -82,6 +84,11 @@ class ServicoGPS:
     @mainthread
     def _on_location(self, **dados):
         self.ao_receber(dados)
+
+    @mainthread
+    def _on_aproximada(self, lat, lon, precisao, idade_s, fonte):
+        if self.ao_aproximada:
+            self.ao_aproximada(lat, lon, precisao, idade_s, fonte)
 
     @mainthread
     def _on_status(self, tipo, status):

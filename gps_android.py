@@ -32,11 +32,24 @@ def _classe_satelites():
         return None
 
 
+def _classe_aproximada():
+    """java/.../LocalizacaoAprox.java (posição por rede e última conhecida); None se faltar."""
+    try:
+        return autoclass("org.kirito.gthud.LocalizacaoAprox")
+    except Exception as e:
+        print("[gps] sem posicao aproximada:", e)
+        return None
+
+
 class GPSAndroid:
-    def __init__(self, ao_receber, ao_status):
+    def __init__(self, ao_receber, ao_status, ao_aproximada=None):
         self._atividade = PythonActivity.mActivity
         self._loc = autoclass("org.kirito.gthud.Localizacao")
         self._sat = _classe_satelites()
+        # posição aproximada na hora (rede/última conhecida), enquanto o satélite não chega
+        self._aprox = _classe_aproximada() if ao_aproximada is not None else None
+        self._ao_aproximada = ao_aproximada
+        self._aprox_visto = 0
         self._ao_receber = ao_receber
         self._ao_status = ao_status
         self._visto = 0
@@ -54,6 +67,14 @@ class GPSAndroid:
             except Exception as e:  # contar satélites é extra: nunca derruba o GPS
                 print("[gps] contador de satelites falhou:", e)
                 self._sat = None
+        if self._aprox is not None:
+            try:
+                self._aprox_visto = self._aprox.contador
+                if not self._aprox.iniciar(self._atividade, 4000):
+                    print("[gps] posicao aproximada: sem provedor de rede", self._aprox.erro)
+            except Exception as e:  # é um extra: nunca derruba o GPS
+                print("[gps] posicao aproximada falhou:", e)
+                self._aprox = None
         if self._ev is None:
             self._ev = Clock.schedule_interval(self._conferir, CONFERIR_S)
 
@@ -62,6 +83,8 @@ class GPSAndroid:
             self._ev.cancel()
             self._ev = None
         self._loc.parar(self._atividade)
+        if self._aprox is not None:
+            self._aprox.parar(self._atividade)
         if self._sat is not None:
             self._sat.parar(self._atividade)
 
@@ -74,6 +97,10 @@ class GPSAndroid:
         dados = self.ler()
         if dados is not None:
             self._ao_receber(**dados)
+        aprox = self._aprox
+        if aprox is not None and aprox.contador != self._aprox_visto:
+            self._aprox_visto = aprox.contador
+            self._ao_aproximada(aprox.lat, aprox.lon, aprox.precisao, aprox.idade, str(aprox.fonte))
 
     def ler(self):
         """Posição nova desde a última leitura (dict) ou None. Usado pelo

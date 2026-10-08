@@ -63,6 +63,10 @@ RUMO_VALIDO_S = 6.0         # rumo mais velho que isso não vai no pedido de rot
 GPS_PERDIDO_FALA_S = 10     # navegando sem sinal por isso: o assistente avisa
 FLUXO_A_CADA_S = 15.0          # mapa: confere se a vista tem as cores do trânsito (só baixa o que falta/venceu)
 TRANSITO_MAPA_A_CADA_S = 240.0  # mapa: o trânsito de Goiânia é olhado de novo a cada isso (~360 consultas/dia no máximo, de 2.500)
+# posição aproximada (rede/última conhecida), usada só enquanto o satélite não chega
+APROX_PRECISAO_MAX_M = 1500.0  # mais vaga que isso não ajuda a achar a pessoa no mapa
+APROX_IDADE_MAX_S = 3 * 3600   # "última posição conhecida" mais velha que isso: ele já pode estar longe
+APROX_SO_SEM_GPS_HA_S = 20.0   # só assume depois de tanto tempo sem leitura boa do satélite
 CAMINHO_A_CADA_S = 300.0       # navegando: a TomTom refaz o caminho com o trânsito de agora a cada isso
 CAMINHO_PRIMEIRA_S = 45.0      # a 1ª conferência, pouco depois de sair
 TRANSITO_A_CADA_S = 240.0      # navegando: olha o trânsito da rota de novo a cada isso
@@ -109,13 +113,14 @@ class GTHudApp(App):
         self._t_caminho = 0.0        # ... e da última vez que a TomTom refez o caminho
         self.rota_sugerida = None    # caminho mais rápido que a TomTom achou durante a navegação
         self._endereco_pendente = None   # endereço recebido de outro app, esperando o GPS/a tela
+        self.posicao_aproximada = False  # True: self.posicao veio da rede/última conhecida, não do satélite
         self._t_chuva = 0.0
         self.corrida = None          # corrida ao vivo em andamento (ao_vivo.AoVivo)
         self.ultimo_resumo = None    # números da última viagem finalizada (cartão de chegada)
         self._estava_fora = False    # saiu da rota: vibra uma vez
         self._hoje = None            # (dia, metros, segundos andando) das viagens de hoje
         self.viagem = Viagem()
-        self.gps = ServicoGPS(self._ao_receber_gps, self._ao_status_gps)
+        self.gps = ServicoGPS(self._ao_receber_gps, self._ao_status_gps, self.ao_posicao_aproximada)
         self.voz = Voz(pasta)
         self.sons = sons.Sons(self.ajustes["sons"])
         self.voz.sons = self.sons
@@ -462,6 +467,34 @@ class GTHudApp(App):
     def segundos_sem_sinal(self):
         return time.monotonic() - max(self._t_valida, self._t_gps_inicio)
 
+    def ao_posicao_aproximada(self, lat, lon, precisao, idade_s, fonte=""):
+        """Posição pelas redes Wi-Fi/antenas ou a última que o Android guardou
+        (LocalizacaoAprox.java). Só vale ENQUANTO o satélite não chega: mostra
+        onde a pessoa está e já deixa calcular rota, como o Waze e o Maps. Não
+        entra no velocímetro, na viagem gravada nem na navegação curva a curva."""
+        agora = time.monotonic()
+        if self.sinal_ok() or (self.posicao is not None and not self.posicao_aproximada
+                               and agora - self._t_valida < APROX_SO_SEM_GPS_HA_S):
+            return   # o satélite está valendo (ou valeu agora há pouco): ele manda
+        if precisao > APROX_PRECISAO_MAX_M or idade_s > APROX_IDADE_MAX_S or not goiania.dentro(lat, lon, 0.05):
+            return   # vaga demais, velha demais ou de outra cidade: não ajuda
+        if self.nav is not None and self.posicao is not None:
+            return   # navegando, a seta não pula para uma posição aproximada
+        primeira = self.posicao is None
+        self.posicao = (lat, lon)
+        self.posicao_aproximada = True
+        self.precisao_aproximada = precisao
+        if primeira:
+            print("[gps] posicao aproximada (%s): %d m, medida ha %d s" % (fonte, precisao, idade_s))
+        if self.fundo.minimizado:
+            return
+        self.sm.get_screen("mapa").mapa.mostrar_eu(lat, lon, None, precisao, None)
+        if self.sm.current == "boot":
+            self.sm.get_screen("boot").posicao_aproximada(precisao)
+        elif self._endereco_pendente is not None:
+            pendente, self._endereco_pendente = self._endereco_pendente, None
+            Clock.schedule_once(lambda dt: self.abrir_endereco(pendente), 0.5)
+
     def resumo_gps(self):
         """(cor, texto) curtos do GPS para o canto do mapa (cabe ao lado do
         menu: no máximo ~15 letras por linha)."""
@@ -476,6 +509,8 @@ class GTHudApp(App):
             return (tema.VERDE if prec <= 10 else tema.LARANJA), texto
         if self.sinal_fraco():
             return tema.LARANJA, "Sinal fraco\n%d m" % (self.precisao_ultima or 0)
+        if self.posicao_aproximada:   # o mapa mostra onde ele está pelas redes; o satélite ainda não chegou
+            return tema.LARANJA, "Posição aproximada\n(sem satélite ainda)"
         texto = "Sem sinal" if self.ja_teve_sinal else "Buscando GPS"
         if sat and sat[0]:
             texto += "\n%d de %d satélites" % (sat[1], sat[0])
@@ -527,6 +562,7 @@ class GTHudApp(App):
             vel = self.filtro.atualizar(d["speed"], d.get("t"), d.get("speed_acc"), d.get("age"))
             self._medir_gps(d, agora)
         self.posicao = (d["lat"], d["lon"])
+        self.posicao_aproximada = False
         if d.get("bearing") is not None and vel >= RUMO_MIN_KMH:
             self.rumo = d["bearing"]
             self._t_rumo = agora
