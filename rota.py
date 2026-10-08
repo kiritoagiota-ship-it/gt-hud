@@ -151,6 +151,14 @@ ESPERA_ENTRE_S = 1.1          # o servidor gratuito aceita ~1 pedido por segundo
 TRANQUILA_MAIS_LONGA = 1.6    # a tranquila pode levar até isso (x o tempo da rápida) + 3 min
 TRANQUILA_GANHO = 0.08        # só é "tranquila" se tiver pelo menos isso a menos de avenida
 NOMES_PERFIS = {p[0]: p[1] for p in PERFIS}
+# ROTA NOTURNA (pedido do dono em 07/10/2026: "queria saber se é segura, se não vão me
+# roubar"). O app NÃO sabe nada de criminalidade (não existe base pública por rua em
+# Goiânia) e não promete segurança. O que dá para fazer: à noite, oferecer um caminho
+# que prefere avenidas e ruas principais, onde há mais movimento e iluminação, em vez
+# de rua de bairro vazia. É o contrário da tranquila (use_roads no máximo).
+OPCOES_NOTURNA = {"use_roads": 1.0, "use_hills": 0.5, "avoid_bad_surfaces": 0.5}
+NOME_NOTURNA = "Noturna (ruas principais)"
+EXTRAS = ("transito", "noturna")   # rotas que ficam sempre na lista, no fim, com nome próprio
 
 
 def elevacao_de(pontos, enviar=None):
@@ -473,7 +481,7 @@ def _pedir_principal(origem, destino, rumo, destino_nome, perfil, alternativas=0
     """Uma Rota; com `alternativas` > 0, a lista [principal, alternativas...].
     `evitar`: pontos (lat, lon) por onde a rota não pode passar."""
     opcoes = {"bicycle_type": "Hybrid", "cycling_speed": 22}   # bike elétrica na cidade
-    opcoes.update(dict((p[0], p[2]) for p in PERFIS)[perfil])
+    opcoes.update(OPCOES_NOTURNA if perfil == "noturna" else dict((p[0], p[2]) for p in PERFIS)[perfil])
     partida = {"lat": origem[0], "lon": origem[1]}
     if rumo is not None:
         # já pedalando: evita uma rota que comece com meia-volta
@@ -540,7 +548,7 @@ def parecidas(a, b):
 
 
 def pedir_alternativas(origem, destino, rumo=None, destino_nome="", ja=(), ao_parcial=None, voltas=EVITAR_VOLTAS,
-                       chave_tomtom=None):
+                       chave_tomtom=None, noite=False):
     """As outras rotas (perfis de PERFIS que ainda não estão em `ja`), sem as
     repetidas. Uma de cada vez: o servidor é gratuito e compartilhado.
     `ao_parcial(lista)`: chamado (na thread da busca) quando a primeira rota
@@ -566,6 +574,21 @@ def pedir_alternativas(origem, destino, rumo=None, destino_nome="", ja=(), ao_pa
                     igual.tempo_tomtom_s = viva.tempo_base_s
         except Exception as e:   # (sem o texto do erro quando for de rede: o endereço leva a chave)
             print("[rota] TomTom falhou:", type(e).__name__, getattr(e, "code", ""))
+    if noite and "noturna" not in tem:
+        # à noite: mais uma opção, pelas ruas principais (mais movimento e luz)
+        try:
+            time.sleep(ESPERA_ENTRE_S)
+            noturna = _pedir_principal(origem, destino, rumo, destino_nome, "noturna")
+            noturna.nome_perfil = NOME_NOTURNA
+            igual = next((r for r in rotas if parecidas(r, noturna)), None)
+            if igual is None:
+                rotas.append(noturna)
+                if ao_parcial is not None:
+                    ao_parcial(rotular(rotas))
+            else:   # o caminho pelas ruas principais é um que já está na lista
+                igual.pelas_principais = True
+        except Exception as e:
+            print("[rota] noturna falhou:", e)
     for perfil, nome, _ in PERFIS:
         if perfil in tem:
             continue
@@ -593,8 +616,8 @@ def rotular(rotas):
     """As rotas com o nome certo, a mais rápida primeiro. A que veio da
     TomTom ("Pelo trânsito de agora") fica sempre, no fim: o tempo dela é
     medido de outro jeito (com trânsito), não se compara com o das outras."""
-    vivas = [r for r in rotas if r.perfil == "transito"]
-    return _rotular_bike([r for r in rotas if r.perfil != "transito"]) + vivas
+    extras = [r for r in rotas if r.perfil in EXTRAS]
+    return _rotular_bike([r for r in rotas if r.perfil not in EXTRAS]) + extras
 
 
 def _rotular_bike(rotas):

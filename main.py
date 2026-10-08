@@ -580,8 +580,9 @@ class GTHudApp(App):
             # a primeira rota tranquila aparece em uns 7 s; o refino segue por trás
             rede._entregar(lambda l: self._alternativas_prontas(l, pedido, final=False), lista)
         chave_tomtom = transito.chave_em_uso(self.ajustes) or None
+        self.noite_na_previa = noite = tema.e_noite(origem[0], origem[1])
         rede.em_segundo_plano(lambda: rotas.pedir_alternativas(origem, alvo, rumo, nome, [rota], parcial,
-                                                               chave_tomtom=chave_tomtom),
+                                                               chave_tomtom=chave_tomtom, noite=noite),
                               lambda rs: self._alternativas_prontas(rs, pedido),
                               lambda e: self._alternativas_prontas([rota], pedido))
 
@@ -704,6 +705,13 @@ class GTHudApp(App):
         """Frases curtas para a prévia: chuva, trânsito de agora e trechos que
         costumam estar lentos."""
         avisos = []
+        # À noite o cartão diz o que cada caminho É (o app não sabe de criminalidade: só
+        # sabe se o caminho vai por rua de bairro, mais vazia, ou por rua principal).
+        if getattr(self, "noite_na_previa", False):
+            if rota.perfil == "noturna" or getattr(rota, "pelas_principais", False):
+                avisos.append("Noite: pelas ruas principais (mais movimento e luz)")
+            elif "tranquila" in rota.nome_perfil:
+                avisos.append("Noite: este caminho vai por ruas mais vazias")
         if self.chuva_prevista is not None:
             avisos.append(clima.frase(self.chuva_prevista))
         do_transito = transito.resumo(rota)
@@ -955,6 +963,7 @@ class GTHudApp(App):
         alvo = (destino["lat"], destino["lon"])
         tranquila = "tranquila" in self.nav.rota.nome_perfil or self.nav.rota.perfil == "tranquila"
         viva = self.nav.rota.perfil == "transito"
+        noturna = self.nav.rota.perfil == "noturna"
         chave_tomtom = transito.chave_em_uso(self.ajustes)
 
         def pedir():
@@ -967,6 +976,15 @@ class GTHudApp(App):
                         return nova
                 except Exception as e:
                     print("[rota] recalculo pela TomTom falhou:", type(e).__name__)
+            if noturna:   # saiu da rota noturna: a nova também vai pelas ruas principais
+                try:
+                    nova = rotas.pedir_rota(origem, alvo, rumo, destino["nome"], "noturna")
+                    nova.nome_perfil = rotas.NOME_NOTURNA
+                    return nova
+                except rotas.SemRota:
+                    raise
+                except Exception as e:
+                    print("[rota] recalculo noturno falhou, indo pela rapida:", e)
             if tranquila:
                 try:
                     nova = rotas.pedir_rota(origem, alvo, rumo, destino["nome"], "tranquila")

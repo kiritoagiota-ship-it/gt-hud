@@ -100,6 +100,16 @@ def sol(lat, lon, quando=None):
     return 720 - 4 * (lon + ha) - eq + fuso_min, 720 - 4 * (lon - ha) - eq + fuso_min
 
 
+def e_noite(lat, lon, quando=None):
+    """Já escureceu (depois do pôr do sol ou antes de nascer) no lugar e na hora dados?"""
+    t = quando or time.localtime()
+    s = sol(lat, lon, t)
+    if s is None:
+        return False
+    agora = t.tm_hour * 60 + t.tm_min
+    return agora < s[0] or agora >= s[1]
+
+
 def modo_pela_hora(lat, lon, quando=None):
     """ "claro" de dia, "escuro" à noite, para o lugar e a hora dados."""
     t = quando or time.localtime()

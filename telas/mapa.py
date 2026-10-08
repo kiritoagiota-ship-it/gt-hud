@@ -127,13 +127,15 @@ class EscolhaRotas(BoxLayout):
     def nome_curto(rota):
         n = rota.nome_perfil.replace(" (não achei mais calma)", "")
         n = n.replace("Mais ", "").replace("Menos subida", "plana").replace("Pelo trânsito de agora", "Trânsito")
+        n = n.replace("Noturna (ruas principais)", "Noturna")
         return n[:1].upper() + n[1:]
 
     def mostrar(self, rotas, escolhida, ao_escolher):
         self.clear_widgets()
+        muitas = len(rotas) >= 4   # 4 abas: só o nome e o tempo cabem (os km aparecem na linha de cima ao escolher)
         for i, r in enumerate(rotas):
-            b = BotaoHUD(text="%s\n%s  %s" % (self.nome_curto(r), fmt_duracao(r.tempo_s),
-                                              fmt_dist_nav(r.total_m)),
+            b = BotaoHUD(text="%s\n%s" % (self.nome_curto(r), fmt_duracao(r.tempo_s)) if muitas else
+                         "%s\n%s  %s" % (self.nome_curto(r), fmt_duracao(r.tempo_s), fmt_dist_nav(r.total_m)),
                          destaque=(r is escolhida), font_size=tema.T_ROTULO,
                          halign="center", valign="middle", max_lines=2,
                          on_release=lambda w, rr=r: ao_escolher(rr))
