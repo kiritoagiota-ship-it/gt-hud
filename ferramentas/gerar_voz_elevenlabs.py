@@ -89,6 +89,9 @@ def pedir(chave_api, voz, texto, antes="", depois="", modelo=MODELO, estabilidad
             detalhe = e.read().decode("utf-8", "replace")[:300]
         except Exception:
             pass
+        if "quota_exceeded" in detalhe:
+            raise RuntimeError("acabaram os créditos liberados (o limite da própria chave, ou os da conta) [erro %d] %s"
+                               % (e.code, detalhe))
         motivos = {401: "a chave da ElevenLabs foi recusada (confira o segredo ELEVENLABS_KEY)",
                    404: "essa voz não existe na sua conta (confira o Voice ID)",
                    422: "a ElevenLabs não aceitou o pedido",
@@ -134,6 +137,30 @@ def acabamento(caminho_cru, caminho_final):
     return len(a) / float(TAXA)
 
 
+def _ler_sobre():
+    try:
+        with open(SOBRE, encoding="utf-8") as f:
+            return json.load(f)
+    except (OSError, ValueError):
+        return {}
+
+
+def _gravar_sobre(sobre):
+    os.makedirs(SAIDA, exist_ok=True)
+    with open(SOBRE, "w", encoding="utf-8") as f:
+        json.dump(sobre, f, ensure_ascii=False)
+
+
+def a_gravar(sobre, voz, modelo, estabilidade):
+    """As falas que ainda precisam ser pedidas à ElevenLabs: as que não têm gravação limpa
+    com ESTE texto, ESTA voz e ESTE jeito. O resto é reaproveitado (não gasta crédito)."""
+    mesma = (sobre.get("voz") == voz and sobre.get("modelo") == modelo
+             and abs(float(sobre.get("estabilidade", -1)) - estabilidade) < 1e-6)
+    textos = sobre.get("textos", {}) if mesma else {}
+    return [c for c in FALAS
+            if textos.get(c) != FALAS[c] or not os.path.exists(os.path.join(SAIDA, c + ".wav"))]
+
+
 def main():
     chave_api = os.environ.get("ELEVENLABS_KEY", "").strip()
     if not chave_api:
@@ -148,25 +175,28 @@ def main():
     import efeito_voz
     if efeito not in efeito_voz.EFEITOS:
         sys.exit("efeito desconhecido: %s" % efeito)
-    caracteres = sum(len(t) for t in FALAS.values())
-    print("%d falas, %d caracteres (voz %s, modelo %s, estabilidade %.2f)" % (len(FALAS), caracteres, voz, modelo, estabilidade))
+    sobre = _ler_sobre()
+    faltam = a_gravar(sobre, voz, modelo, estabilidade)
+    caracteres = sum(len(FALAS[c]) for c in faltam)
+    print("%d falas no app; %d já gravadas com este texto e esta voz (reaproveitadas); %d a gravar = %d caracteres"
+          % (len(FALAS), len(FALAS) - len(faltam), len(faltam), caracteres), flush=True)
     if caracteres > LIMITE_CARACTERES:
-        sys.exit("As falas somam %d caracteres: acima da trava de %d." % (caracteres, LIMITE_CARACTERES))
-    # MODO TESTE (pedido do dono, 08/10/2026, depois de duas vozes recusadas): antes de tudo,
-    # pede só a menor fala. A ElevenLabs recusa aqui (voz da Biblioteca no plano grátis, voz
-    # que não existe, chave errada) gastando no máximo esses poucos caracteres.
-    menor = min(FALAS, key=lambda c: len(FALAS[c]))
-    try:
-        pedir(chave_api, voz, FALAS[menor], *vizinhos(menor), modelo=modelo, estabilidade=estabilidade)
-    except RuntimeError as e:
-        sys.exit("TESTE DA VOZ: recusada (gasto: no máximo %d caracteres). %s\nNada foi trocado no app."
-                 % (len(FALAS[menor]), e))
-    print("TESTE DA VOZ: aceita ('%s', %d caracteres). Gravando as %d falas..."
-          % (FALAS[menor], len(FALAS[menor]), len(FALAS)), flush=True)
+        sys.exit("As falas a gravar somam %d caracteres: acima da trava de %d." % (caracteres, LIMITE_CARACTERES))
+    if len(faltam) == len(FALAS) or sobre.get("voz") != voz:
+        # voz nova: as gravações da voz antiga não servem mais (nem como reaproveitamento)
+        sobre = {"origem": "elevenlabs", "voz": voz, "modelo": modelo, "estabilidade": estabilidade, "textos": {}}
+    sobre.update(voz=voz, modelo=modelo, estabilidade=estabilidade)
+    sobre.setdefault("textos", {})
+    os.makedirs(SAIDA, exist_ok=True)
     pasta = tempfile.mkdtemp(prefix="voz_")
-    total = 0.0
+    gastos = 0
     try:
-        for n, (chave, texto) in enumerate(FALAS.items(), 1):
+        # Cada fala que dá certo já fica guardada (gravação limpa + o texto dela em voz.json): se
+        # algo parar no meio (créditos, internet), a próxima tentativa CONTINUA de onde parou, sem
+        # pagar de novo pelo que já foi feito. As gravações do APP (audio/voz) só são refeitas no
+        # fim, quando todas existem: o app nunca fica com metade de cada voz.
+        for n, chave in enumerate(faltam, 1):
+            texto = FALAS[chave]
             antes, depois = vizinhos(chave)
             for tentativa in range(3):
                 try:
@@ -176,22 +206,23 @@ def main():
                     if "[erro 429]" in str(e) and tentativa < 2:
                         time.sleep(8 * (tentativa + 1))     # pedidos demais: espera e tenta de novo
                         continue
-                    sys.exit("Parei na fala %d (%s): %s\nNada foi trocado no app." % (n, chave, e))
-            total += acabamento(mp3_para_wav(mp3, pasta, chave), os.path.join(pasta, chave + ".wav"))
-            print("%3d/%d %s" % (n, len(FALAS), chave), flush=True)
+                    sys.exit("Parei na fala %d de %d (%s): %s\nAs %d já gravadas ficaram guardadas (%d caracteres); "
+                             "o app continua com a voz de antes." % (n, len(faltam), chave, e, n - 1, gastos))
+            acabamento(mp3_para_wav(mp3, pasta, chave), os.path.join(SAIDA, chave + ".wav"))
+            sobre["textos"][chave] = texto
+            _gravar_sobre(sobre)
+            gastos += len(texto)
+            print("%3d/%d %s" % (n, len(faltam), chave), flush=True)
             time.sleep(0.4)
-        # todas deram certo: troca as gravações do app
-        os.makedirs(SAIDA, exist_ok=True)
-        for velho in os.listdir(SAIDA):
-            if velho.endswith(".wav"):
-                os.remove(os.path.join(SAIDA, velho))
-        for chave in FALAS:
-            shutil.move(os.path.join(pasta, chave + ".wav"), os.path.join(SAIDA, chave + ".wav"))
-        with open(SOBRE, "w", encoding="utf-8") as f:
-            json.dump({"origem": "elevenlabs", "voz": voz, "modelo": modelo, "feita_em": time.strftime("%Y%m%d%H%M%S")}, f)
     finally:
         shutil.rmtree(pasta, ignore_errors=True)
-    print("pronto: %d falas, %.0f s de áudio, %d caracteres gastos" % (len(FALAS), total, caracteres))
+    for velho in os.listdir(SAIDA):                      # fala que saiu do app
+        if velho.endswith(".wav") and velho[:-4] not in FALAS:
+            os.remove(os.path.join(SAIDA, velho))
+    sobre["textos"] = {c: t for c, t in sobre["textos"].items() if c in FALAS}
+    sobre["feita_em"] = time.strftime("%Y%m%d%H%M%S")
+    _gravar_sobre(sobre)
+    print("pronto: %d falas gravadas agora, %d caracteres gastos" % (len(faltam), gastos))
     # as do app: as limpas com o efeito e a velocidade pedidos
     sys.argv = [sys.argv[0], efeito, str(velocidade)]
     efeito_voz.main()

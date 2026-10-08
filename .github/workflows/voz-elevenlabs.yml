@@ -54,12 +54,16 @@ jobs:
           EFEITO: ${{ inputs.efeito }}
           VELOCIDADE: ${{ inputs.velocidade }}
         run: python ferramentas/gerar_voz_elevenlabs.py "$VOZ" "$MODELO" "$ESTABILIDADE" "$EFEITO" "$VELOCIDADE"
+      # (roda mesmo se a gravacao parou no meio: o que ja foi gravado fica guardado e a
+      # proxima tentativa continua de onde parou, sem gastar credito de novo)
       - name: Guardar no projeto
+        if: always()
         env:
           VOZ: ${{ inputs.voice_id }}
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add audio/voz ferramentas/voz_base
+          git diff --cached --quiet && echo "nada novo para guardar" && exit 0
           git commit -m "Voz do assistente gravada pela ElevenLabs (voz $VOZ)"
           git push
