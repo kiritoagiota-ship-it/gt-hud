@@ -20,6 +20,14 @@ on:
         description: "Estabilidade de 0 a 1 (maior = mais serio e igual entre as falas)"
         required: false
         default: "0.7"
+      efeito:
+        description: "Efeito: nenhum, leve, medio ou forte (voz grave, tipo monstro)"
+        required: false
+        default: "nenhum"
+      velocidade:
+        description: "Velocidade da fala (1.0 = normal; 0.85 = 15% mais lenta)"
+        required: false
+        default: "1.0"
 
 jobs:
   gravar:
@@ -43,13 +51,15 @@ jobs:
           VOZ: ${{ inputs.voice_id }}
           MODELO: ${{ inputs.modelo }}
           ESTABILIDADE: ${{ inputs.estabilidade }}
-        run: python ferramentas/gerar_voz_elevenlabs.py "$VOZ" "$MODELO" "$ESTABILIDADE"
+          EFEITO: ${{ inputs.efeito }}
+          VELOCIDADE: ${{ inputs.velocidade }}
+        run: python ferramentas/gerar_voz_elevenlabs.py "$VOZ" "$MODELO" "$ESTABILIDADE" "$EFEITO" "$VELOCIDADE"
       - name: Guardar no projeto
         env:
           VOZ: ${{ inputs.voice_id }}
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add audio/voz
+          git add audio/voz ferramentas/voz_base
           git commit -m "Voz do assistente gravada pela ElevenLabs (voz $VOZ)"
           git push

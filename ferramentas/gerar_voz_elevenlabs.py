@@ -5,7 +5,7 @@ Roda no GitHub (.github/workflows/voz-elevenlabs.yml), não no PC: a chave da
 ElevenLabs é do dono e fica só no segredo ELEVENLABS_KEY do repositório. Aqui
 ela é lida da variável de ambiente e nunca é escrita em lugar nenhum.
 
-    ELEVENLABS_KEY=... python ferramentas/gerar_voz_elevenlabs.py <voice_id> [modelo] [estabilidade]
+    ELEVENLABS_KEY=... python ferramentas/gerar_voz_elevenlabs.py <voice_id> [modelo] [estabilidade] [efeito] [velocidade]
 
 O que faz:
 - pede cada fala de falas.py (93 falas, ~2.800 caracteres: cabe com folga nos
@@ -17,7 +17,10 @@ O que faz:
   e daí vale o mesmo acabamento da voz antiga (aparar o silêncio, pontas
   suaves, todas no mesmo volume);
 - só troca as gravações do app se TODAS derem certo (grava numa pasta
-  provisória primeiro).
+  provisória primeiro);
+- as gravações LIMPAS ficam em ferramentas/voz_base/ (não vão para o APK) e as do
+  app (audio/voz) saem delas com o efeito e a velocidade pedidos
+  (ferramentas/efeito_voz.py): trocar o efeito depois não gasta crédito.
 
 Feito pela documentação (elevenlabs.io/docs/api-reference/text-to-speech/convert);
 a primeira gravação de verdade é a que o dono disparar.
@@ -40,8 +43,8 @@ import caminhos  # noqa: E402,F401  (as pastas do código no caminho de busca)
 from falas import FALAS  # noqa: E402
 
 URL = "https://api.elevenlabs.io/v1/text-to-speech/%s?output_format=mp3_44100_128"
-SAIDA = os.path.join(RAIZ, "audio", "voz")
-SOBRE = os.path.join(SAIDA, "voz.json")      # qual voz está gravada (o app usa para trocar o que guardou da antiga)
+SAIDA = os.path.join(RAIZ, "ferramentas", "voz_base")   # as gravações limpas (as do app saem delas: efeito_voz.py)
+SOBRE = os.path.join(SAIDA, "voz.json")
 TAXA = 24000
 MODELO = "eleven_multilingual_v2"
 LIMITE_CARACTERES = 6000                     # trava: nunca gasta mais que isso dos créditos numa gravação
@@ -69,7 +72,7 @@ def pedir(chave_api, voz, texto, antes="", depois="", modelo=MODELO, estabilidad
     """Os bytes do MP3 da fala. Levanta RuntimeError com um texto claro se a ElevenLabs recusar."""
     corpo = {"text": texto, "model_id": modelo,
              "voice_settings": {"stability": estabilidade, "similarity_boost": 0.8, "style": 0.0,
-                                "use_speaker_boost": True, "speed": 0.97}}
+                                "use_speaker_boost": True, "speed": 1.0}}   # (a velocidade é do efeito_voz.py)
     if antes:
         corpo["previous_text"] = antes
     if depois:
@@ -140,6 +143,11 @@ def main():
     voz = sys.argv[1].strip()
     modelo = (sys.argv[2].strip() if len(sys.argv) > 2 else "") or MODELO
     estabilidade = float(sys.argv[3]) if len(sys.argv) > 3 and sys.argv[3].strip() else 0.7
+    efeito = (sys.argv[4].strip().lower() if len(sys.argv) > 4 else "") or "nenhum"
+    velocidade = float(sys.argv[5]) if len(sys.argv) > 5 and sys.argv[5].strip() else 1.0
+    import efeito_voz
+    if efeito not in efeito_voz.EFEITOS:
+        sys.exit("efeito desconhecido: %s" % efeito)
     caracteres = sum(len(t) for t in FALAS.values())
     print("%d falas, %d caracteres (voz %s, modelo %s, estabilidade %.2f)" % (len(FALAS), caracteres, voz, modelo, estabilidade))
     if caracteres > LIMITE_CARACTERES:
@@ -184,6 +192,9 @@ def main():
     finally:
         shutil.rmtree(pasta, ignore_errors=True)
     print("pronto: %d falas, %.0f s de áudio, %d caracteres gastos" % (len(FALAS), total, caracteres))
+    # as do app: as limpas com o efeito e a velocidade pedidos
+    sys.argv = [sys.argv[0], efeito, str(velocidade)]
+    efeito_voz.main()
 
 
 if __name__ == "__main__":
