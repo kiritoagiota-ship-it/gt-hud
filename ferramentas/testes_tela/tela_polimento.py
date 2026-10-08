@@ -122,7 +122,7 @@ def encerrar(dt):
 def ver_resumo(dt):
     t = tela()
     checar(t.card_resumo.parent is not None, "cartao de resumo aparece ao encerrar")
-    checar(t.lbl_resumo_titulo.text == "Rota encerrada" and "Buritis" in t.lbl_resumo_destino.text,
+    checar(t.lbl_resumo_titulo.text == __import__("tema").texto("encerrada", "Rota encerrada") and "Buritis" in t.lbl_resumo_destino.text,
            "titulo e destino: %s / %s" % (t.lbl_resumo_titulo.text, t.lbl_resumo_destino.text))
     checar(t.res_dist.valor.text not in ("-", "0 m") and t.res_max.valor.text != "0", "numeros da rota: %s, max %s" % (
         t.res_dist.valor.text, t.res_max.valor.text))

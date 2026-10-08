@@ -20,13 +20,15 @@ RAIZ = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 SAIDA = os.path.join(RAIZ, "icone")
 SS = 4  # superamostragem
 
-# mesmas cores de tema.py
-FUNDO = (4, 7, 11)
-PAINEL = (10, 21, 32)
-CIANO = (0, 229, 255)
-CIANO_APAGADO = (13, 52, 64)
-LARANJA = (255, 138, 0)
-BRANCO = (242, 251, 255)
+# as cores do tema Monarca de tema.py (o ícone mudou junto com o tema, a pedido do dono,
+# 08/10/2026; as de antes: fundo 4,7,11; painel 10,21,32; ciano 0,229,255; apagado 13,52,64;
+# laranja 255,138,0; branco 242,251,255)
+FUNDO = (5, 4, 12)
+PAINEL = (17, 13, 48)
+CIANO = (90, 160, 255)         # o azul das janelas do sistema
+CIANO_APAGADO = (27, 26, 72)
+LARANJA = (155, 92, 255)       # (os segmentos "além do limite" ficam no roxo da aura)
+BRANCO = (238, 240, 255)
 
 SEGMENTOS = 18
 ACESOS = 15        # quantos segmentos acesos

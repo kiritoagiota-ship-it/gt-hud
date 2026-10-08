@@ -147,7 +147,7 @@ def escolher(dt):
     checar(mapa._radar_t0 is not None, "radar procurando caminho ligado")
     checar(mapa._dest_t0 is not None, "pino do destino caindo")
     checar(tela._card_fora > 0.9 and tela._ev_card is not None, "cartão entrando deslizando")
-    checar(tela.lbl_resumo.text == "Calculando a rota...", "cartão diz que está calculando")
+    checar(tela.lbl_resumo.text == __import__("tema").texto("calculando", "Calculando a rota..."), "cartão diz que está calculando")
 
 
 def procurando(dt):

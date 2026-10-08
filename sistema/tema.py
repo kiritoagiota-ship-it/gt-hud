@@ -29,6 +29,7 @@ PALETAS = {
         "VERMELHO": "#FF3355",       # erro / sem sinal
         "VERDE": "#3DFFA2",          # GPS bom
         "LUGAR": "#B8D6F0",          # nomes de bairro no mapa
+        "ROXO": "#00E5FF",           # 2ª cor de brilho (só o tema Monarca tem uma diferente da principal)
     },
     # claro: fundo claro, texto escuro e as mesmas cores em tons mais fechados
     # (o ciano vivo e o verde-limão somem em cima de branco)
@@ -44,18 +45,47 @@ PALETAS = {
         "VERMELHO": "#D01F40",
         "VERDE": "#0A8A50",
         "LUGAR": "#35546B",
+        "ROXO": "#00788F",
+    },
+    # MONARCA DAS SOMBRAS (pedido do dono, 08/10/2026: "um tema mais estilo Venom ou Sung
+    # Jin-woo"; ele escolheu este). Desenho próprio, só o CLIMA: preto arroxeado, janelas de
+    # "sistema" em azul elétrico e um brilho roxo por trás. Nada de logotipo ou arte da obra.
+    "monarca": {
+        "FUNDO": "#05040C",
+        "PAINEL": "#0B0920",
+        "PAINEL_CLARO": "#1C1750",
+        "CIANO": "#5AA0FF",          # o azul das janelas do sistema
+        "CIANO_APAGADO": "#1B1A48",
+        "CIANO_FRACO": "#9590E6",
+        "BRANCO": "#EEF0FF",
+        "LARANJA": "#FFA63D",
+        "VERMELHO": "#FF3B6B",
+        "VERDE": "#5CFFC8",
+        "LUGAR": "#BDB6F5",
+        "ROXO": "#9B5CFF",           # a aura das sombras
     },
 }
-DEGRADE = {"escuro": 0.72, "claro": 0.90}   # quanto da cor sobra na base do degradê
+DEGRADE = {"escuro": 0.72, "claro": 0.90, "monarca": 0.50}   # quanto da cor sobra na base do degradê
+# As frases de alguns avisos mudam com o tema (no Monarca, o app fala como "o Sistema")
+TEXTOS = {
+    "monarca": {
+        "chegou": "MISSÃO CONCLUÍDA", "encerrada": "MISSÃO ENCERRADA",
+        "calculando": "O Sistema está traçando a rota...",
+        "para_onde": "Qual é a missão?", "busca_titulo": "Qual é a missão?",
+        "iniciar": "Aceitar", "cancelar": "Recusar",
+        "subtitulo": "O SISTEMA DESPERTOU", "aviso": "[Sistema] ",
+        "recompensas": "Recompensas da missão",
+    },
+}
 
 modo = "escuro"
 FUNDO, PAINEL, PAINEL_CLARO, CIANO, CIANO_APAGADO, CIANO_FRACO = ([0, 0, 0, 1] for _ in range(6))
-BRANCO, LARANJA, VERMELHO, VERDE, LUGAR = ([0, 0, 0, 1] for _ in range(5))
+BRANCO, LARANJA, VERMELHO, VERDE, LUGAR, ROXO = ([0, 0, 0, 1] for _ in range(6))
 degrade_base = DEGRADE["escuro"]
 
 
 def aplicar(nome):
-    """Troca a paleta ("escuro" ou "claro"), no lugar."""
+    """Troca a paleta ("escuro", "claro" ou "monarca"), no lugar."""
     global modo, degrade_base
     modo = nome if nome in PALETAS else "escuro"
     for chave, cor in PALETAS[modo].items():
@@ -65,6 +95,15 @@ def aplicar(nome):
 
 def claro():
     return modo == "claro"
+
+
+def monarca():
+    return modo == "monarca"
+
+
+def texto(chave, padrao):
+    """A frase do aviso `chave` no tema de agora (ou `padrao`, a de sempre)."""
+    return TEXTOS.get(modo, {}).get(chave, padrao)
 
 
 def com_alfa(cor, alfa):

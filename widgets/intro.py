@@ -41,7 +41,7 @@ class AnelBoot(Widget):
         self._geo = None
         self.titulo = Label(text="", font_size=dp(44), bold=True, color=tema.CIANO,
                             size_hint=(None, None))
-        self.sub = Label(text="Ouxi GT20", font_size=tema.T_ROTULO + 1, color=tema.CIANO_FRACO,
+        self.sub = Label(text=tema.texto("subtitulo", "Ouxi GT20"), font_size=tema.T_ROTULO + 1, color=tema.CIANO_FRACO,
                          size_hint=(None, None), opacity=0)
         self.add_widget(self.titulo)
         self.add_widget(self.sub)
@@ -100,12 +100,17 @@ class AnelBoot(Widget):
             # três arcos de dentro, no sentido contrário
             PushMatrix()
             self._gira_dentro = Rotate(angle=0, origin=(cx, cy))
-            self._cor_dentro = Color(*tema.com_alfa(tema.CIANO, 0.75))
+            self._cor_dentro = Color(*tema.com_alfa(tema.ROXO, 0.75))
             ri = rs - esp - dp(10)
             for k in range(3):
                 Line(circle=(cx, cy, ri, k * 120 + 8, k * 120 + 74), width=dp(1.6), cap="none")
-            Color(*tema.com_alfa(tema.CIANO, 0.22))
+            Color(*tema.com_alfa(tema.ROXO, 0.22))
             Line(circle=(cx, cy, ri - dp(9)), width=dp(1))
+            if tema.monarca():   # a aura: mais dois anéis roxos largos e fracos por dentro
+                Color(*tema.com_alfa(tema.ROXO, 0.10))
+                Line(circle=(cx, cy, ri - dp(20)), width=dp(7))
+                Color(*tema.com_alfa(tema.ROXO, 0.06))
+                Line(circle=(cx, cy, ri - dp(34)), width=dp(11))
             PopMatrix()
             # varredura
             self._cor_varre = Color(*tema.com_alfa(tema.CIANO, 0.0))
@@ -142,7 +147,8 @@ class AnelBoot(Widget):
         desde = t - self._pronto_em if pronto else 0.0
         cor = tema.VERDE if pronto else tema.CIANO
         self._cor_fora.rgba = tema.com_alfa(cor, 0.35 * e)
-        self._cor_dentro.rgba = tema.com_alfa(cor, 0.75 * e)
+        # (os arcos de dentro usam a 2ª cor do tema; nos temas comuns ela é igual à principal)
+        self._cor_dentro.rgba = tema.com_alfa(tema.VERDE if pronto else tema.ROXO, 0.75 * e)
         # cometa: a cabeça dá voltas; atrás dela o brilho vai caindo
         cabeca = (t / VOLTA_S * SEGMENTOS) % SEGMENTOS
         apagado = tema.CIANO_APAGADO

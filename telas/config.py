@@ -157,7 +157,7 @@ class _Coletor:
                 grade.add_widget(w)
 
 
-_NOMES_TEMA = {"auto": "Automático", "claro": "Claro", "escuro": "Escuro"}
+_NOMES_TEMA = {"auto": "Automático", "claro": "Claro", "escuro": "Escuro", "monarca": "Monarca"}
 
 
 def _versao():
@@ -342,7 +342,8 @@ class TelaConfig(Screen):
                                  on_release=lambda *a: self._mudar_tema())
         lista.add_widget(Linha("Aparência",
                                "Automático: tema claro de dia (lê melhor no sol) e escuro à "
-                               "noite, pelo nascer e pôr do sol. Toque para trocar.",
+                               "noite. Monarca: preto, roxo e azul, com avisos no estilo \"Sistema\". "
+                               "Toque para trocar.",
                                self._centralizar(self.btn_tema)))
 
         self.alt_sim = Alternar(self._mudar_sim)
@@ -728,7 +729,7 @@ class TelaConfig(Screen):
 
     def _mudar_tema(self):
         app = App.get_running_app()
-        ordem = ["auto", "claro", "escuro"]
+        ordem = ["auto", "claro", "escuro", "monarca"]
         atual = app.ajustes["tema"] if app.ajustes["tema"] in ordem else "auto"
         novo = ordem[(ordem.index(atual) + 1) % len(ordem)]
         app.ajustes["tema"] = novo

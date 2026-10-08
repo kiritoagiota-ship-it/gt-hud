@@ -38,6 +38,11 @@ class PainelHUD(BoxLayout):
         plano = [v for p in pts for v in p]
         self.canvas.before.clear()
         with self.canvas.before:
+            if tema.monarca():   # a "aura" roxa por trás da janela do sistema
+                Color(*tema.com_alfa(tema.ROXO, 0.13))
+                Line(points=plano, close=True, width=dp(7.5), joint="round")
+                Color(*tema.com_alfa(tema.ROXO, 0.22))
+                Line(points=plano, close=True, width=dp(4.4), joint="round")
             Color(*tema.com_alfa(self.cor_borda, 0.10))            # halo
             Line(points=plano, close=True, width=dp(3.6), joint="round")
             Color(*tema.com_alfa(tema.PAINEL_CLARO, 0.96))         # corpo em degradê

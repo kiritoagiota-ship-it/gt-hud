@@ -1098,13 +1098,14 @@ class MapaHUD(CamadasDoMapa, Widget):
             grupo.add(linha)
             self._larg_rota.append((linha, dp(4.6)))
         elif tipo == "rota":
-            grupo.add(Color(*tema.com_alfa(tema.CIANO, 0.28)))
+            # (o brilho em volta da rota usa a 2ª cor do tema: roxa no Monarca, igual à linha nos outros)
+            grupo.add(Color(*tema.com_alfa(tema.ROXO, 0.40 if tema.monarca() else 0.28)))
             halo = Line(points=plano, width=1, joint="round", cap="round", **LINHA_LEVE)
             grupo.add(halo)
             grupo.add(Color(*tema.CIANO))
             linha = Line(points=plano, width=1, joint="round", cap="round", **LINHA_LEVE)
             grupo.add(linha)
-            self._larg_rota += [(halo, dp(11)), (linha, dp(4.2))]
+            self._larg_rota += [(halo, dp(13) if tema.monarca() else dp(11)), (linha, dp(4.2))]
         else:
             grupo.add(Color(*tema.com_alfa(tema.LARANJA, 0.85)))
             grupo.add(Line(points=plano, width=1, joint="round", cap="round", **LINHA_LEVE))
@@ -1145,7 +1146,7 @@ class MapaHUD(CamadasDoMapa, Widget):
         self._e_prec = Ellipse()
         self._m_prec = grupo(Color(*tema.com_alfa(tema.CIANO, 0.10)), self._e_prec)
         self._e_halo = Ellipse(size=(dp(44), dp(44)))
-        self._c_halo = Color(*tema.com_alfa(tema.CIANO, 0.30))
+        self._c_halo = Color(*tema.com_alfa(tema.ROXO, 0.30))   # (a aura em volta da seta)
         self._m_halo = grupo(self._c_halo, self._e_halo)
         # alerta chegando (radar, lombada, semáforo, ocorrência): dois anéis pulsando em volta da placa
         self._pulso = [(Color(1, 1, 1, 0.0), Line(circle=(0, 0, 1), width=dp(2.2))) for _ in range(2)]

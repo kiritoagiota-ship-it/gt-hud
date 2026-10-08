@@ -36,7 +36,7 @@ class TelaBusca(Screen):
         self._ev_segurar = None
         self._segurou = False
         raiz = BoxLayout(orientation="vertical", padding=tema.MARGEM, spacing=dp(10))
-        raiz.add_widget(Cabecalho("Para onde, senhor?", self._voltar))
+        raiz.add_widget(Cabecalho(tema.texto("busca_titulo", "Para onde, senhor?"), self._voltar))
 
         linha = BoxLayout(size_hint_y=None, height=dp(52), spacing=dp(8))
         self.campo = TextInput(

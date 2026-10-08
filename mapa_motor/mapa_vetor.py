@@ -301,15 +301,42 @@ def chave_nome(texto):
     return _sem_acento(texto.split(" · ")[0]).strip()
 
 
+def _para_monarca(cor, vivo=False):
+    """Uma cor do mapa escuro puxada para o roxo-escuro do tema Monarca. `vivo`: praças
+    e água mantêm mais da cor própria (senão o mapa vira uma mancha roxa só)."""
+    r, g, b = cor[0], cor[1], cor[2]
+    if vivo:
+        return (0.55 * r + 0.03, 0.62 * g, 0.85 * b + 0.06, cor[3])
+    return (0.72 * r + 0.022, 0.50 * g + 0.004, 0.98 * b + 0.045, cor[3])
+
+
+def _estilo_monarca(escuro):
+    vivas = ("verde", "esporte", "cemiterio", "agua", "areia")
+    return {
+        "fundo": (0.052, 0.040, 0.118, 1),
+        "contorno": (0.032, 0.024, 0.078, 1),
+        "areas": {n: _para_monarca(c, n in vivas) for n, c in escuro["areas"].items()},
+        "ruas": {n: (_para_monarca(c, True) if n == "ciclovia" else _para_monarca(c))
+                 for n, c in escuro["ruas"].items()},
+        "setas": {n: (0.62, 0.60, 0.92, c[3]) for n, c in escuro["setas"].items()},
+        "detalhes": {"corrego": (0.130, 0.240, 0.640, 1), "trem": (0.300, 0.270, 0.430, 1),
+                     "ponte": (0.360, 0.330, 0.560, 1), "eixo": (0.660, 0.560, 1.000, 0.70)},
+    }
+
+
 def aplicar_tema(claro):
     """Troca as cores do mapa (no lugar). Vale para os tiles preparados
-    DEPOIS: quem chama remonta o mapa."""
+    DEPOIS: quem chama remonta o mapa. `claro`: True/False, ou o nome do tema
+    ("claro", "escuro", "monarca")."""
     global _ESCURO
     if _ESCURO is None:
         _ESCURO = {"fundo": tuple(FUNDO), "contorno": tuple(CONTORNO), "areas": dict(AREAS),
                    "ruas": {n: v[1] for n, v in RUAS.items()}, "setas": dict(SETAS),
                    "detalhes": dict(DETALHES)}
-    estilo = _CLARO if claro else _ESCURO
+    if claro == "monarca":
+        estilo = _estilo_monarca(_ESCURO)
+    else:
+        estilo = _CLARO if claro in (True, "claro") else _ESCURO
     FUNDO[:] = estilo["fundo"]
     CONTORNO[:] = estilo["contorno"]
     AREAS.update(estilo["areas"])

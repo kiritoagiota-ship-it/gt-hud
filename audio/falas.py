@@ -72,6 +72,50 @@ FALAS.update({
 })
 
 
+# O que a VOZ GRAVADA do app diz (pedido do dono, 08/10/2026: voz "tipo o Venom", que fala
+# como "nós"; frases aprovadas por ele antes de gravar). As chaves são as mesmas de FALAS: o
+# app monta as frases igual, só o texto gravado é outro. FALAS continua valendo para a voz
+# do celular e para o que aparece escrito na tela ("Vire à direita").
+GRAVADAS = dict(FALAS)
+GRAVADAS.update({
+    "senhor": "Parceiro,",
+    "vire_esquerda": "viramos à esquerda.",
+    "vire_direita": "viramos à direita.",
+    "levemente_esquerda": "seguimos levemente à esquerda.",
+    "levemente_direita": "seguimos levemente à direita.",
+    "acentuada_esquerda": "curva fechada à esquerda.",
+    "acentuada_direita": "curva fechada à direita.",
+    "retorno": "fazemos o retorno.",
+    "em_frente": "seguimos em frente.",
+    "mantenha_esquerda": "ficamos à esquerda.",
+    "mantenha_direita": "ficamos à direita.",
+    "saida_esquerda": "pegamos a saída à esquerda.",
+    "saida_direita": "pegamos a saída à direita.",
+    "rotatoria": "entramos na rotatória.",
+    "sair_rotatoria": "saímos da rotatória.",
+    "chegara_destino": "chegaremos ao destino.",
+    "chegou": "chegamos.",
+    "rota_calculada": "Caminho traçado. Vamos.",
+    "recalculando": "Saímos da rota. Achando outro caminho.",
+    "sem_internet": "Sem internet. Não conseguimos traçar a rota.",
+    "gps_perdido": "perdemos o sinal do GPS.",
+    "gps_ok": "O sinal do GPS voltou.",
+    "bem_vindo": "Nós estamos acordados. Para onde vamos?",
+    "rota_trocada": "Novo caminho.",
+    "lombada": "Lombada à frente. Devagar.",
+    "radar": "Radar à frente. Devagar.",
+    "avenida": "Cuidado. Avenida movimentada à frente.",
+    "incidente": "Cuidado. Problema no trânsito à frente.",
+    "chuva": "Vem chuva no caminho.",
+    "caminho_melhor": "Achamos um caminho mais rápido. Toque em rotas.",
+    "sem_rota": "Não achamos um caminho até lá.",
+})
+for _n, _t in _ORDINAIS.items():
+    GRAVADAS["rotatoria_%d" % _n] = "na rotatória, pegamos a %s saída." % _t
+for _g, _t in _NUMEROS.items():
+    GRAVADAS["descida_%d" % _g] = "descida de %s por cento. Devagar." % _t
+
+
 def frase(pedacos):
     """Pedaços -> uma frase só, para o motor de voz do celular falar de uma
     vez (fluida), ex.: "Senhor, em duzentos metros, vire à direita." """

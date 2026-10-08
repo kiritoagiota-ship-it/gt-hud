@@ -40,7 +40,7 @@ RAIZ = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, RAIZ)
 import caminhos  # noqa: E402,F401  (as pastas do código no caminho de busca)
 
-from falas import FALAS  # noqa: E402
+from falas import GRAVADAS as FALAS  # noqa: E402  (o texto da voz gravada: fala como "nós")
 
 URL = "https://api.elevenlabs.io/v1/text-to-speech/%s?output_format=mp3_44100_128"
 SAIDA = os.path.join(RAIZ, "ferramentas", "voz_base")   # as gravações limpas (as do app saem delas: efeito_voz.py)
@@ -55,16 +55,16 @@ def vizinhos(chave):
     """(texto antes, texto depois) para a entonação do pedaço: o que costuma vir
     antes e depois dele numa frase do app."""
     if chave == "senhor":
-        return "", "em duzentos metros, vire à direita."
+        return "", "em duzentos metros, viramos à direita."
     if chave.startswith("em_"):
-        return "Senhor,", "vire à direita."
+        return "Parceiro,", "viramos à direita."
     if chave == "logo_depois":
-        return "Vire à direita.", "vire à esquerda."
+        return "Viramos à direita.", "viramos à esquerda."
     if chave.startswith(("vire_", "levemente_", "acentuada_", "retorno", "em_frente", "mantenha_", "saida_",
                          "rotatoria", "sair_rotatoria", "chegara_destino", "destino_", "subida_", "descida_")):
-        return "Senhor, em duzentos metros,", ""
+        return "Parceiro, em duzentos metros,", ""
     if chave in ("chegou", "gps_perdido"):
-        return "Senhor,", ""
+        return "Parceiro,", ""
     return "", ""
 
 

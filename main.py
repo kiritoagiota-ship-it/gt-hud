@@ -93,8 +93,12 @@ class GTHudApp(App):
         self.ajustes = Ajustes(pasta)
         self.posicao = None
         # tema ANTES de montar qualquer tela (claro de dia, escuro à noite)
+        if not self.ajustes["tema_monarca_v1"]:
+            # o dono pediu o tema Monarca (08/10/2026): entra ligado uma vez; depois vale o que ele escolher
+            self.ajustes["tema_monarca_v1"] = True
+            self.ajustes["tema"] = "monarca"
         tema.aplicar(self.tema_desejado())
-        mapa_vetor.aplicar_tema(tema.claro())
+        mapa_vetor.aplicar_tema(tema.modo)
         Window.clearcolor = tema.FUNDO
         self.banco = Banco(pasta)
         if not self.ajustes["alfa_v2"]:
@@ -200,7 +204,7 @@ class GTHudApp(App):
     def tema_desejado(self):
         """O tema que deveria estar valendo agora, pelos Ajustes e pela hora."""
         escolha = self.ajustes["tema"]
-        if escolha in ("claro", "escuro"):
+        if escolha in ("claro", "escuro", "monarca"):
             return escolha
         lat, lon = self.posicao or goiania.CENTRO
         return tema.modo_pela_hora(lat, lon)
@@ -229,7 +233,7 @@ class GTHudApp(App):
         except Exception as e:
             print("[tema] ao soltar as telas antigas:", e)
         tema.aplicar(nome)
-        mapa_vetor.aplicar_tema(tema.claro())
+        mapa_vetor.aplicar_tema(tema.modo)
         Window.clearcolor = tema.FUNDO
         android_utils.cores_do_sistema(tema.FUNDO, tema.claro())
         mapa_velho.fonte.fechar()
@@ -1013,7 +1017,7 @@ class GTHudApp(App):
         resumo = self.ultimo_resumo if salvou else None
         if not chegou:
             self.voz.falar(["navegacao_encerrada"], P_INFO)
-        texto = "Você chegou!" if chegou else "Rota encerrada"
+        texto = tema.texto("chegou", "Você chegou!") if chegou else tema.texto("encerrada", "Rota encerrada")
 
         def na_tela():
             tela = self.sm.get_screen("mapa")

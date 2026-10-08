@@ -31,17 +31,24 @@ class _Resposta:
 
 class TesteGravacao(unittest.TestCase):
     def test_cabe_nos_creditos_do_plano_gratuito(self):
-        total = sum(len(t) for t in falas.FALAS.values())
+        total = sum(len(t) for t in falas.GRAVADAS.values())
         self.assertLess(total, gravar.LIMITE_CARACTERES)
         self.assertLess(total, 10000 / 3)            # dá para gravar tudo 3 vezes com 10.000 créditos
 
     def test_cada_pedaco_leva_o_texto_vizinho(self):
-        self.assertEqual(gravar.vizinhos("em_200"), ("Senhor,", "vire à direita."))
-        self.assertEqual(gravar.vizinhos("vire_direita"), ("Senhor, em duzentos metros,", ""))
-        self.assertEqual(gravar.vizinhos("subida_8")[0], "Senhor, em duzentos metros,")
+        self.assertEqual(gravar.vizinhos("em_200"), ("Parceiro,", "viramos à direita."))
+        self.assertEqual(gravar.vizinhos("vire_direita"), ("Parceiro, em duzentos metros,", ""))
+        self.assertEqual(gravar.vizinhos("subida_8")[0], "Parceiro, em duzentos metros,")
         self.assertEqual(gravar.vizinhos("recalculando"), ("", ""))          # frase inteira: sem vizinho
         for chave in falas.FALAS:
             self.assertEqual(len(gravar.vizinhos(chave)), 2)
+
+    def test_a_voz_gravada_tem_as_mesmas_falas_com_o_texto_dela(self):
+        self.assertEqual(set(falas.GRAVADAS), set(falas.FALAS))          # as mesmas chaves: o app monta igual
+        self.assertEqual(falas.GRAVADAS["vire_direita"], "viramos à direita.")
+        self.assertEqual(falas.GRAVADAS["em_200"], falas.FALAS["em_200"])  # distâncias iguais
+        self.assertEqual(falas.FALAS["vire_direita"], "vire à direita.")   # a tela e a voz do celular não mudaram
+        self.assertEqual(falas.texto_manobra("direita"), "Vire à direita")
 
     def test_o_pedido(self):
         vistos = []

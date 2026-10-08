@@ -196,7 +196,7 @@ class CampoBusca(ButtonBehavior, Widget):
 
     def __init__(self, **kw):
         super().__init__(**kw)
-        self.lbl = Label(text="Para onde?", font_size=tema.T_BOTAO, color=tema.CIANO_FRACO,
+        self.lbl = Label(text=tema.texto("para_onde", "Para onde?"), font_size=tema.T_BOTAO, color=tema.CIANO_FRACO,
                          halign="left", valign="middle")
         self.add_widget(self.lbl)
         self.bind(pos=self._d, size=self._d, state=self._d)
@@ -343,8 +343,8 @@ class TelaMapa(Screen):
         self.perfil = PerfilAltimetria(size_hint_y=None, height=dp(64))
         self.escolha = EscolhaRotas(size_hint_y=None, height=dp(50))
         botoes = BoxLayout(size_hint_y=None, height=dp(50), spacing=dp(10))
-        botoes.add_widget(BotaoHUD(text="Cancelar", on_release=lambda *a: app.cancelar_previa()))
-        self.btn_iniciar = BotaoHUD(text="Iniciar", destaque=True,
+        botoes.add_widget(BotaoHUD(text=tema.texto("cancelar", "Cancelar"), on_release=lambda *a: app.cancelar_previa()))
+        self.btn_iniciar = BotaoHUD(text=tema.texto("iniciar", "Iniciar"), destaque=True,
                                     on_release=lambda *a: app.iniciar_navegacao())
         botoes.add_widget(self.btn_iniciar)
         # chuva prevista, trânsito de agora e trechos que costumam estar lentos
@@ -451,7 +451,8 @@ class TelaMapa(Screen):
         """Cartão de fechamento da rota: distância, tempo, média e máxima.
         Fica até tocar em Fechar (ou some sozinho em RESUMO_FICA_S)."""
         self.lbl_resumo_titulo.text = titulo
-        self.lbl_resumo_destino.text = destino or ""
+        recompensas = tema.texto("recompensas", "")   # (no tema Monarca os números da viagem são "recompensas")
+        self.lbl_resumo_destino.text = "  ·  ".join(x for x in (destino or "", recompensas) if x)
         self.res_dist.valor.text = fmt_dist(resumo["distancia_m"])
         self.res_tempo.valor.text = fmt_tempo(resumo["duracao_s"])
         self.res_media.valor.text = "%.0f" % (resumo["vel_media_kmh"] or 0)
@@ -477,7 +478,7 @@ class TelaMapa(Screen):
         self._fechar_resumo(montar=False)
         self.estado = PREVIA
         self.lbl_destino.text = lugar["nome"]
-        self.lbl_resumo.text = "Calculando a rota..."
+        self.lbl_resumo.text = tema.texto("calculando", "Calculando a rota...")
         self.lbl_resumo.color = tema.CIANO_FRACO
         self.lbl_avisos.text = ""
         self.escolha.clear_widgets()
@@ -670,6 +671,8 @@ class TelaMapa(Screen):
             self._montar()
 
     def mensagem(self, texto, cor=tema.VERDE, segundos=3.5):
+        if texto and len(texto) <= 40:   # no tema Monarca os avisos curtos vêm "do Sistema"
+            texto = tema.texto("aviso", "") + texto
         self.lbl_msg.text = texto
         self.lbl_msg.color = cor
         if self._ev_msg:
