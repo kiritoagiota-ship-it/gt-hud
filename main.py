@@ -231,12 +231,23 @@ class GTHudApp(App):
         Window.clearcolor = tema.FUNDO
         android_utils.cores_do_sistema(tema.FUNDO, tema.claro())
         mapa_velho.fonte.fechar()
+        # a tela de antes vira uma "foto" por cima da nova e se dissolve devagar: as cores
+        # mudam aos poucos, em vez de a tela piscar (pedido do dono, 08/10/2026)
+        foto = None
+        try:
+            if not self.fundo.minimizado and velha.width > 2:
+                foto = velha.export_as_image().texture
+        except Exception as e:
+            print("[tema] sem a foto da tela antiga:", e)
         self._ouvintes = []
         self.sm = self._montar_telas(atual)
         Window.remove_widget(velha)
         Window.add_widget(self.sm)
         self.root = self.sm
-        entrar(self.sm, 0.4)   # as telas novas aparecem suave (antes era um corte seco)
+        if foto is not None:
+            self._dissolver(foto)
+        else:
+            entrar(self.sm, 0.4)   # as telas novas aparecem suave (antes era um corte seco)
         tela = self.sm.get_screen("mapa")
         tela.mapa.centro, tela.mapa.zoom = centro, zoom
         if self.nav is not None:
@@ -257,6 +268,26 @@ class GTHudApp(App):
         self.atualizar_transito_do_mapa()   # o mapa novo nasce sem o trânsito desenhado
         self._fluxo_tiles = None
         self.atualizar_fluxo()
+
+    def _dissolver(self, textura, segundos=1.3):
+        """A foto da tela antiga por cima de tudo, sumindo aos poucos."""
+        from kivy.animation import Animation
+        from kivy.graphics import Color, Rectangle
+        from kivy.uix.widget import Widget
+        capa = Widget(size=Window.size, pos=(0, 0), size_hint=(None, None))
+        capa.disabled = True                       # não rouba toque
+        with capa.canvas:
+            Color(1, 1, 1, 1)
+            Rectangle(texture=textura, pos=(0, 0), size=Window.size)
+        Window.add_widget(capa)
+        self._capa_tema = capa
+
+        def tirar(*a):
+            if capa.parent is not None:
+                Window.remove_widget(capa)
+        animacao = Animation(opacity=0.0, d=segundos, t="in_out_quad")
+        animacao.bind(on_complete=tirar)
+        animacao.start(capa)
 
     # --- voz -------------------------------------------------------------------
     def indice_voz(self):
@@ -1133,6 +1164,7 @@ class GTHudApp(App):
             if resultado is None or self.nav is None or self.nav.rota is not rota:
                 return
             self.nav.avenidas = [a for a in rota.avenidas if a[1] - a[0] >= 300]
+            # (os limites de velocidade da via vieram junto: a navegação lê de rota.limites)
             self.na_tela(lambda: self.sm.get_screen("mapa").mapa.definir_trechos(rota.trechos))
         rede.em_segundo_plano(lambda: rotas.medir_movimento(rota), medida, lambda e: None)
 

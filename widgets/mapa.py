@@ -29,7 +29,7 @@ from kivy.clock import Clock
 from kivy.core.text import Label as CoreLabel
 from kivy.animation import Animation
 from kivy.graphics import (Color, Ellipse, InstructionGroup, Line, Mesh, PopMatrix,
-                           PushMatrix, Rectangle, Rotate, Scale, Translate)
+                           PushMatrix, Rectangle, Rotate, RoundedRectangle, Scale, Translate)
 from kivy.metrics import Metrics, dp, sp
 from kivy.properties import BooleanProperty, NumericProperty
 from kivy.uix.label import Label
@@ -51,6 +51,12 @@ TAM = 256.0
 MAX_ROTULOS_RUA = 30
 MAX_ROTULOS_LUGAR = 8
 MAX_ROTULOS_POI = 14
+# nome de avenida (secundária para cima) dentro de uma plaquinha azul com letra branca, como
+# placa de rua (pedido do dono, 08/10/2026): escuro, claro
+PLACA_ESCURO, PLACA_CLARO = (0.085, 0.270, 0.540, 0.93), (0.130, 0.370, 0.680, 0.95)
+PESO_PLACA = 5             # _IMPORTANCIA a partir da qual o nome ganha placa (secundária, primária, expressa)
+RASTRO_PONTOS = 18         # o rastro curto atrás da seta
+RASTRO_PASSO_M = 6.0
 DIST_NOME_DP = 15          # do centro do emblema do lugar até o começo do nome
 # cor da bolinha de cada tipo de lugar (o nome sai num tom mais claro da mesma cor)
 CORES_POI = {
@@ -129,9 +135,10 @@ class _Rotulo:
     Lugar (ponto != None) ganha o emblema da categoria antes do nome, e os
     dois surgem com um pequeno "pulo" (não aparecem do nada)."""
 
-    def __init__(self, info, textura, ponto=None):
+    def __init__(self, info, textura, ponto=None, placa=None):
         self.info = info
         self.textura = textura
+        self.placa = placa
         self.grupo = InstructionGroup()
         self.bolinha = None
         self.grupo.add(PushMatrix())
@@ -150,6 +157,12 @@ class _Rotulo:
             self.grupo.add(PopMatrix())
             Animation(x=1.0, y=1.0, d=0.26, t="out_back").start(self.cresce)
             deslocar = dp(DIST_NOME_DP)
+        if placa is not None:   # nome de avenida: dentro de uma plaquinha, como placa de rua
+            self.cor_placa = Color(placa[0], placa[1], placa[2], 0.0)
+            self.grupo.add(self.cor_placa)
+            self.grupo.add(RoundedRectangle(pos=(deslocar - dp(7), -h / 2.0 - dp(1.5)),
+                                            size=(w + dp(14), h + dp(3)), radius=[dp(5)]))
+            Animation(a=placa[3], d=0.22, t="out_quad").start(self.cor_placa)
         self.cor = Color(1, 1, 1, 0.0)
         self.grupo.add(self.cor)
         self.grupo.add(Rectangle(texture=textura, size=(w, h), pos=(deslocar, -h / 2.0)))
@@ -213,6 +226,9 @@ class MapaHUD(CamadasDoMapa, Widget):
         self._brilho = None                 # hora em que a rota acabou de se desenhar
         self._radar_t0 = None               # "procurando caminho": ondas saindo de quem pedala
         self._festa = None                  # chegada: (hora, (lat, lon)) das ondas verdes no destino
+        self._destaque = None               # alerta chegando: ((lat, lon), cor) -> placa maior e anel pulsando
+        self._curva = []                    # a seta da próxima curva, desenhada no chão: [(lat, lon)]
+        self._rastro = collections.deque(maxlen=RASTRO_PONTOS)   # por onde a seta acabou de passar (locais)
         self._dest_t0 = None                # pino do destino caindo
         self.ao_segurar = None              # ao_segurar(lat, lon): dedo parado no mapa
         self.ocorrencias = []               # trânsito de Goiânia agora (transito.py), mesmo sem rota
@@ -254,9 +270,19 @@ class MapaHUD(CamadasDoMapa, Widget):
         self._g_trilha = InstructionGroup()
         self._g_alt = InstructionGroup()      # outras rotas que dá para escolher (cinza)
         self._g_rota = InstructionGroup()
+        self._g_rastro = InstructionGroup()   # rastro curto atrás da seta
+        self._g_curva = InstructionGroup()    # seta da próxima curva, pintada no chão por cima da rota
         self.canvas.add(self._g_trilha)
         self.canvas.add(self._g_alt)
         self.canvas.add(self._g_rota)
+        self.canvas.add(self._g_rastro)
+        self.canvas.add(self._g_curva)
+        self._rastro_linhas = []
+        for alfa in (0.10, 0.22, 0.38):       # do pedaço mais velho para o mais novo
+            self._g_rastro.add(Color(1, 1, 1, alfa))
+            linha = Line(points=[0, 0, 0, 0], width=1, cap="round", joint="round", **LINHA_LEVE)
+            self._g_rastro.add(linha)
+            self._rastro_linhas.append(linha)
         self.canvas.add(PopMatrix())
         self._g_sinais = InstructionGroup()   # semáforos e lombadas (tela)
         self.canvas.add(self._g_sinais)
@@ -315,6 +341,10 @@ class MapaHUD(CamadasDoMapa, Widget):
         self._cancelar_voo()
         self._radar_t0 = None
         self._navegando = ligado
+        if not ligado:
+            self._destaque = None
+            self._curva = []
+            self._g_curva.clear()
         # navegando e girando: a seta fica mais embaixo, sobra mapa à frente
         ancora = self.ancora_nav if (ligado and self.girar) else (0.5, 0.5)
         if ligado:
@@ -363,6 +393,35 @@ class MapaHUD(CamadasDoMapa, Widget):
             return
         self._festa = (time.monotonic(), tuple(onde[:2]))
         self._ligar_animacao()
+
+    def definir_seta_curva(self, pontos):
+        """A próxima manobra desenhada no chão: uma seta branca larga por cima da
+        rota, passando pela curva (pontos (lat, lon) de antes até depois dela).
+        [] tira."""
+        self._curva = list(pontos or [])
+        self._desenhar_seta_curva()
+
+    def _desenhar_seta_curva(self):
+        self._g_curva.clear()
+        if len(self._curva) < 2 or not self._navegando:
+            return
+        pts = [self._local(p[0], p[1]) for p in self._curva]
+        s = self._escala_tela()
+        # a ponta: um triângulo no fim, na direção do último trecho
+        (ax, ay), (bx, by) = pts[-2], pts[-1]
+        comp = math.hypot(bx - ax, by - ay) or 1.0
+        ux, uy = (bx - ax) / comp, (by - ay) / comp
+        t, meia = dp(15) / s, dp(11) / s
+        ponta = [(bx + ux * t, by + uy * t), (bx - uy * meia, by + ux * meia), (bx + uy * meia, by - ux * meia)]
+        plano = [c for p in pts for c in p]
+        # (borda escura por baixo e o branco por cima; um pouco mais larga que a linha da rota)
+        for cor, px, cresce in (((0.03, 0.05, 0.08, 0.85), dp(7.4), 1.3), ((1, 1, 1, 0.97), dp(5.2), 1.0)):
+            self._g_curva.add(Color(*cor))
+            self._g_curva.add(Line(points=plano, width=px / s, cap="round", joint="round", **LINHA_LEVE))
+            cx, cy = sum(p[0] for p in ponta) / 3.0, sum(p[1] for p in ponta) / 3.0
+            tri = [(cx + (x - cx) * cresce, cy + (y - cy) * cresce) for x, y in ponta]
+            self._g_curva.add(Mesh(vertices=[v for x, y in tri for v in (x, y, 0, 0)], indices=[0, 1, 2],
+                                   mode="triangles"))
 
     def procurar(self, ligado):
         """Calculando a rota: ondas de radar saem de quem pedala (e uma do
@@ -748,11 +807,11 @@ class MapaHUD(CamadasDoMapa, Widget):
             self._aplicar()
 
     # --- nomes --------------------------------------------------------------------
-    def _textura(self, texto, tamanho, cor, negrito=True):
+    def _textura(self, texto, tamanho, cor, negrito=True, contorno=None):
         """Textura do nome (guardada). None = passou do limite de nomes novos
         desta vez (desenhar texto é caro): fica para a próxima escolha."""
         cor = tuple(cor)
-        chave = (texto, tamanho, cor, negrito)
+        chave = (texto, tamanho, cor, negrito, contorno)
         tex = self._texturas.get(chave)
         if tex is None:
             # navegando, poucos por vez: desenhar texto é o que mais pesa num
@@ -761,7 +820,8 @@ class MapaHUD(CamadasDoMapa, Widget):
                 return None
             self._novas_texturas += 1
             rotulo = CoreLabel(text=texto, font_size=tamanho, bold=negrito, color=cor,
-                               outline_width=max(1, int(dp(1.6))), outline_color=FUNDO[:3])
+                               outline_width=max(1, int(dp(1.6))),
+                               outline_color=(contorno or FUNDO)[:3])
             rotulo.refresh()
             tex = rotulo.texture
             self._texturas[chave] = tex
@@ -836,7 +896,12 @@ class MapaHUD(CamadasDoMapa, Widget):
                 tamanho = sp(13.5) if r["peso"] < 4 else sp(14.5)
                 if r["comp"] * s < len(r["texto"]) * tamanho * 0.4:
                     continue  # nem precisa desenhar: o nome não cabe no trecho
-                tex = self._textura(r["texto"], tamanho, tema.BRANCO)
+                placa = None
+                if r["peso"] >= PESO_PLACA:
+                    placa = PLACA_CLARO if tema.claro() else PLACA_ESCURO
+                    tex = self._textura(r["texto"], tamanho, (1, 1, 1, 1), contorno=placa)
+                else:
+                    tex = self._textura(r["texto"], tamanho, tema.BRANCO)
                 if tex is None:
                     faltou_textura = True
                     continue
@@ -847,20 +912,21 @@ class MapaHUD(CamadasDoMapa, Widget):
                 ponto = None
             elif tipo == "lugar":
                 tex = self._textura(r["texto"], sp(15), tema.LUGAR)
-                ang, ponto = 0.0, None
+                ang, ponto, placa = 0.0, None, None
             else:
                 ponto = CORES_POI.get(r.get("grupo"), CORES_POI["outros"])
                 if tema.claro():   # no mapa claro, as cores vivas precisam fechar para aparecer
                     ponto = (ponto[0] * 0.70, ponto[1] * 0.70, ponto[2] * 0.70, 1)
                 clara = tema.misturar(ponto, tema.BRANCO, 0.45)   # o nome: a cor puxada para a do texto
                 tex = self._textura(r["texto"], sp(12.5), clara, negrito=r.get("grupo") == "praca")
-                ang = 0.0
+                ang, placa = 0.0, None
             if tex is None:
                 faltou_textura = True
                 continue
             w, h = tex.size
             c, sn = abs(math.cos(math.radians(ang))), abs(math.sin(math.radians(ang)))
-            bw, bh = w * c + h * sn + dp(6), w * sn + h * c + dp(6)
+            folga = dp(18) if placa else dp(6)   # (a placa é maior que o texto)
+            bw, bh = w * c + h * sn + folga, w * sn + h * c + folga
             cx_ = sx + (w / 2.0 + dp(DIST_NOME_DP) if ponto else 0)
             caixa = (cx_ - bw / 2, sy - bh / 2, cx_ + bw / 2, sy + bh / 2)
             if any(caixa[0] < o[2] and o[0] < caixa[2] and caixa[1] < o[3] and o[1] < caixa[3]
@@ -873,13 +939,13 @@ class MapaHUD(CamadasDoMapa, Widget):
             ocupados.append(caixa)
             usados_texto[chave] = (sx, sy)
             conta[tipo] += 1
-            novos.append((r, tex, ponto))
+            novos.append((r, tex, ponto, placa))
         self._g_rotulos.clear()
         self._rotulos = []
-        for r, tex, ponto in novos:
+        for r, tex, ponto, placa in novos:
             rot = antigos.get(id(r))
             if rot is None or rot.textura is not tex:
-                rot = _Rotulo(r, tex, ponto)
+                rot = _Rotulo(r, tex, ponto, placa)
             self._rotulos.append(rot)
             self._g_rotulos.add(rot.grupo)
         self._mover_rotulos()
@@ -1053,6 +1119,10 @@ class MapaHUD(CamadasDoMapa, Widget):
             linha.width = px / s
         for linha in self._larg_geral:      # trânsito da cidade
             linha.width = dp(4.2) / s
+        for linha in self._rastro_linhas:   # rastro da seta
+            linha.width = dp(3.2) / s
+        if self._curva:                     # a ponta da seta da curva é feita no tamanho da tela: refaz
+            self._desenhar_seta_curva()
         for linha in (i for i in self._g_trilha.children if isinstance(i, Line)):
             linha.width = dp(2.6) / s
         linhas_alt = [i for i in self._g_alt.children if isinstance(i, Line)]
@@ -1075,7 +1145,11 @@ class MapaHUD(CamadasDoMapa, Widget):
         self._e_prec = Ellipse()
         self._m_prec = grupo(Color(*tema.com_alfa(tema.CIANO, 0.10)), self._e_prec)
         self._e_halo = Ellipse(size=(dp(44), dp(44)))
-        self._m_halo = grupo(Color(*tema.com_alfa(tema.CIANO, 0.30)), self._e_halo)
+        self._c_halo = Color(*tema.com_alfa(tema.CIANO, 0.30))
+        self._m_halo = grupo(self._c_halo, self._e_halo)
+        # alerta chegando (radar, lombada, semáforo, ocorrência): dois anéis pulsando em volta da placa
+        self._pulso = [(Color(1, 1, 1, 0.0), Line(circle=(0, 0, 1), width=dp(2.2))) for _ in range(2)]
+        self._m_pulso = grupo(*[i for par in self._pulso for i in par])
         self._seta_malha = Mesh(vertices=[0.0] * 16, indices=[0, 1, 2, 3], mode="triangle_fan")
         self._seta_borda = Line(points=[0.0] * 8, close=True, width=dp(1.4))
         self._m_seta = grupo(Color(*tema.BRANCO), self._seta_malha,
@@ -1161,7 +1235,12 @@ class MapaHUD(CamadasDoMapa, Widget):
                 if dp(20) < r < max(self.width, self.height):
                     self._e_prec.pos, self._e_prec.size = (x - r, y - r), (2 * r, 2 * r)
                     quais.append(self._m_prec)
-            self._e_halo.pos = (x - dp(22), y - dp(22))
+            # o halo "respira" devagar (só anda quando o mapa já está animando: não gasta bateria parado)
+            respiro = 0.5 + 0.5 * math.sin(agora * 2.0 * math.pi / 2.6)
+            raio = dp(21) + dp(5) * respiro
+            self._e_halo.size = (2 * raio, 2 * raio)
+            self._e_halo.pos = (x - raio, y - raio)
+            self._c_halo.a = 0.34 - 0.14 * respiro
             quais.append(self._m_halo)
             if rumo is None:
                 for e in self._e_ponto:
@@ -1179,6 +1258,15 @@ class MapaHUD(CamadasDoMapa, Widget):
                     self._seta_malha.vertices = [v for px, py in pts for v in (px, py, 0, 0)]
                     self._seta_borda.points = [c for p in pts for c in p]
                 quais.append(self._m_seta)
+        if self._destaque is not None:
+            (dlat, dlon), cor = self._destaque
+            px, py = self._para_tela(dlat, dlon)
+            for n, (c, anel) in enumerate(self._pulso):
+                fase = (agora / 1.1 + n * 0.5) % 1.0
+                anel.circle = (px, py, dp(20) + fase * dp(34))
+                c.rgb = cor
+                c.a = 0.9 * (1.0 - fase) ** 1.5
+            quais.append(self._m_pulso)
         self._mostrar_marcas(quais)
 
     # --- animação (seta andando, câmera seguindo, zoom suave, inércia) ---------------
@@ -1192,6 +1280,27 @@ class MapaHUD(CamadasDoMapa, Widget):
             self._ev_anim.cancel()
             self._ev_anim = None
         self._velocidade = (0.0, 0.0)
+
+    def _guardar_rastro(self, vista):
+        """O rastro curto atrás da seta: um ponto a cada RASTRO_PASSO_M, em três
+        pedaços cada vez mais apagados para trás."""
+        ponto = self._local(vista[0], vista[1])
+        passo = RASTRO_PASSO_M / max(0.05, metros_por_px(vista[0], 14))   # em unidades locais
+        if self._rastro:
+            ux, uy = self._rastro[-1]
+            d = math.hypot(ponto[0] - ux, ponto[1] - uy)
+            if d < passo:
+                return
+            if d > passo * 12:   # pulou (GPS voltou, rota nova): o rastro velho não liga com o novo
+                self._rastro.clear()
+        self._rastro.append(ponto)
+        pts = list(self._rastro)
+        terco = max(1, len(pts) // 3)
+        pedacos = (pts[:terco + 1], pts[terco:2 * terco + 1], pts[2 * terco:])
+        for linha, pedaco in zip(self._rastro_linhas, pedacos):
+            if len(pedaco) < 2:
+                pedaco = [pts[0], pts[0]]
+            linha.points = [c for p in pedaco for c in p]
 
     def _posicao_prevista(self, agora):
         """(lat, lon, rumo, andando) de onde a seta deve estar agora."""
@@ -1232,7 +1341,7 @@ class MapaHUD(CamadasDoMapa, Widget):
             if agora - self._radar_t0 > RADAR_MAX_S:
                 self._radar_t0 = None
             mexeu = True
-        if self._dest_t0 is not None or self._festa is not None:
+        if self._dest_t0 is not None or self._festa is not None or self._destaque is not None:
             mexeu = True
         if self._revelar is not None:
             mexeu = True
@@ -1289,6 +1398,7 @@ class MapaHUD(CamadasDoMapa, Widget):
                           and (rumo is None or abs(_dif_angulo(nova[2], rumo)) < 0.2))
                 self._vista = nova
                 mexeu = mexeu or andando or not parado
+                self._guardar_rastro(nova)
             if self.seguindo and self._vista is not None and self._voo is None:
                 lat, lon, rumo = self._vista
                 clat, clon = self.centro

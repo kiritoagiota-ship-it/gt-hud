@@ -14,7 +14,7 @@ import math
 
 from kivy.core.text import Label as CoreLabel
 from kivy.graphics import (Color, Ellipse, InstructionGroup, Line, Mesh, PopMatrix, PushMatrix, Rectangle,
-                           RoundedRectangle, Translate)
+                           RoundedRectangle, Scale, Translate)
 from kivy.metrics import dp, sp
 
 import rede
@@ -145,9 +145,12 @@ class CamadasDoMapa:
     # --- semáforos e lombadas -------------------------------------------------------
     @staticmethod
     def _icone(tipo):
-        g, tr = InstructionGroup(), Translate(0, 0)
+        """(grupo, Translate, Scale) do ícone: o Scale faz a placa crescer quando a
+        pessoa chega perto dela na navegação (destacar_alerta)."""
+        g, tr, sc = InstructionGroup(), Translate(0, 0), Scale(1, 1, 1)
         g.add(PushMatrix())
         g.add(tr)
+        g.add(sc)
         if tipo in ("casa", "trabalho"):
             # pino do atalho (como o da casa no Waze): gota na cor do app com o desenho dentro
             cor, fundo = tema.CIANO, tema.FUNDO
@@ -198,33 +201,47 @@ class CamadasDoMapa:
                 g.add(Rectangle(pos=(-dp(1.5), -dp(6.5)), size=(dp(3), dp(3))))
         elif sinais.e_radar(tipo):
             # placa de limite: disco branco, aro vermelho e o número (ou "R" sem limite informado)
-            g.add(Color(0.85, 0.10, 0.16, 1))
-            g.add(Ellipse(pos=(-dp(13), -dp(13)), size=(dp(26), dp(26))))
+            g.add(Color(0, 0, 0, 0.30))                                   # sombra
+            g.add(Ellipse(pos=(-dp(15.5), -dp(17.5)), size=(dp(31), dp(31))))
+            g.add(Color(0.05, 0.06, 0.09, 1))                             # contorno escuro
+            g.add(Ellipse(pos=(-dp(16), -dp(16)), size=(dp(32), dp(32))))
+            g.add(Color(0.88, 0.10, 0.16, 1))
+            g.add(Ellipse(pos=(-dp(14.5), -dp(14.5)), size=(dp(29), dp(29))))
             g.add(Color(1, 1, 1, 1))
-            g.add(Ellipse(pos=(-dp(9.5), -dp(9.5)), size=(dp(19), dp(19))))
+            g.add(Ellipse(pos=(-dp(10.5), -dp(10.5)), size=(dp(21), dp(21))))
             limite = sinais.limite_do_radar(tipo)
-            rotulo = CoreLabel(text=str(limite) if limite else "R", font_size=sp(11), bold=True,
+            rotulo = CoreLabel(text=str(limite) if limite else "R", font_size=sp(12.5), bold=True,
                                color=(0.05, 0.07, 0.10, 1))
             rotulo.refresh()
             tw, th = rotulo.texture.size
             g.add(Color(1, 1, 1, 1))
             g.add(Rectangle(texture=rotulo.texture, size=(tw, th), pos=(-tw / 2.0, -th / 2.0)))
-        elif tipo == "semaforo":  # caixinha escura com as três luzes
-            g.add(Color(0.02, 0.03, 0.05, 0.95))
-            g.add(RoundedRectangle(pos=(-dp(5), -dp(11)), size=(dp(10), dp(22)), radius=[dp(3)]))
-            for k, cor in enumerate(((0.95, 0.25, 0.25, 1), (1.0, 0.78, 0.2, 1), (0.25, 0.9, 0.45, 1))):
+        elif tipo == "semaforo":  # caixa escura com aro claro e as três luzes acesas
+            g.add(Color(0, 0, 0, 0.30))                                   # sombra
+            g.add(RoundedRectangle(pos=(-dp(7.5), -dp(16)), size=(dp(15), dp(30)), radius=[dp(5)]))
+            g.add(Color(0.80, 0.84, 0.90, 1))                             # aro claro: destaca no mapa escuro e no claro
+            g.add(RoundedRectangle(pos=(-dp(8), -dp(14.5)), size=(dp(16), dp(29)), radius=[dp(5)]))
+            g.add(Color(0.05, 0.06, 0.09, 1))
+            g.add(RoundedRectangle(pos=(-dp(6.5), -dp(13)), size=(dp(13), dp(26)), radius=[dp(4)]))
+            for k, cor in enumerate(((0.98, 0.24, 0.24, 1), (1.0, 0.80, 0.18, 1), (0.22, 0.92, 0.46, 1))):
                 g.add(Color(*cor))
-                g.add(Ellipse(pos=(-dp(3), dp(4) - k * dp(7)), size=(dp(6), dp(6))))
-        else:  # lombada: triângulo laranja de aviso
-            pts = [(0, dp(10)), (dp(10), -dp(8)), (-dp(10), -dp(8))]
-            g.add(Color(*tema.LARANJA))
-            g.add(Mesh(vertices=[v for x, y in pts for v in (x, y, 0, 0)], indices=[0, 1, 2],
-                       mode="triangles"))
-            g.add(Color(*tema.FUNDO))
-            g.add(Line(points=[c for p in pts for c in p], close=True, width=dp(1.3)))
-            g.add(Rectangle(pos=(-dp(1.2), -dp(3)), size=(dp(2.4), dp(7))))
+                g.add(Ellipse(pos=(-dp(3.6), dp(4.6) - k * dp(8.1)), size=(dp(7.2), dp(7.2))))
+        else:  # lombada: placa de advertência (losango amarelo) com o desenho da lombada
+            def losango(r):
+                return [(0, r), (r, 0), (0, -r), (-r, 0)]
+
+            def cheio(pontos, cor):
+                g.add(Color(*cor))
+                g.add(Mesh(vertices=[v for x, y in pontos for v in (x, y, 0, 0)], indices=[0, 1, 2, 3],
+                           mode="triangle_fan"))
+            cheio([(x, y - dp(2)) for x, y in losango(dp(16.5))], (0, 0, 0, 0.30))     # sombra
+            cheio(losango(dp(16.5)), (0.05, 0.06, 0.09, 1))                            # contorno
+            cheio(losango(dp(14.5)), (1.0, 0.80, 0.10, 1))
+            g.add(Color(0.05, 0.06, 0.09, 1))
+            g.add(Rectangle(pos=(-dp(8), -dp(4.5)), size=(dp(16), dp(2.2))))                 # o chão
+            g.add(Ellipse(pos=(-dp(5.5), -dp(4.5)), size=(dp(11), dp(9)), angle_start=-90, angle_end=90))   # a lombada
         g.add(PopMatrix())
-        return g, tr
+        return g, tr, sc
 
     def _escolher_sinais(self):
         """Ícones dos semáforos/lombadas à vista (de perto: de longe poluiria)."""
@@ -277,11 +294,27 @@ class CamadasDoMapa:
                 item = self._icones[(lat, lon, tipo)] = self._icone(tipo)
             self._g_sinais.add(item[0])
             lx, ly = self._local(lat, lon)
-            self._sinais.append((lx, ly, item[1]))
+            self._sinais.append((lx, ly, item[1], item[2], (lat, lon)))
             if (lat, lon, tipo) in de_quem:
                 self._ocorr_na_tela.append((lx, ly, de_quem[(lat, lon, tipo)]))
         self._mover_sinais()
 
+    def destacar_alerta(self, lat_lon, cor=None):
+        """Navegando, o alerta que está chegando (radar, lombada, semáforo, ocorrência):
+        a placa dele cresce e um anel pulsa em volta. None = nenhum."""
+        novo = None if lat_lon is None else (tuple(lat_lon[:2]), tuple(cor or tema.LARANJA)[:3])
+        if novo == self._destaque:
+            return
+        self._destaque = novo
+        self._mover_sinais()
+        self._desenhar_tela()
+        if novo is not None:
+            self._ligar_animacao()
+
     def _mover_sinais(self):
-        for lx, ly, tr in self._sinais:
+        alvo = self._destaque[0] if self._destaque else None
+        for lx, ly, tr, sc, onde in self._sinais:
+            # (a placa do alerta que está chegando fica 40% maior; ~25 m de folga na posição)
+            perto = alvo is not None and abs(onde[0] - alvo[0]) < 0.00025 and abs(onde[1] - alvo[1]) < 0.00025
+            sc.x = sc.y = 1.4 if perto else 1.0
             tr.xy = self._local_para_tela(lx, ly)

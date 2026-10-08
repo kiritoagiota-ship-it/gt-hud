@@ -70,6 +70,35 @@ class DiscoVelocimetro(Widget):
             Line(ellipse=(self.x, self.y, self.width, self.height), width=dp(1.2))
 
 
+class PlacaLimite(Widget):
+    """Placa redonda com o limite de velocidade da via (disco branco, aro vermelho),
+    ao lado do velocímetro na navegação. limite = 0 esconde."""
+    limite = NumericProperty(0)
+
+    def __init__(self, **kw):
+        kw.setdefault("size_hint", (None, None))
+        kw.setdefault("size", (dp(50), dp(50)))
+        super().__init__(**kw)
+        self.numero = Label(text="", bold=True, font_size=sp(19), color=(0.05, 0.06, 0.09, 1))
+        self.add_widget(self.numero)
+        self.bind(pos=self._d, size=self._d, limite=self._d)
+
+    def _d(self, *a):
+        self.numero.text = str(int(self.limite)) if self.limite else ""
+        self.numero.font_size = sp(19) if self.limite < 100 else sp(15)
+        self.numero.pos, self.numero.size = self.pos, self.size
+        self.canvas.before.clear()
+        with self.canvas.before:
+            Color(0, 0, 0, 0.32)
+            Ellipse(pos=(self.x - dp(1), self.y - dp(3)), size=(self.width + dp(2), self.height + dp(2)))
+            Color(0.05, 0.06, 0.09, 1)
+            Ellipse(pos=(self.x - dp(1.5), self.y - dp(1.5)), size=(self.width + dp(3), self.height + dp(3)))
+            Color(0.88, 0.10, 0.16, 1)
+            Ellipse(pos=self.pos, size=self.size)
+            Color(1, 1, 1, 1)
+            Ellipse(pos=(self.x + dp(6), self.y + dp(6)), size=(self.width - dp(12), self.height - dp(12)))
+
+
 class ChipStatus(BoxLayout):
     """Bolinha + texto do GPS num fundo escuro do tamanho do texto (direto
     sobre o mapa, o texto se misturava com ruas e nomes). Não passa de
@@ -257,6 +286,9 @@ class TelaMapa(Screen):
 
         # --- velocímetro e botões do mapa ---
         self.disco = DiscoVelocimetro()
+        self.placa_limite = PlacaLimite()
+        self._limite_via = None      # km/h da via em que ele está navegando (None = o mapa não sabe)
+        self._curva_desenhada = None
         # botões do mapa com ÍCONE (lê mais rápido que palavra, com a bike andando)
         self.btn_centro = BotaoHUD(text="", icone="centralizar", opaco=True, destaque=True,
                                    size_hint=(None, None), on_release=lambda *a: self.mapa.recentralizar())
@@ -405,6 +437,8 @@ class TelaMapa(Screen):
         self.mapa.sinais_rota = None
         self._rota_na_tela = None
         self._parar_contagem()
+        self._limite_via = None
+        self._curva_desenhada = None
         self.mapa.definir_rota([])
         self.mapa.definir_destino(None)
         self.mapa.recentralizar()
@@ -571,6 +605,8 @@ class TelaMapa(Screen):
         self._escolha_nav = None
         self._rota_na_tela = None
         self._parar_contagem()
+        self._limite_via = None
+        self._curva_desenhada = None
         self.mapa.definir_alternativas([])
         self.mapa.definir_rota(rota.pontos)
         self.mapa.definir_trechos(rota.trechos)
@@ -658,6 +694,8 @@ class TelaMapa(Screen):
             visiveis.remove(self.disco)
         else:
             visiveis += [self.faixa, self.barra_nav]
+            if self._limite_via and self._escolha_nav is None:
+                visiveis.append(self.placa_limite)
             if self._escolha_nav is None:
                 visiveis += [self.btn_rotas, self.btn_vivo]
                 self._pintar_vivo()
@@ -710,6 +748,8 @@ class TelaMapa(Screen):
             bx, bw = m, W - 2 * m
             self.disco.pos = (m, m + alt_barra + m)
         self.disco.size = (tam_velo, tam_velo)
+        # a placa do limite da via: encostada no canto de cima, à direita, do velocímetro
+        self.placa_limite.pos = (self.disco.x + tam_velo - dp(30), self.disco.y + tam_velo - dp(34))
         self.barra_livre.pos, self.barra_livre.size = (bx, m), (bw, dp(132))
         self.barra_nav.pos, self.barra_nav.size = (bx, m), (bw, dp(76))
 
@@ -995,7 +1035,7 @@ class TelaMapa(Screen):
         app = App.get_running_app()
         if vel is not None:
             self.disco.velo.velocidade = vel
-            self.disco.velo.alerta = vel > app.ajustes["limite_kmh"]
+            self.disco.velo.alerta = vel > self._limite_do_alerta()
         if app.posicao is not None and vel is not None:
             self.mapa.mostrar_eu(app.posicao[0], app.posicao[1], app.rumo_para_mapa(),
                                  app.precisao, vel)
@@ -1013,7 +1053,7 @@ class TelaMapa(Screen):
         v = app.velocidade_agora()
         if abs(v - self.disco.velo.velocidade) >= 0.2:
             self.disco.velo.velocidade = v
-            self.disco.velo.alerta = v > app.ajustes["limite_kmh"]
+            self.disco.velo.alerta = v > self._limite_do_alerta()
 
     def _tique(self, dt):
         app = App.get_running_app()
@@ -1030,7 +1070,41 @@ class TelaMapa(Screen):
             self._gps_a_vista = a_vista
             self._montar()
 
+    def _limite_do_alerta(self):
+        """O quanto pode andar antes de o velocímetro ficar vermelho: o menor entre o
+        limite que o dono escolheu nos Ajustes e o da via (com 3 km/h de folga)."""
+        limite = App.get_running_app().ajustes["limite_kmh"]
+        if self.estado == NAVEGANDO and self._limite_via:
+            limite = min(limite, self._limite_via + 3)
+        return limite
+
+    def _sinalizar(self, e):
+        """Navegando: limite da via na placa, a seta da próxima curva no chão e o
+        alerta que está chegando pulsando no mapa."""
+        app = App.get_running_app()
+        nav = app.nav
+        if nav is None:
+            return
+        limite = e.get("limite_via")
+        if limite != self._limite_via:
+            self._limite_via = limite
+            self.placa_limite.limite = limite or 0
+            self._montar()
+        m = e["manobra"]
+        chave = None if m is None else (id(nav.rota), m.get("indice"))
+        if chave != self._curva_desenhada:
+            self._curva_desenhada = chave
+            self.mapa.definir_seta_curva(nav.pontos_da_curva(m) if m is not None else [])
+        a = e.get("alerta")
+        onde = nav.posicao_do_alerta(a) if (a and a.get("em_m", 999) <= 180) else None
+        if onde is None:
+            self.mapa.destacar_alerta(None)
+        else:
+            vermelho = a["tipo"] == "incidente" or sinais.e_radar(a["tipo"])
+            self.mapa.destacar_alerta(onde, tema.VERMELHO if vermelho else tema.LARANJA)
+
     def _atualizar_navegacao(self, e):
+        self._sinalizar(e)
         m = e["manobra"]
         if m is not None:
             if m.get("indice") != self._manobra_vista:

@@ -89,6 +89,36 @@ class Navegacao:
         self.vivo = None
         self._iniciar_rota(rota)
 
+    def limite_aqui(self):
+        """O limite de velocidade (km/h) da via onde a pessoa está, ou None se o
+        mapa não sabe (rota.limites vem de rota.medir_movimento)."""
+        for inicio, fim, kmh in getattr(self.rota, "limites", ()):
+            if inicio <= self.dist_feita < fim:
+                return kmh
+            if inicio > self.dist_feita:
+                break
+        return None
+
+    def posicao_do_alerta(self, alerta):
+        """(lat, lon) do alerta do estado (radar, lombada, semáforo, ocorrência), ou None."""
+        if not alerta or alerta.get("tipo") == "avenida" or alerta.get("em_m") is None:
+            return None
+        return self.rota.ponto_em(self.dist_feita + alerta["em_m"], self.seg)[:2]
+
+    def pontos_da_curva(self, manobra, antes_m=32.0, depois_m=30.0, passo_m=4.0):
+        """O pedaço da rota que passa pela manobra (de antes até depois dela), para a
+        seta desenhada no chão: [(lat, lon)]."""
+        if not manobra or manobra.get("acao", "").startswith("chegada"):
+            return []
+        d0 = max(0.0, manobra["dist_m"] - antes_m)
+        d1 = min(self.rota.total_m, manobra["dist_m"] + depois_m)
+        pontos, d = [], d0
+        while d < d1:
+            pontos.append(self.rota.ponto_em(d)[:2])
+            d += passo_m
+        pontos.append(self.rota.ponto_em(d1)[:2])
+        return pontos if len(pontos) >= 2 else []
+
     def definir_vivo(self, atraso_s, falta_s):
         """O trânsito de AGORA no que falta do caminho (rota_tomtom.conferir):
         o tempo de chegada passa a usar isso até a próxima conferência."""
@@ -316,6 +346,7 @@ class Navegacao:
             "manobra": None, "dist_manobra": None, "depois": None,
             "restante_m": restante,
             "restante_s": self._tempo_restante(restante),
+            "limite_via": self.limite_aqui(),
             "subida_restante_m": rota.subida_restante_m(self.dist_feita),
             "subida": None,
             "alerta": None,

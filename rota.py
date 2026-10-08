@@ -187,6 +187,7 @@ class Rota:
         self.estresse = None             # média dos níveis de estresse (medir_movimento)
         self.trechos = []                # [(pontos, nível)] das avenidas da rota
         self.avenidas = []               # [(início m, fim m, nível, nome)]
+        self.limites = []                # [(início m, fim m, km/h)] limite de velocidade da via, onde o mapa sabe
         # o que o app sabe a mais sobre ela (main.GTHudApp._informar_rotas):
         self.tempo_pessoal_s = None      # pelo histórico do dono (aprendizado.py); None = não conhece o caminho
         self.lentos = []                 # [(início m, fim m)] que costumam estar lentos neste horário
@@ -368,7 +369,15 @@ def medir_movimento(rota):
     alinhada = len(forma) == len(rota.pontos)   # mesmos pontos da rota: dá para saber a distância de cada trecho
     km = [0.0, 0.0, 0.0, 0.0]
     juntos = []    # [i0, i1, nível, nome, km] de avenidas, emendando trechos seguidos
+    limites = []   # [i0, i1, km/h] do limite de velocidade de cada trecho (quando o mapa sabe)
     for trecho in dados.get("edges", []):
+        limite = trecho.get("speed_limit")
+        if isinstance(limite, (int, float)) and 10 <= limite <= 130:
+            a, b = trecho.get("begin_shape_index", 0), trecho.get("end_shape_index", 0)
+            if limites and limites[-1][1] == a and limites[-1][2] == int(limite):
+                limites[-1][1] = b
+            else:
+                limites.append([a, b, int(limite)])
         n = nivel_do_trecho(trecho)
         comprimento = trecho.get("length") or 0.0
         km[n] += comprimento
@@ -392,6 +401,8 @@ def medir_movimento(rota):
     if alinhada:
         rota.avenidas = [(rota.acumulado[i0], rota.acumulado[i1], n, nome) for i0, i1, n, nome, _ in juntos
                          if i1 < len(rota.acumulado)]
+        rota.limites = [(rota.acumulado[a], rota.acumulado[b], kmh) for a, b, kmh in limites
+                        if b < len(rota.acumulado) and b > a]
     rota.movimentada = (km[2] + km[3]) / total
     return rota.movimentada
 
