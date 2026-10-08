@@ -39,8 +39,7 @@ class TesteMapaNoApp(unittest.TestCase):
 class TestePedacosProntos(unittest.TestCase):
     """O pedaço desenhado uma vez fica guardado: na vez seguinte não é desenhado de novo."""
 
-    CAMADAS = ("landuse", "park", "landcover", "water", "building",
-               "transportation", "transportation_name", "place", "poi")
+    CAMADAS = mapa_vetor.CAMADAS
 
     def _centro(self):
         z14 = mapa_vetor.FonteVetorial.tiles_goiania((14,))

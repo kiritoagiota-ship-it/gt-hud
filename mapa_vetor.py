@@ -59,7 +59,10 @@ MAX_PREPARADOS = 56
 # carregado"). Preparar um pedaço no zoom de navegação leva ~0,3 s no PC e
 # mais de 2 s no celular; ler o pronto do disco leva milésimos. Mudou
 # preparar() ou o estilo (larguras, zoom mínimo de cada rua)? Suba este número:
-VERSAO_PREPARO = 1
+VERSAO_PREPARO = 2   # 2: prédios com volume, eixo das avenidas, pontes, rua de terra, córregos, trilhos, mais terrenos
+# as camadas dos dados (OpenMapTiles) que o desenho usa
+CAMADAS = ("landuse", "park", "landcover", "water", "waterway", "building",
+           "transportation", "transportation_name", "place", "poi")
 # formato do marshal fixo (2 = o que todo Python lê): o pacote é montado no PC/GitHub
 # com um Python e lido no celular com outro
 FORMATO_MARSHAL = 2
@@ -96,12 +99,19 @@ FUNDO = [0.118, 0.141, 0.188, 1]   # (lista: aplicar_tema troca o conteúdo no l
 AREAS = {
     "residencial": (0.128, 0.153, 0.203, 1),
     "comercial": (0.150, 0.158, 0.210, 1),
+    "industrial": (0.146, 0.150, 0.172, 1),      # galpões, garagens, pátio de trem: cinza neutro
     "institucional": (0.150, 0.188, 0.275, 1),   # escola, faculdade, hospital: bloco azulado
-    "verde": (0.148, 0.410, 0.318, 1),           # praça, parque, campo
+    "verde": (0.148, 0.410, 0.318, 1),           # praça, parque, mata
+    "esporte": (0.170, 0.470, 0.300, 1),         # campo, quadra, estádio: verde mais vivo
+    "cemiterio": (0.150, 0.300, 0.290, 1),
+    "areia": (0.300, 0.280, 0.210, 1),
     "agua": (0.128, 0.330, 0.640, 1),
     # (07/10/2026, pedido do dono de um mapa "mais rico": o prédio quase não se
     # distinguia do chão; agora tem um degrau claro de brilho, como no Google escuro)
-    "predio": (0.178, 0.210, 0.278, 1),
+    # prédio com volume (pedido do dono, 08/10/2026: "modelar mais o mapa"): a mesma forma,
+    # um pouco deslocada e escura, por baixo (a "parede" na sombra) e o telhado claro por cima
+    "predio_sombra": (0.070, 0.086, 0.122, 1),
+    "predio": (0.196, 0.230, 0.302, 1),
 }
 # Tema claro (dia): mapa de fundo cinza-claro com ruas brancas e avenidas
 # amarelas, como os mapas de papel; o escuro são os valores deste arquivo.
@@ -112,23 +122,35 @@ _CLARO = {
     "fundo": (0.935, 0.938, 0.925, 1),
     "contorno": (0.775, 0.795, 0.815, 1),
     "areas": {"residencial": (0.948, 0.950, 0.938, 1), "comercial": (0.968, 0.948, 0.905, 1),
+              "industrial": (0.915, 0.912, 0.925, 1),
               "institucional": (0.905, 0.920, 0.968, 1), "verde": (0.720, 0.880, 0.732, 1),
-              "agua": (0.600, 0.790, 0.955, 1), "predio": (0.836, 0.840, 0.830, 1)},
+              "esporte": (0.640, 0.860, 0.620, 1), "cemiterio": (0.790, 0.860, 0.800, 1),
+              "areia": (0.950, 0.920, 0.790, 1),
+              "agua": (0.600, 0.790, 0.955, 1), "predio_sombra": (0.700, 0.705, 0.700, 1),
+              "predio": (0.860, 0.862, 0.852, 1)},
     "ruas": {"servico": (0.975, 0.978, 0.982, 1), "caminho": (0.830, 0.850, 0.865, 1),
-             "ciclovia": (0.150, 0.640, 0.420, 1), "rua": (1.0, 1.0, 1.0, 1),
+             "ciclovia": (0.150, 0.640, 0.420, 1), "terra": (0.930, 0.900, 0.830, 1), "rua": (1.0, 1.0, 1.0, 1),
              "terciaria": (1.0, 0.985, 0.900, 1), "secundaria": (1.0, 0.930, 0.640, 1),
              "primaria": (1.0, 0.860, 0.470, 1), "expressa": (0.985, 0.760, 0.380, 1)},
     # (mais apagadas que no escuro: em cima de rua branca, seta escura cheia pesava o mapa)
     "setas": {"setas": (0.420, 0.490, 0.560, 0.50), "setas_escuras": (0.470, 0.410, 0.270, 0.55)},
+    "detalhes": {"corrego": (0.560, 0.770, 0.950, 1), "trem": (0.640, 0.640, 0.660, 1),
+                 "ponte": (0.560, 0.580, 0.610, 1), "eixo": (0.820, 0.640, 0.250, 0.85)},
 }
 _ESCURO = None   # guardado na primeira troca
 _USO_DO_SOLO = {
     "residential": "residencial", "suburb": "residencial", "neighbourhood": "residencial",
     "commercial": "comercial", "retail": "comercial",
+    "industrial": "industrial", "garages": "industrial", "railway": "industrial", "quarry": "industrial",
+    "bus_station": "industrial",
     "school": "institucional", "university": "institucional", "college": "institucional",
-    "hospital": "institucional", "kindergarten": "institucional",
-    "cemetery": "verde", "pitch": "verde", "playground": "verde", "stadium": "verde",
+    "hospital": "institucional", "kindergarten": "institucional", "library": "institucional",
+    "cemetery": "cemiterio",
+    "pitch": "esporte", "playground": "esporte", "stadium": "esporte", "track": "esporte",
+    "theme_park": "verde", "zoo": "verde",
 }
+_COBERTURA = {"grass": "verde", "wood": "verde", "farmland": "verde", "scrub": "verde", "wetland": "verde",
+              "sand": "areia"}
 # Mão única (o dono pediu a contramão bem clara, sem exagero): setinhas no
 # sentido da rua, a partir do zoom 16, uma a cada SETA_PASSO_DP de rua.
 ZOOM_SETAS = 16
@@ -154,6 +176,7 @@ RUAS = collections.OrderedDict([
     ("servico", (3.0, (0.196, 0.236, 0.302, 1), 15)),
     ("caminho", (2.2, (0.184, 0.222, 0.284, 1), 15)),
     ("ciclovia", (3.0, (0.200, 0.620, 0.450, 1), 14)),
+    ("terra", (5.0, (0.262, 0.262, 0.262, 1), 14)),       # rua sem asfalto: tom de terra, mais apagada
     ("rua", (6.0, (0.248, 0.298, 0.380, 1), 14)),
     ("terciaria", (7.2, (0.278, 0.334, 0.422, 1), 13)),
     ("secundaria", (8.4, (0.308, 0.370, 0.466, 1), 10)),
@@ -167,7 +190,30 @@ _CLASSE_RUA = {
     "busway": "rua", "raceway": "rua", "pedestrian": "caminho",
 }
 _IMPORTANCIA = {"expressa": 7, "primaria": 6, "secundaria": 5, "terciaria": 4,
-                "rua": 3, "ciclovia": 2, "servico": 1, "caminho": 1}
+                "rua": 3, "terra": 2, "ciclovia": 2, "servico": 1, "caminho": 1}
+# Detalhes desenhados junto com as ruas (lista: aplicar_tema troca as cores no lugar):
+#   corrego  córregos e rios finos (linhas da camada waterway)
+#   trem     trilhos
+#   ponte    borda larga e clara por baixo da rua que passa em ponte/viaduto
+#   eixo     tracejado amarelo no meio das avenidas de mão dupla (de perto)
+DETALHES = {"corrego": (0.128, 0.330, 0.640, 1), "trem": (0.330, 0.340, 0.370, 1),
+            "ponte": (0.400, 0.440, 0.500, 1), "eixo": (0.900, 0.720, 0.260, 0.75)}
+ZOOM_EIXO = 16             # o tracejado do meio só aparece de perto
+_COM_EIXO = ("terciaria", "secundaria", "primaria")
+_AGUA_LARGURA = {"river": 6.0, "canal": 3.5, "stream": 2.4, "drain": 1.6, "ditch": 1.6}   # dp no zoom 16
+
+
+def ordem_das_linhas():
+    """A ordem de desenho de tudo que é rua/linha (o de baixo primeiro)."""
+    return ["corrego", "trem", "contorno", "ponte"] + list(RUAS) + ["eixo"] + list(SETAS)
+
+
+def cor_da_linha(nome, rz):
+    if nome == "contorno":
+        return tuple(CONTORNO)
+    if nome in DETALHES:
+        return DETALHES[nome]
+    return cor_rua(nome, rz) if nome in RUAS else SETAS[nome]
 
 
 def fator_largura(rz):
@@ -260,12 +306,14 @@ def aplicar_tema(claro):
     global _ESCURO
     if _ESCURO is None:
         _ESCURO = {"fundo": tuple(FUNDO), "contorno": tuple(CONTORNO), "areas": dict(AREAS),
-                   "ruas": {n: v[1] for n, v in RUAS.items()}, "setas": dict(SETAS)}
+                   "ruas": {n: v[1] for n, v in RUAS.items()}, "setas": dict(SETAS),
+                   "detalhes": dict(DETALHES)}
     estilo = _CLARO if claro else _ESCURO
     FUNDO[:] = estilo["fundo"]
     CONTORNO[:] = estilo["contorno"]
     AREAS.update(estilo["areas"])
     SETAS.update(estilo["setas"])
+    DETALHES.update(estilo["detalhes"])
     for nome, (largura, _, zoom_min) in list(RUAS.items()):
         RUAS[nome] = (largura, estilo["ruas"][nome], zoom_min)
 
@@ -275,7 +323,7 @@ def cor_rua(nome, rz):
     (senão viram uma teia que compete com as avenidas e com a rota)."""
     r, g, b, a = RUAS[nome][1]
     f = 1.0
-    if nome in ("rua", "servico", "caminho") and rz <= 14:
+    if nome in ("rua", "terra", "servico", "caminho") and rz <= 14:
         f = 0.62 if rz <= 13 else 0.75
     elif nome == "terciaria" and rz <= 13:
         f = 0.7
@@ -455,6 +503,21 @@ class _Malha:
         return [(array("f", v), array("H", i)) for v, i in self.pedacos if i]
 
 
+def _por_tracos(malha, pts, traco, vao, meia):
+    """Tracejado ao longo da linha: pedaços de comprimento `traco` separados por `vao`."""
+    resto = vao / 2.0          # o quanto falta para começar o próximo traço
+    for (ax, ay), (bx, by) in zip(pts, pts[1:]):
+        comp = math.hypot(bx - ax, by - ay)
+        if comp < 1e-9:
+            continue
+        ux, uy = (bx - ax) / comp, (by - ay) / comp
+        d = resto
+        while d + traco <= comp:
+            malha.faixa([(ax + ux * d, ay + uy * d), (ax + ux * (d + traco), ay + uy * (d + traco))], meia, 0)
+            d += traco + vao
+        resto = max(0.0, d - comp)
+
+
 def _por_setas(malha, pts, passo, t):
     """Setas de mão única ao longo da rua (pts já no sentido permitido):
     espalhadas por igual, só em trecho reto onde a seta cabe inteira."""
@@ -569,17 +632,44 @@ def preparar(camadas, dz, tx, ty, rz, origem, escala, densidade):
             cor = alvo
             if nome_camada == "landuse":
                 cor = _USO_DO_SOLO.get(props.get("class"))
-            elif nome_camada == "landcover" and props.get("class") not in ("grass", "wood", "farmland", "scrub"):
-                continue
+            elif nome_camada == "landcover":
+                cor = _COBERTURA.get(props.get("class"))
             if cor:
                 area(cor, partes, conv)
 
+    # prédio com volume: a "parede" é o próprio telhado copiado um pouco para baixo e para a
+    # direita (a luz vem de cima, à esquerda); reaproveita os triângulos já calculados
+    if areas["predio"].pedacos[0][1]:
+        sx, sy = 1.7 * densidade / px_por_local, -2.4 * densidade / px_por_local
+        sombra = areas["predio_sombra"]
+        sombra.pedacos = []
+        for v, ind in areas["predio"].pedacos:
+            deslocado = list(v)
+            for k in range(0, len(deslocado), 4):
+                deslocado[k] += sx
+                deslocado[k + 1] += sy
+            sombra.pedacos.append((deslocado, list(ind)))
+            _respirar()
+
     ruas = {nome: _Malha() for nome in RUAS}
     contorno = _Malha()
+    detalhes = {nome: _Malha() for nome in DETALHES}
+    if "waterway" in camadas and rz >= 13:
+        extent, feicoes = camadas["waterway"]
+        conv = conversor(extent)
+        for tipo, props, partes in feicoes:
+            largura = _AGUA_LARGURA.get(props.get("class"))
+            if tipo != 2 or largura is None or (largura < 3 and rz < 14) or props.get("brunnel") == "tunnel":
+                continue
+            meia = largura * densidade * fator_largura(rz) / 2.0 / px_por_local
+            for parte in partes:
+                detalhes["corrego"].faixa(_simplificar(conv(parte), tol2), meia, 0)
     borda_local = CONTORNO_PX * densidade / px_por_local
     setas = {nome: _Malha() for nome in SETAS}
     seta_t = SETA_TAM_DP * (1.0 if rz <= 16 else 1.25) * densidade / px_por_local
     seta_passo = SETA_PASSO_DP * densidade / px_por_local
+    traco_eixo, vao_eixo = 7.0 * densidade / px_por_local, 9.0 * densidade / px_por_local
+    meia_eixo = 0.55 * densidade / px_por_local
     rotulos = []
     if "transportation" in camadas:
         extent, feicoes = camadas["transportation"]
@@ -588,9 +678,17 @@ def preparar(camadas, dz, tx, ty, rz, origem, escala, densidade):
             _respirar()
             if tipo != 2:
                 continue
+            if props.get("class") in ("rail", "transit"):   # trilho: uma linha fina (túnel não aparece)
+                if rz >= 13 and props.get("brunnel") != "tunnel":
+                    meia_trem = 1.5 * densidade * fator_largura(rz) / 2.0 / px_por_local
+                    for parte in partes:
+                        detalhes["trem"].faixa(_simplificar(conv(parte), tol2), meia_trem, 0)
+                continue
             estilo = _CLASSE_RUA.get(props.get("class"))
             if props.get("subclass") == "cycleway" or props.get("bicycle") == "designated":
                 estilo = "ciclovia"
+            elif estilo in ("rua", "servico") and props.get("surface") == "unpaved":
+                estilo = "terra"
             if estilo is None or rz < RUAS[estilo][2]:
                 continue
             largura_px = RUAS[estilo][0] * densidade * fator_largura(rz)
@@ -601,11 +699,18 @@ def preparar(camadas, dz, tx, ty, rz, origem, escala, densidade):
             lados = 0 if largura_px < 3 else (6 if largura_px < 10 else 8)
             mao = props.get("oneway") if rz >= ZOOM_SETAS and estilo in _COM_SETA else None
             com_borda = rz >= ZOOM_CONTORNO and largura_px >= 4 and estilo not in ("caminho", "ciclovia")
+            ponte = rz >= ZOOM_CONTORNO and props.get("brunnel") == "bridge" and largura_px >= 4
+            eixo = rz >= ZOOM_EIXO and estilo in _COM_EIXO and props.get("oneway") not in (1, -1) \
+                and props.get("brunnel") != "tunnel"
             for parte in partes:
                 pts = _simplificar(conv(parte), tol2)
                 ruas[estilo].faixa(pts, meia, lados)
                 if com_borda:
                     contorno.faixa(pts, meia + borda_local, lados)
+                if ponte:   # borda larga e clara: a rua "sai do chão"
+                    detalhes["ponte"].faixa(pts, meia + 3.2 * borda_local, 0)
+                if eixo:
+                    _por_tracos(detalhes["eixo"], pts, traco_eixo, vao_eixo, meia_eixo)
                 if mao in (1, -1) and len(pts) >= 2:
                     _por_setas(setas["setas_escuras" if estilo in _SETA_ESCURA else "setas"],
                                pts if mao == 1 else pts[::-1], seta_passo, seta_t)
@@ -670,9 +775,8 @@ def preparar(camadas, dz, tx, ty, rz, origem, escala, densidade):
         grade.setdefault((int(r["x"] // celula), int(r["y"] // celula)), []).append(r)
     return {
         "areas": [(nome, m.listas()) for nome, m in areas.items()],
-        "ruas": [("contorno", tuple(CONTORNO), contorno.listas())]
-                + [(nome, cor_rua(nome, rz), m.listas()) for nome, m in ruas.items()]
-                + [(nome, SETAS[nome], m.listas()) for nome, m in setas.items()],
+        "ruas": [(nome, cor_da_linha(nome, rz), malha.listas()) for nome, malha in (
+            (n, dict(ruas, contorno=contorno, **detalhes, **setas)[n]) for n in ordem_das_linhas())],
         "rotulos": rotulos,
         "grade": grade,          # (gx, gy) -> nomes naquele quadrado (coord. locais / celula)
         "celula": celula,
@@ -705,9 +809,7 @@ def desempacotar(dados, rz):
         return saida
 
     def cor(nome):
-        if nome == "contorno":
-            return tuple(CONTORNO)
-        return cor_rua(nome, rz) if nome in RUAS else SETAS[nome]
+        return cor_da_linha(nome, rz)
     celula, grade = d["celula"], {}
     for r in d["rotulos"]:
         grade.setdefault((int(r["x"] // celula), int(r["y"] // celula)), []).append(r)
@@ -1022,9 +1124,7 @@ class FonteVetorial:
             dados = self._ler_ou_baixar(*base)
             if dados is None:
                 return None
-            camadas = mvt.ler(dados, ("landuse", "park", "landcover", "water", "building",
-                                      "transportation", "transportation_name", "place", "poi"),
-                              respirar=_respirar)
+            camadas = mvt.ler(dados, CAMADAS, respirar=_respirar)
             with self._trava:
                 self._decodificados[base] = camadas
                 while len(self._decodificados) > MAX_DECODIFICADOS:

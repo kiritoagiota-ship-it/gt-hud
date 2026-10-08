@@ -8,7 +8,6 @@ código de desenho daquele build; o arquivo (~150 MB) não vai para o git.
 Sem ele o app funciona igual, só desenha cada pedaço na primeira vez que
 ele aparece (e guarda no celular).
 """
-import marshal
 import os
 import sqlite3
 import sys
@@ -23,8 +22,7 @@ os.environ.setdefault("KIVY_LOG_MODE", "PYTHON")
 import mapa_vetor  # noqa: E402
 import mvt  # noqa: E402
 
-CAMADAS = ("landuse", "park", "landcover", "water", "building",
-           "transportation", "transportation_name", "place", "poi")
+CAMADAS = mapa_vetor.CAMADAS
 
 
 def main(zooms=mapa_vetor.ZOOMS_PRONTOS):

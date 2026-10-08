@@ -42,7 +42,7 @@ import tema
 from diagnostico import seguro
 from widgets import icones_mapa
 from widgets.mapa_camadas import CORES_TRANSITO, LINHA_LEVE, TOQUE_OCORRENCIA_DP, CamadasDoMapa
-from mapa_vetor import (AREAS, FUNDO, RUAS, SETAS, FonteVetorial, chave_nome, legenda_se_precisa,
+from mapa_vetor import (AREAS, FUNDO, RUAS, FonteVetorial, chave_nome, ordem_das_linhas, legenda_se_precisa,
                         nivel_de_desenho, origem_padrao, tela_animando, tiles_do_retangulo, z_dados)
 
 ZOOM_MIN, ZOOM_MAX = 11.0, 19.0   # o app é só de Goiânia: de longe, a cidade inteira
@@ -241,12 +241,10 @@ class MapaHUD(CamadasDoMapa, Widget):
         self.canvas.add(self._g_fundo)
         self._g_areas = InstructionGroup()
         self.canvas.add(self._g_areas)
-        self._g_ruas = {"contorno": InstructionGroup()}   # a borda das ruas, por baixo de todas elas
-        self.canvas.add(self._g_ruas["contorno"])
-        for nome in RUAS:  # da menos importante para a mais (a mais fica por cima)
-            self._g_ruas[nome] = InstructionGroup()
-            self.canvas.add(self._g_ruas[nome])
-        for nome in SETAS:  # setas de mão única: por cima de todas as ruas, por baixo da rota
+        # córregos e trilhos, a borda das ruas, as pontes, as ruas (da menos importante para a
+        # mais), o tracejado do meio das avenidas e as setas de mão única: nesta ordem
+        self._g_ruas = {}
+        for nome in ordem_das_linhas():
             self._g_ruas[nome] = InstructionGroup()
             self.canvas.add(self._g_ruas[nome])
         self._g_fluxo = InstructionGroup()      # ruas coloridas pela velocidade de agora
