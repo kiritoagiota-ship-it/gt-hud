@@ -882,6 +882,12 @@ class TelaMapa(Screen):
         lat, lon = self._marca
         self._marca = None
         endereco = getattr(self, "_marca_endereco", "")
+        achado = getattr(App.get_running_app(), "_recebido_em", None)
+        if achado is not None:   # endereço vindo de outro app: anota onde o app pôs e onde a pessoa confirmou
+            from rota import distancia_m
+            print("[endereco] app achou %.5f,%.5f; a pessoa confirmou %.5f,%.5f (%d m de diferenca)"
+                  % (achado[0], achado[1], lat, lon, distancia_m(achado, (lat, lon))))
+            App.get_running_app()._recebido_em = None
         App.get_running_app().escolher_destino({"nome": endereco or "Ponto marcado", "endereco": "",
                                                 "lat": lat, "lon": lon})
 

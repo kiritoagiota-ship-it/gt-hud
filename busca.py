@@ -442,6 +442,7 @@ def _enderecos_tomtom(consulta, perto, chave, baixar=None):
             continue
         lugares.append({"nome": nome, "endereco": end.get("municipalitySubdivision") or "",
                         "lat": pos["lat"], "lon": pos["lon"], "fonte": "TomTom",
+                        "tipo": r.get("type") or "", "confianca": (r.get("matchConfidence") or {}).get("score"),
                         "bairro": end.get("municipalitySubdivision") or "",
                         "exato": r.get("type") in ("Point Address", "Address Range"), "nota": 30})
     return lugares
@@ -459,13 +460,23 @@ def resolver_endereco(texto, perto=None, chave_tomtom=None, cep_de=None, enderec
       3. sem ela (ou sem resultado), o mapa aberto (Photon) procura a rua naquele bairro.
     Devolve {"lugar": {nome, endereco, lat, lon}, "certo": achou o NÚMERO?, "bairro"} ou
     None (não achou: o app abre a busca). Chamada que espera a resposta (thread)."""
+    # (o passo a passo vai para o diagnóstico: quando um endereço cair no lugar errado, o dono
+    # envia e dá para ver o que cada serviço respondeu. A chave da TomTom nunca é escrita.)
+    def anotar(*partes):
+        print("[endereco]", *partes)
+
+    def resumir(candidatos):
+        return "; ".join("%s | %s | %s | %.5f,%.5f" % (c.get("tipo") or c.get("fonte", "?"), c.get("nome", ""),
+                                                    c.get("bairro", ""), c["lat"], c["lon"]) for c in candidatos[:6])
     p = partes_do_endereco(texto)
     info = None
+    anotar("recebido:", repr(texto), "-> rua=%r numero=%r cep=%r" % (p["rua"], p["numero"], p["cep"]))
     if p["cep"]:
         try:
             info = (cep_de or consultar_cep)(p["cep"])
         except Exception as e:
             print("[busca] CEP:", type(e).__name__)
+        anotar("CEP diz:", info)
     if info and info["cidade"] and normalizar(info["cidade"]) not in ("goiania", "aparecida de goiania", "trindade",
                                                                   "senador canedo", "goianira"):
         return None   # o CEP é de outra cidade
@@ -483,6 +494,8 @@ def resolver_endereco(texto, perto=None, chave_tomtom=None, cep_de=None, enderec
             candidatos = (enderecos or _enderecos_tomtom)(consulta, perto, chave_tomtom)
         except Exception as e:   # (sem o texto do erro: o endereço consultado leva a chave)
             print("[busca] enderecos TomTom:", type(e).__name__, getattr(e, "code", ""))
+    anotar("consulta:", repr(consulta), "| TomTom:", resumir(candidatos) if candidatos else
+           ("nada" if chave_tomtom else "sem chave"))
     if bairro:   # com o bairro em mãos, só vale candidato DELE (a "Rua 9" existe em vários setores)
         candidatos = [c for c in candidatos if _mesmo_bairro(bairro, c.get("bairro"))]
     if not candidatos:
@@ -492,14 +505,17 @@ def resolver_endereco(texto, perto=None, chave_tomtom=None, cep_de=None, enderec
             candidatos = [dict(c, bairro=c.get("endereco", "")) for c in achados]
         except Exception as e:
             print("[busca] enderecos Photon:", type(e).__name__)
+        anotar("mapa aberto:", resumir(candidatos) if candidatos else "nada")
         if bairro:
             candidatos = [c for c in candidatos if _mesmo_bairro(bairro, c.get("bairro"))]
     if not candidatos:
+        anotar("nenhum candidato no bairro", repr(bairro))
         return None
     # o do bairro do CEP primeiro; entre eles, o que achou o número
     candidatos.sort(key=lambda c: (not (bairro and _mesmo_bairro(bairro, c.get("bairro"))), not c.get("exato")))
     melhor = candidatos[0]
     no_bairro = not bairro or _mesmo_bairro(bairro, melhor.get("bairro"))
+    anotar("escolhido:", resumir([melhor]), "| achou o numero:", bool(melhor.get("exato")) and no_bairro)
     return {"lugar": {"nome": titulo[:60], "endereco": bairro or melhor.get("endereco", ""),
                       "lat": melhor["lat"], "lon": melhor["lon"]},
             "certo": bool(melhor.get("exato")) and no_bairro, "bairro": bairro}

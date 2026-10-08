@@ -355,6 +355,7 @@ class GTHudApp(App):
         cá" (ou corrigir segurando o dedo no lugar certo). Não achou: abre a
         busca. Navegando, não troca o destino sozinho."""
         recebido = busca.de_geo(uri)
+        print("[endereco] o outro app mandou:", repr(str(uri)[:300]))   # (para o diagnóstico)
         print("[app] endereco recebido:", "ponto" if recebido and "lat" in recebido else
               "texto" if recebido else "nao entendi")
         if recebido is None:
@@ -405,6 +406,7 @@ class GTHudApp(App):
         self._pilha_telas.clear()
         self.sm.current = "mapa"
         self.sm.get_screen("mapa").mostrar_ponto_recebido(lat, lon, nome, certo)
+        self._recebido_em = (lat, lon)   # (para anotar onde a pessoa corrigiu o pino)
 
     def _buscar_na_tela(self, texto):
         """Abre a tela de busca com o texto já digitado e procurando."""
