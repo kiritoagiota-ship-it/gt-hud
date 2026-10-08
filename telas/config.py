@@ -95,7 +95,7 @@ class Alternar(BotaoHUD):
 # As opções, agrupadas (eram mais de 20 linhas soltas, na ordem em que
 # foram sendo criadas): seção -> títulos das linhas, na ordem da tela.
 SECOES = [
-    ("Voz", ["Voz do assistente", "Qual voz", "Tom da voz", "Efeito de IA", "Testar a voz", "Sons de aviso"]),
+    ("Voz", ["Voz do assistente", "Voz usada", "Qual voz", "Tom da voz", "Efeito de IA", "Testar a voz", "Sons de aviso"]),
     ("Navegação", ["Rota preferida", "Trânsito ao vivo", "Testar o trânsito", "Aviso de chuva", "Avisar subidas e descidas", "Avisar semáforos", "Continuar em segundo plano",
                    "Janela ao minimizar", "Tipo de janela", "Corrida ao vivo"]),
     ("Mapa e tela", ["Aparência", "Mapa gira com a direção", "Mapa offline de Goiânia",
@@ -182,6 +182,11 @@ class TelaConfig(Screen):
         lista.add_widget(Linha("Voz do assistente",
                                "Fala as curvas, as subidas e os avisos da navegação.",
                                self._centralizar(self.alt_voz)))
+
+        self.btn_fonte_voz = BotaoHUD(text="", size_hint_x=None, width=dp(130), font_size=tema.T_ROTULO + 2,
+                                      on_release=lambda *a: self._mudar_fonte_voz())
+        self.linha_fonte_voz = Linha("Voz usada", "", self._centralizar(self.btn_fonte_voz))
+        lista.add_widget(self.linha_fonte_voz)
 
         self.sel_qual_voz = Seletor("%s", self._mudar_qual_voz)
         self.linha_qual_voz = Linha("Qual voz", "", self.sel_qual_voz)
@@ -360,6 +365,7 @@ class TelaConfig(Screen):
         self.alt_voz.mostrar(aj["voz"])
         self._mostrar_qual_voz()
         self.sel_tom.mostrar(aj["voz_tom"])
+        self._mostrar_fonte_voz()
         self.alt_efeito.mostrar(aj["voz_efeito"])
         self.alt_subidas.mostrar(aj["avisar_subidas"])
         self.alt_semaforos.mostrar(aj["avisar_semaforos"])
@@ -402,12 +408,36 @@ class TelaConfig(Screen):
             app.voz.calar()
         self.alt_voz.mostrar(ligado)
 
+    def _mostrar_fonte_voz(self):
+        gravada = App.get_running_app().ajustes["voz_fonte"] != "celular"
+        self.btn_fonte_voz.text = "Gravada" if gravada else "Do celular"
+        self.linha_fonte_voz.explicacao.text = (
+            "Voz gravada do app (Brian). Avisos com nome de rua ou metros saem na versão curta; "
+            "o detalhe fica na tela. Toque para usar a voz do celular."
+            if gravada else
+            "Voz do próprio celular: lê todos os detalhes. \"Qual voz\", tom e efeito valem para ela. "
+            "Toque para usar a voz gravada do app.")
+
+    def _mudar_fonte_voz(self):
+        app = App.get_running_app()
+        nova = "celular" if app.ajustes["voz_fonte"] != "celular" else "gravada"
+        app.ajustes["voz_fonte"] = nova
+        app.voz.gravada = nova != "celular"
+        self._mostrar_fonte_voz()
+        self._mostrar_qual_voz()
+        app.voz.calar()
+        app.voz.testar()   # já ouve a que escolheu
+
     def _mostrar_qual_voz(self, *a):
         app = App.get_running_app()
         estado = app.voz.estado_motor()
         nomes = app.voz.nomes_vozes()
         n = len(nomes)
         i = app.ajustes["voz_indice"]
+        if app.ajustes["voz_fonte"] != "celular":
+            self.sel_qual_voz.mostrar("gravada")
+            self.linha_qual_voz.explicacao.text = "Usando a voz gravada do app. (Vale para a voz do celular.)"
+            return
         if estado == "iniciando":
             self.sel_qual_voz.mostrar("...")
             explicacao = "Ligando o motor de voz do celular..."

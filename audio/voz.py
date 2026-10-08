@@ -69,6 +69,7 @@ class Voz:
     def __init__(self, pasta_cache):
         self.ligada = True
         self.sons = None             # sons.Sons: o toque que anuncia cada fala (o app liga)
+        self.gravada = True          # True: fala com as gravações do app; False: com a voz do celular
         self._pasta = pasta_das_frases(pasta_cache)
         self._fila = []            # [(prioridade, hora, pedaços, texto)]
         self._livre_em = 0.0       # time.monotonic() em que a fala atual termina
@@ -169,7 +170,10 @@ class Voz:
         self._tentar()
 
     def testar(self):
-        self.falar(["bem_vindo"], 3, texto=FRASE_TESTE)
+        if self.gravada:   # uma frase montada em pedaços, como na navegação: dá para ouvir a emenda
+            self.falar(["senhor", "em_200", "vire_direita"], 3)
+        else:
+            self.falar(["bem_vindo"], 3, texto=FRASE_TESTE)
 
     def calar(self):
         self._fila.clear()
@@ -198,7 +202,7 @@ class Voz:
         if agora < self._livre_em or ocupada:
             self._agendar(max(0.15, self._livre_em - agora))
             return
-        if self._motor_iniciando():
+        if not self.gravada and self._motor_iniciando():   # (a voz gravada não espera o motor do celular)
             self._agendar(0.3)
             return
         self._fila = [f for f in self._fila if agora - f[1] < VALIDADE_NA_FILA_S]
@@ -207,7 +211,10 @@ class Voz:
         _, _, pedacos, texto = self._fila.pop(0)
         if self.sons is not None:       # o toque do tipo de aviso, logo antes da fala
             self.sons.tocar(sons.som_da_fala(pedacos))
-        if self.motor_pronto():
+        tem_gravacao = [p for p in pedacos if os.path.exists(self._arquivo(p))]
+        # voz do celular: quando ela foi a escolhida, ou quando a frase não tem gravação nenhuma
+        # (melhor a outra voz do que ficar mudo)
+        if self.motor_pronto() and (not self.gravada or not tem_gravacao):
             self._aplicar_config()
             frase = texto or falas.frase(pedacos)
             if self._fala.falar(frase):
@@ -215,7 +222,7 @@ class Voz:
                 self._limite_fala = agora + TRAVADA_BASE_S + TRAVADA_POR_LETRA_S * len(frase)
                 self._agendar(0.3)
                 return
-        self._tocar_gravada([p for p in pedacos if os.path.exists(self._arquivo(p))], agora)
+        self._tocar_gravada(tem_gravacao, agora)
 
     def _tocar_gravada(self, pedacos, agora):
         if not pedacos:

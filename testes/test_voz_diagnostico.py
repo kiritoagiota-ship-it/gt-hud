@@ -46,6 +46,7 @@ class TesteVoz(unittest.TestCase):
         try:
             v = voz.Voz(tempfile.mkdtemp())
             v._fala = FalaTravada
+            v.gravada = False   # este teste é do motor de voz do celular
             v.falar(["recalculando"], 2)
             v.falar(["gps_ok"], 0)
             fim = time.time() + 5

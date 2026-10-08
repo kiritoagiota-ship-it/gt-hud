@@ -32,6 +32,10 @@ PADRAO = {
     "flutuante_tipo": "painel",  # o que aparece minimizado: "painel" (retângulo com a rota e a
                                  # velocidade) ou "bolha" (pequena, só minutos e km)
     "bolha": True,              # ... com a bolha de km/minutos por cima dos apps
+    # qual voz fala: "gravada" (as gravações que vão no app: Brian, da ElevenLabs) ou "celular"
+    # (o leitor de texto do Android). Até a 1.0.58 o app SEMPRE usava a do celular quando ela
+    # existia, e as gravações nunca tocavam (o dono regravou a voz e "não saiu a voz nova").
+    "voz_fonte": "gravada",
     "voz_indice": -1,        # -1 = automática: a mais grave (masculina) do celular
     "voz_auto": -1,          # índice que a medição achou (-1 = ainda não mediu)
     "voz_auto_nome": "",     # nome dessa voz (se a lista mudar, mede de novo)

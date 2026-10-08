@@ -125,6 +125,7 @@ class GTHudApp(App):
         self.voz = Voz(pasta)
         self.sons = sons.Sons(self.ajustes["sons"])
         self.voz.sons = self.sons
+        self.voz.gravada = self.ajustes["voz_fonte"] != "celular"
         self.voz.ligada = self.ajustes["voz"]
         if not self.ajustes["voz_masculina_v1"]:
             # o dono pediu voz masculina: quem tinha escolhido outra volta para a
