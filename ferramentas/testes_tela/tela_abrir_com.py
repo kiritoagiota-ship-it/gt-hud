@@ -90,6 +90,8 @@ def resolver_falso(texto, perto=None, chave_tomtom=None, **k):
 
 busca.resolver_endereco = resolver_falso
 busca.certeza = lambda lugares: None      # (a busca comum do teste nunca "tem certeza")
+# (e responde na hora: a de verdade vai à internet e às vezes passava dos 3 s que o teste espera)
+busca.buscar = lambda texto, perto=None, salvos=(), chave_tomtom=None, endereco=False: []
 
 
 def app():
