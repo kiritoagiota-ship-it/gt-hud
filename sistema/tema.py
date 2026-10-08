@@ -71,7 +71,7 @@ TEXTOS = {
     "monarca": {
         "chegou": "MISSÃO CONCLUÍDA", "encerrada": "MISSÃO ENCERRADA",
         "calculando": "O Sistema está traçando a rota...",
-        "para_onde": "Qual é a missão?", "busca_titulo": "Qual é a missão?",
+        "para_onde": "Para onde vamos?", "busca_titulo": "Para onde vamos?",
         "iniciar": "Aceitar", "cancelar": "Recusar",
         "subtitulo": "O SISTEMA DESPERTOU", "aviso": "[Sistema] ",
         "recompensas": "Recompensas da missão",

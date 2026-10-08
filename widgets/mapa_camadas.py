@@ -11,6 +11,7 @@ CamadasDoMapa é a "metade" de MapaHUD que cuida disso: usa o que MapaHUD
 guarda (self._local, self._para_tela, self.zoom, os grupos de desenho...).
 """
 import math
+import time
 
 from kivy.core.text import Label as CoreLabel
 from kivy.graphics import (Color, Ellipse, InstructionGroup, Line, Mesh, PopMatrix, PushMatrix, Rectangle,
@@ -20,7 +21,7 @@ from kivy.metrics import dp, sp
 import rede
 import sinais
 import tema
-from mapa_vetor import _Malha, nivel_de_desenho
+from mapa_vetor import _Malha
 
 # (16 enchia a tela de semáforos no centro da cidade, andando livre)
 # faixa de trânsito por baixo da rota, pela gravidade (1 leve ... 3 parado, 4 via interditada)
@@ -34,6 +35,7 @@ ZOOM_FLUXO = 12.5          # de mais longe as cores virariam um borrão
 ZOOM_OCORRENCIAS = 12.0    # acidente, obra, via interditada (trânsito ao vivo): desde bem longe
 ZOOM_LENTOS = 13.5         # o ícone de trânsito lento, um pouco mais de perto (o trecho pintado, sempre)
 TOQUE_OCORRENCIA_DP = 30   # tocou até isso do ícone: abre o que é
+SALTO_S = 0.32             # o "pulo" do ícone tocado
 ZOOM_RADARES = 14.5        # radares aparecem bem antes
 ZOOM_SINAIS = 17.0         # fora da navegação, semáforos e lombadas a partir desse zoom
 MAX_SINAIS = 40
@@ -52,9 +54,12 @@ class CamadasDoMapa:
         self._desenhar_fluxo()
 
     def _desenhar_fluxo(self):
-        """Uma malha por cor (centenas de trechos viram 5 desenhos). A largura
-        é fixa no nível de desenho de agora: refaz quando ele muda."""
-        rz = self._rz if self._rz is not None else nivel_de_desenho(self.zoom)
+        """Uma malha por cor (centenas de trechos viram 5 desenhos), com as pontas e as
+        curvas ARREDONDADAS (retas, cada trecho terminava num retângulo: o dono estranhou
+        no print de 08/10/2026). A largura é feita para o zoom de agora (de meio em meio
+        nível) e refeita quando ele muda: antes era fixa no nível de desenho e, bem de
+        perto, as faixas ficavam com o dobro ou o triplo da largura."""
+        rz = round(max(11.0, min(19.0, self.zoom)) * 2.0) / 2.0
         visivel = self.zoom >= ZOOM_FLUXO and bool(self._fluxo)
         if self._fluxo_rz == (rz, visivel):
             return
@@ -70,7 +75,7 @@ class CamadasDoMapa:
             # (numa thread: uma avenida inteira são milhares de pontos; na tela daria um engasgo)
             malhas = {n: _Malha() for n in CORES_FLUXO}
             for pontos, nivel in segmentos:
-                malhas[nivel].faixa([local(lat, lon) for lat, lon in pontos], larguras[nivel], 0)
+                malhas[nivel].faixa([local(lat, lon) for lat, lon in pontos], larguras[nivel], 6)
             return [(nivel, malhas[nivel].listas()) for nivel in sorted(malhas)]
 
         def desenhar(prontas):
@@ -113,7 +118,7 @@ class CamadasDoMapa:
         partes = rot.info["texto"].split(" · ")
         lat, lon = self._local_para_geo(rot.info["x"], rot.info["y"])
         return {"nome": partes[0], "legenda": partes[1] if len(partes) > 1 else "",
-                "icone": rot.icone, "lat": lat, "lon": lon}
+                "icone": rot.icone, "lat": lat, "lon": lon, "_rot": rot}
 
     def definir_ocorrencias(self, ocorrencias):
         """O trânsito de Goiânia agora, mesmo sem rota (pedido do dono, 07/10/2026:
@@ -311,10 +316,24 @@ class CamadasDoMapa:
         if novo is not None:
             self._ligar_animacao()
 
+    def saltar_icone(self, lat_lon):
+        """O ícone tocado dá um \"pulo\" (cresce e volta) e uma onda sai dele."""
+        self._salto = (time.monotonic(), tuple(lat_lon[:2]))
+        self._onda_toque = (time.monotonic(), self._local(lat_lon[0], lat_lon[1]))
+        self._ligar_animacao()
+
     def _mover_sinais(self):
         alvo = self._destaque[0] if self._destaque else None
+        salto, pulo = self._salto, 0.0
+        if salto is not None:
+            f = (time.monotonic() - salto[0]) / SALTO_S
+            if f >= 1.0:
+                self._salto = salto = None
+            else:
+                pulo = 0.42 * math.sin(math.pi * f)     # cresce e volta
         for lx, ly, tr, sc, onde in self._sinais:
             # (a placa do alerta que está chegando fica 40% maior; ~25 m de folga na posição)
             perto = alvo is not None and abs(onde[0] - alvo[0]) < 0.00025 and abs(onde[1] - alvo[1]) < 0.00025
-            sc.x = sc.y = 1.4 if perto else 1.0
+            tocado = salto is not None and abs(onde[0] - salto[1][0]) < 1e-6 and abs(onde[1] - salto[1][1]) < 1e-6
+            sc.x = sc.y = (1.4 if perto else 1.0) + (pulo if tocado else 0.0)
             tr.xy = self._local_para_tela(lx, ly)

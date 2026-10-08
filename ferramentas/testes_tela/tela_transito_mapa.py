@@ -75,6 +75,9 @@ import time  # noqa: E402
 
 import transito  # noqa: E402
 import widgets.comuns  # noqa: E402
+import widgets.mapa as _wm  # noqa: E402
+
+_wm.ATRASO_TOQUE_S = 0     # no teste o cartão abre na hora (no app espera o ícone "pular")
 
 M = 1.0 / 111320.0
 PEDIDOS = []

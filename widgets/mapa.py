@@ -42,6 +42,8 @@ import tema
 from diagnostico import seguro
 from widgets import icones_mapa
 from widgets.mapa_camadas import CORES_TRANSITO, LINHA_LEVE, TOQUE_OCORRENCIA_DP, CamadasDoMapa
+
+ATRASO_TOQUE_S = 0.15     # o cartão do ícone tocado abre depois disso: dá tempo de ver o ícone "pular"
 from mapa_vetor import (AREAS, FUNDO, RUAS, FonteVetorial, chave_nome, ordem_das_linhas, legenda_se_precisa,
                         nivel_de_desenho, origem_padrao, tela_animando, tiles_do_retangulo, z_dados)
 
@@ -227,6 +229,8 @@ class MapaHUD(CamadasDoMapa, Widget):
         self._radar_t0 = None               # "procurando caminho": ondas saindo de quem pedala
         self._festa = None                  # chegada: (hora, (lat, lon)) das ondas verdes no destino
         self._destaque = None               # alerta chegando: ((lat, lon), cor) -> placa maior e anel pulsando
+        self._salto = None                  # ícone tocado dando um pulo: (hora, (lat, lon))
+        self._onda_toque = None             # ... e a onda que sai dele: (hora, (x, y) locais)
         self._curva = []                    # a seta da próxima curva, desenhada no chão: [(lat, lon)]
         self._rastro = collections.deque(maxlen=RASTRO_PONTOS)   # por onde a seta acabou de passar (locais)
         self._dest_t0 = None                # pino do destino caindo
@@ -1151,6 +1155,10 @@ class MapaHUD(CamadasDoMapa, Widget):
         # alerta chegando (radar, lombada, semáforo, ocorrência): dois anéis pulsando em volta da placa
         self._pulso = [(Color(1, 1, 1, 0.0), Line(circle=(0, 0, 1), width=dp(2.2))) for _ in range(2)]
         self._m_pulso = grupo(*[i for par in self._pulso for i in par])
+        # a onda que sai do ícone tocado
+        self._c_onda_toque = Color(1, 1, 1, 0.0)
+        self._l_onda_toque = Line(circle=(0, 0, 1), width=dp(2.0))
+        self._m_onda_toque = grupo(self._c_onda_toque, self._l_onda_toque)
         self._seta_malha = Mesh(vertices=[0.0] * 16, indices=[0, 1, 2, 3], mode="triangle_fan")
         self._seta_borda = Line(points=[0.0] * 8, close=True, width=dp(1.4))
         self._m_seta = grupo(Color(*tema.BRANCO), self._seta_malha,
@@ -1259,6 +1267,16 @@ class MapaHUD(CamadasDoMapa, Widget):
                     self._seta_malha.vertices = [v for px, py in pts for v in (px, py, 0, 0)]
                     self._seta_borda.points = [c for p in pts for c in p]
                 quais.append(self._m_seta)
+        if self._onda_toque is not None:
+            f = (agora - self._onda_toque[0]) / 0.42
+            if f >= 1.0:
+                self._onda_toque = None
+            else:
+                ox, oy = self._local_para_tela(*self._onda_toque[1])
+                self._l_onda_toque.circle = (ox, oy, dp(12) + f * dp(30))
+                self._c_onda_toque.rgb = tema.ROXO[:3]
+                self._c_onda_toque.a = 0.85 * (1.0 - f) ** 1.3
+                quais.append(self._m_onda_toque)
         if self._destaque is not None:
             (dlat, dlon), cor = self._destaque
             px, py = self._para_tela(dlat, dlon)
@@ -1342,7 +1360,8 @@ class MapaHUD(CamadasDoMapa, Widget):
             if agora - self._radar_t0 > RADAR_MAX_S:
                 self._radar_t0 = None
             mexeu = True
-        if self._dest_t0 is not None or self._festa is not None or self._destaque is not None:
+        if (self._dest_t0 is not None or self._festa is not None or self._destaque is not None
+                or self._onda_toque is not None or self._salto is not None):
             mexeu = True
         if self._revelar is not None:
             mexeu = True
@@ -1538,6 +1557,12 @@ class MapaHUD(CamadasDoMapa, Widget):
         self._aplicar()
         return True
 
+    def _depois_do_toque(self, abrir):
+        if ATRASO_TOQUE_S > 0:
+            Clock.schedule_once(lambda dt: abrir(), ATRASO_TOQUE_S)
+        else:
+            abrir()
+
     def on_touch_up(self, touch):
         if touch.grab_current is not self:
             return False
@@ -1559,7 +1584,9 @@ class MapaHUD(CamadasDoMapa, Widget):
                     perto = (d, o)
             if perto is not None:
                 self._movs = []
-                self.ao_tocar_ocorrencia(perto[1])
+                ocorrencia = perto[1]
+                self.saltar_icone(ocorrencia["pontos"][len(ocorrencia["pontos"]) // 2])
+                self._depois_do_toque(lambda: self.ao_tocar_ocorrencia(ocorrencia))
                 return True
         # ... ou em cima de um lugar (o emblema ou o nome): abre o cartão dele
         if (self.ao_tocar_lugar is not None and not self._toques and inicio
@@ -1568,7 +1595,14 @@ class MapaHUD(CamadasDoMapa, Widget):
             lugar = self.lugar_em(touch.x, touch.y)
             if lugar is not None:
                 self._movs = []
-                self.ao_tocar_lugar(lugar)
+                rot = lugar.pop("_rot", None)
+                if rot is not None:   # o emblema dá um pulo e uma onda sai dele
+                    Animation.cancel_all(rot.cresce)
+                    (Animation(x=1.45, y=1.45, d=0.10, t="out_quad")
+                     + Animation(x=1.0, y=1.0, d=0.22, t="out_back")).start(rot.cresce)
+                    self._onda_toque = (time.monotonic(), (rot.info["x"], rot.info["y"]))
+                    self._ligar_animacao()
+                self._depois_do_toque(lambda: self.ao_tocar_lugar(lugar))
                 return True
         # inércia: continua deslizando na velocidade dos últimos movimentos
         agora = time.time()

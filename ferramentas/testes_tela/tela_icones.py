@@ -74,6 +74,9 @@ def checar(cond, texto):
 import time  # noqa: E402
 
 import widgets.comuns  # noqa: E402
+import widgets.mapa as _wm  # noqa: E402
+
+_wm.ATRASO_TOQUE_S = 0     # no teste o cartão abre na hora (no app espera o ícone "pular")
 from widgets import icones_mapa  # noqa: E402
 
 ABERTOS = []

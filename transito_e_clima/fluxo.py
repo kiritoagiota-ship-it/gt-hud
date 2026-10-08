@@ -26,6 +26,7 @@ CAMADA = "Traffic flow"
 Z = 12                     # um pedaço cobre ~10 km: Goiânia inteira são 25
 VALIDADE_S = 180.0
 MAX_POR_VEZ = 4            # pedaços novos pedidos de cada vez
+TRECHO_MIN_M = 25.0        # trecho medido mais curto que isso vira um "quadradinho" solto no mapa: fica de fora
 PARADO, LENTO, MODERADO, LIVRE, FECHADA = 3, 2, 1, 0, 4
 
 
@@ -59,6 +60,13 @@ def tiles_da_caixa(lat0, lon0, lat1, lon1, z=Z):
     return [(x, y) for x in range(xa, xb + 1) for y in range(ya, yb + 1)]
 
 
+def _comprimento_m(pontos):
+    total = 0.0
+    for (la0, lo0), (la1, lo1) in zip(pontos, pontos[1:]):
+        total += math.hypot((la1 - la0) * 111320.0, (lo1 - lo0) * 111320.0 * math.cos(math.radians(la0)))
+    return total
+
+
 def segmentos_da_camada(camada, x, y, z=Z):
     """A camada "Traffic flow" de um pedaço -> [(pontos [(lat, lon)], nível)]."""
     if not camada:
@@ -76,7 +84,7 @@ def segmentos_da_camada(camada, x, y, z=Z):
                 mx = (x + parte[i] / float(extent)) / n
                 my = (y + parte[i + 1] / float(extent)) / n
                 pontos.append((math.degrees(math.atan(math.sinh(math.pi * (1.0 - 2.0 * my)))), mx * 360.0 - 180.0))
-            if len(pontos) >= 2:
+            if len(pontos) >= 2 and _comprimento_m(pontos) >= TRECHO_MIN_M:
                 saida.append((pontos, nivel))
     return saida
 

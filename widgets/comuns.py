@@ -1,7 +1,8 @@
 """Peças de interface reaproveitadas entre as telas."""
 from kivy.animation import Animation
 from kivy.clock import Clock
-from kivy.graphics import Color, Ellipse, Line, Rectangle, RoundedRectangle
+from kivy.graphics import (Color, Ellipse, InstructionGroup, Line, PopMatrix, PushMatrix, Rectangle,
+                           RoundedRectangle, Scale)
 from kivy.metrics import dp
 from kivy.properties import ListProperty, StringProperty
 from kivy.uix.behaviors import ButtonBehavior
@@ -226,6 +227,40 @@ def entrar(conteudo, segundos=0.16, subir=0.0):
         Animation(opacity=1.0, d=segundos, t="out_quad").start(conteudo)
 
 
+def abrir_janela(janela):
+    """Abre a janelinha (Popup) com a cara do app e uma entrada animada (pedido do dono,
+    08/10/2026: \"uma animaçãozinha para abrir esses pop-ups\"): ela cresce de 86% até o
+    tamanho, passando um tiquinho, enquanto aparece; e ganha a borda de cantos cortados dos
+    painéis (com a aura roxa no tema Monarca), em vez de um retângulo liso."""
+    escala = Scale(0.86, 0.86, 1)
+    borda = InstructionGroup()
+    janela.canvas.before.add(PushMatrix())
+    janela.canvas.before.add(escala)
+    janela.canvas.after.add(borda)
+    janela.canvas.after.add(PopMatrix())
+
+    def desenhar(*a):
+        escala.origin = janela.center
+        borda.clear()
+        c = dp(14)
+        pts = _poligono(janela.x, janela.y, janela.width, janela.height, c)
+        plano = [v for p in pts for v in p]
+        if tema.monarca():
+            borda.add(Color(*tema.com_alfa(tema.ROXO, 0.16)))
+            borda.add(Line(points=plano, close=True, width=dp(7), joint="round"))
+        borda.add(Color(*tema.com_alfa(tema.CIANO, 0.9)))
+        borda.add(Line(points=plano, close=True, width=dp(1.3)))
+        for traco in cantos(pts, c):
+            borda.add(Line(points=traco, width=dp(2.4), cap="square", joint="miter"))
+    janela.bind(pos=desenhar, size=desenhar)
+    janela.opacity = 0.0
+    janela.open()
+    desenhar()
+    Animation(opacity=1.0, d=0.16, t="out_quad").start(janela)
+    Animation(x=1.0, y=1.0, d=0.26, t="out_back").start(escala)
+    return janela
+
+
 def escolher(titulo, opcoes, texto=""):
     """Janelinha com um botão por opção: opcoes = [(rótulo, função ou None), ...]
     (None só fecha). Devolve a janela."""
@@ -254,7 +289,7 @@ def escolher(titulo, opcoes, texto=""):
                      size_hint_y=None, height=dp(48), on_release=lambda w, f=funcao: tocar(f))
         janela.botoes.append(b)
         caixa.add_widget(b)
-    janela.open()
+    abrir_janela(janela)
     return janela
 
 
@@ -293,7 +328,7 @@ def pedir_nome(ao_confirmar, sugestao="", titulo="Nome do lugar", botao="Salvar"
     campo.bind(on_text_validate=confirmar)
     caixa.add_widget(campo)
     caixa.add_widget(botoes)
-    janela.open()
+    abrir_janela(janela)
     campo.focus = True
     if sugestao:
         Clock.schedule_once(lambda dt: campo.select_all(), 0.1)

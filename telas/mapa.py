@@ -844,7 +844,7 @@ class TelaMapa(Screen):
         linhas = [lugar["legenda"].capitalize() if lugar["legenda"] else icones_mapa.NOMES.get(lugar["icone"], "Lugar")]
         if app.posicao is not None:
             from rota import distancia_m
-            linhas.append("A %s daqui, em linha reta." % fmt_dist(distancia_m(app.posicao, (lugar["lat"], lugar["lon"]))))
+            linhas.append("A %s daqui, em linha reta." % fmt_dist_nav(distancia_m(app.posicao, (lugar["lat"], lugar["lon"]))))
         destino = {"nome": lugar["nome"], "endereco": "", "lat": lugar["lat"], "lon": lugar["lon"]}
 
         def salvar():
