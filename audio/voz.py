@@ -10,7 +10,9 @@ geradas por ferramentas/gerar_voz.py): os pedaços são emendados num WAV só.
 Nos dois casos a fila é a mesma: prioridade (curva na hora passa na frente
 de aviso) e falas velhas são descartadas (aviso atrasado confunde).
 """
+import json
 import os
+import shutil
 import time
 import wave
 
@@ -36,12 +38,38 @@ FRASE_TESTE = ("Sistemas online, senhor. Em duzentos metros, vire à direita. "
                "Subida de oito por cento à frente.")
 
 
+def marca_da_voz():
+    """Um nome curto para a voz que está gravada em audio/voz (de audio/voz/voz.json, que
+    quem grava a voz escreve). Muda a voz -> muda a marca."""
+    try:
+        with open(os.path.join(PASTA_VOZ, "voz.json"), encoding="utf-8") as f:
+            d = json.load(f)
+        return "".join(c for c in "%s-%s" % (d.get("voz", ""), d.get("feita_em", "")) if c.isalnum() or c == "-")[:48]
+    except (OSError, ValueError):
+        return "3"      # a voz que veio antes de existir o voz.json (pasta "falas3")
+
+
+def pasta_das_frases(pasta_cache):
+    """Onde ficam as frases já emendadas (a mesma frase repete muito). Uma pasta POR VOZ:
+    trocou a voz do app, as frases guardadas da antiga não servem (e são apagadas)."""
+    atual = "falas" + marca_da_voz()
+    try:
+        for nome in os.listdir(pasta_cache):
+            velha = os.path.join(pasta_cache, nome)
+            if nome.startswith("falas") and nome != atual and os.path.isdir(velha):
+                shutil.rmtree(velha, ignore_errors=True)
+    except OSError:
+        pass
+    pasta = os.path.join(pasta_cache, atual)
+    os.makedirs(pasta, exist_ok=True)
+    return pasta
+
+
 class Voz:
     def __init__(self, pasta_cache):
         self.ligada = True
         self.sons = None             # sons.Sons: o toque que anuncia cada fala (o app liga)
-        self._pasta = os.path.join(pasta_cache, "falas3")  # "falas": sem o silêncio de entrada; "falas2": a voz antiga (22 kHz)
-        os.makedirs(self._pasta, exist_ok=True)
+        self._pasta = pasta_das_frases(pasta_cache)
         self._fila = []            # [(prioridade, hora, pedaços, texto)]
         self._livre_em = 0.0       # time.monotonic() em que a fala atual termina
         self._som = None           # referência viva do som gravado tocando

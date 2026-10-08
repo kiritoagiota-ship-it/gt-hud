@@ -1,0 +1,55 @@
+name: Gravar voz (ElevenLabs)
+
+# Grava as 93 falas do assistente com uma voz da ElevenLabs e guarda no projeto
+# (audio/voz). So roda quando alguem aperta "Run workflow". A chave fica no
+# segredo ELEVENLABS_KEY (do dono; nunca vai para o codigo nem para os registros).
+# Depois de gravar, e preciso gerar o APK ("Build APK" > Run workflow): o envio
+# feito por este fluxo nao dispara o build sozinho.
+
+on:
+  workflow_dispatch:
+    inputs:
+      voice_id:
+        description: "Voice ID da voz escolhida na ElevenLabs"
+        required: true
+      modelo:
+        description: "Modelo (padrao: eleven_multilingual_v2)"
+        required: false
+        default: "eleven_multilingual_v2"
+      estabilidade:
+        description: "Estabilidade de 0 a 1 (maior = mais serio e igual entre as falas)"
+        required: false
+        default: "0.7"
+
+jobs:
+  gravar:
+    runs-on: ubuntu-22.04
+    timeout-minutes: 20
+    permissions:
+      contents: write   # guardar as gravacoes no projeto
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.11"
+      - name: Ferramentas (ffmpeg e numpy)
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y --no-install-recommends ffmpeg
+          pip install numpy
+      - name: Gravar as falas
+        env:
+          ELEVENLABS_KEY: ${{ secrets.ELEVENLABS_KEY }}
+          VOZ: ${{ inputs.voice_id }}
+          MODELO: ${{ inputs.modelo }}
+          ESTABILIDADE: ${{ inputs.estabilidade }}
+        run: python ferramentas/gerar_voz_elevenlabs.py "$VOZ" "$MODELO" "$ESTABILIDADE"
+      - name: Guardar no projeto
+        env:
+          VOZ: ${{ inputs.voice_id }}
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add audio/voz
+          git commit -m "Voz do assistente gravada pela ElevenLabs (voz $VOZ)"
+          git push
