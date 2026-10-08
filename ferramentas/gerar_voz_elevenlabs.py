@@ -144,6 +144,17 @@ def main():
     print("%d falas, %d caracteres (voz %s, modelo %s, estabilidade %.2f)" % (len(FALAS), caracteres, voz, modelo, estabilidade))
     if caracteres > LIMITE_CARACTERES:
         sys.exit("As falas somam %d caracteres: acima da trava de %d." % (caracteres, LIMITE_CARACTERES))
+    # MODO TESTE (pedido do dono, 08/10/2026, depois de duas vozes recusadas): antes de tudo,
+    # pede só a menor fala. A ElevenLabs recusa aqui (voz da Biblioteca no plano grátis, voz
+    # que não existe, chave errada) gastando no máximo esses poucos caracteres.
+    menor = min(FALAS, key=lambda c: len(FALAS[c]))
+    try:
+        pedir(chave_api, voz, FALAS[menor], *vizinhos(menor), modelo=modelo, estabilidade=estabilidade)
+    except RuntimeError as e:
+        sys.exit("TESTE DA VOZ: recusada (gasto: no máximo %d caracteres). %s\nNada foi trocado no app."
+                 % (len(FALAS[menor]), e))
+    print("TESTE DA VOZ: aceita ('%s', %d caracteres). Gravando as %d falas..."
+          % (FALAS[menor], len(FALAS[menor]), len(FALAS)), flush=True)
     pasta = tempfile.mkdtemp(prefix="voz_")
     total = 0.0
     try:
