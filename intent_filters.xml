@@ -1,0 +1,15 @@
+<!-- O GT-HUD entra no "Abrir com" do Android para endereços e pontos de mapa
+     (geo:) e para pedidos de navegação no formato do Google (google.navigation:).
+     Lido por main.GTHudApp.abrir_endereco (android_utils.endereco_recebido). -->
+<intent-filter>
+    <action android:name="android.intent.action.VIEW" />
+    <category android:name="android.intent.category.DEFAULT" />
+    <category android:name="android.intent.category.BROWSABLE" />
+    <data android:scheme="geo" />
+</intent-filter>
+<intent-filter>
+    <action android:name="android.intent.action.VIEW" />
+    <category android:name="android.intent.category.DEFAULT" />
+    <category android:name="android.intent.category.BROWSABLE" />
+    <data android:scheme="google.navigation" />
+</intent-filter>

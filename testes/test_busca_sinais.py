@@ -177,7 +177,7 @@ class TesteBuscaTomTom(unittest.TestCase):
         achados = busca._tomtom("barbearia imagem", CENTRO, "CHAVE", baixar)
         self.assertEqual([a["nome"] for a in achados], ["Barbearia Imagem", "Rua 9"])
         self.assertEqual(achados[0]["endereco"], "Rua X 10, Goiânia")
-        self.assertEqual((achados[0]["fonte"], achados[0]["nota"], achados[1]["nota"]), ("TomTom", 30, 14))
+        self.assertEqual((achados[0]["fonte"], achados[0]["nota"], achados[1]["nota"]), ("TomTom", 30, 26))
         self.assertIn("/search/2/search/barbearia%20imagem.json?", pedidos[0])
         self.assertIn("language=pt-BR", pedidos[0])
         self.assertIn("topLeft=-16.48000%2C-49.45000", pedidos[0])

@@ -14,6 +14,7 @@ from kivy.metrics import dp
 from kivy.uix.screenmanager import NoTransition, ScreenManager
 
 import android_utils
+import busca
 import diagnostico
 import fluxo
 import goiania
@@ -107,6 +108,7 @@ class GTHudApp(App):
         self._t_transito = 0.0       # time.monotonic() da última conferência do trânsito na navegação
         self._t_caminho = 0.0        # ... e da última vez que a TomTom refez o caminho
         self.rota_sugerida = None    # caminho mais rápido que a TomTom achou durante a navegação
+        self._endereco_pendente = None   # endereço recebido de outro app, esperando o GPS/a tela
         self._t_chuva = 0.0
         self.corrida = None          # corrida ao vivo em andamento (ao_vivo.AoVivo)
         self.ultimo_resumo = None    # números da última viagem finalizada (cartão de chegada)
@@ -307,6 +309,10 @@ class GTHudApp(App):
         gc.collect()
         gc.freeze()
         Clock.schedule_once(self._fechar_corridas_esquecidas, 8)
+        android_utils.ouvir_enderecos(self.abrir_endereco)
+        recebido = android_utils.endereco_recebido()
+        if recebido:
+            self.abrir_endereco(recebido)
         Clock.schedule_once(self._aprender_com_as_antigas, 12)
         Clock.schedule_once(self.atualizar_transito_do_mapa, 5)
         Clock.schedule_interval(self.atualizar_transito_do_mapa, TRANSITO_MAPA_A_CADA_S)
@@ -335,6 +341,57 @@ class GTHudApp(App):
         self.fundo.terminou()
         self.salvar_viagem_atual()  # não perde a viagem se o app fechar
         self.gps.parar()
+
+    # --- endereço recebido de outro app ("Abrir com" do Android) ---------------------
+    def abrir_endereco(self, uri):
+        """Outro app mandou um endereço (toque num endereço do Instagram, do
+        WhatsApp, de um site...). Ponto exato ou endereço achado com certeza:
+        vai direto para a prévia da rota. Em dúvida: abre a busca com o
+        endereço e as opções. Navegando, não troca o destino sozinho."""
+        recebido = busca.de_geo(uri)
+        print("[app] endereco recebido:", "ponto" if recebido and "lat" in recebido else
+              "texto" if recebido else "nao entendi")
+        if recebido is None:
+            return
+        if self.posicao is None or self.sm.current == "boot":
+            self._endereco_pendente = uri    # ainda abrindo/sem GPS: trata na 1ª posição
+            return
+        tela = self.sm.get_screen("mapa")
+        if self.nav is not None:
+            tela.mensagem("Encerre a rota atual para ir ao endereço recebido", tema.LARANJA, 8)
+            return
+        if "lat" in recebido:
+            if not goiania.dentro(recebido["lat"], recebido["lon"], 0.01):
+                self.sm.current = "mapa"
+                tela.mensagem("O endereço recebido fica fora de Goiânia", tema.LARANJA, 8)
+                return
+            self.escolher_destino({"nome": recebido["nome"], "endereco": "",
+                                   "lat": recebido["lat"], "lon": recebido["lon"]})
+            return
+        texto = busca.texto_de_endereco(recebido["texto"])
+        self.sm.current = "mapa"
+        tela.mensagem("Procurando: " + texto[:40], tema.CIANO, 8)
+        chave_tomtom = transito.chave_em_uso(self.ajustes) or None
+        posicao, salvos = self.posicao, list(self.salvos)
+
+        def achou(lugares):
+            if self.nav is not None:
+                return
+            certo = busca.certeza(lugares)
+            if certo is not None:
+                tela.mensagem("", tema.CIANO, 0.1)
+                self.escolher_destino(certo)
+            else:   # nada, ou mais de um lugar possível: a pessoa escolhe na busca
+                self._buscar_na_tela(texto)
+        rede.em_segundo_plano(lambda: busca.buscar(texto, posicao, salvos, chave_tomtom, endereco=True), achou,
+                              lambda e: self._buscar_na_tela(texto))
+
+    def _buscar_na_tela(self, texto):
+        """Abre a tela de busca com o texto já digitado e procurando."""
+        self.abrir("busca")
+        tela = self.sm.get_screen("busca")
+        tela.campo.text = texto
+        Clock.schedule_once(lambda dt: tela._buscar(), 0.3)
 
     def _guardar_posicao(self):
         """Onde a pessoa está ao sair: na próxima abertura o mapa já nasce ali."""
@@ -473,6 +530,9 @@ class GTHudApp(App):
         if d.get("bearing") is not None and vel >= RUMO_MIN_KMH:
             self.rumo = d["bearing"]
             self._t_rumo = agora
+        if self._endereco_pendente is not None and not self.fundo.minimizado:
+            pendente, self._endereco_pendente = self._endereco_pendente, None
+            Clock.schedule_once(lambda dt: self.abrir_endereco(pendente), 0.5)   # (a tela do mapa acabou de entrar)
         if not self._saudou:
             self._saudou = True
             self.voz.falar(["bem_vindo"], P_INFO)

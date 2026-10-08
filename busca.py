@@ -309,7 +309,7 @@ def _tomtom(texto, perto, chave, baixar=None):
     lat0, lon0, lat1, lon1 = goiania.LIMITES
     params = {"key": chave, "limit": MAX_RESULTADOS, "countrySet": "BR", "language": "pt-BR",
               "topLeft": "%.5f,%.5f" % (lat1, lon0), "btmRight": "%.5f,%.5f" % (lat0, lon1),
-              "idxSet": "POI,PAD,Addr"}
+              "idxSet": "POI,PAD,Addr,Str"}
     if perto:
         params.update(lat="%.5f" % perto[0], lon="%.5f" % perto[1])
     url = TOMTOM + urllib.parse.quote(texto, safe="") + ".json?" + urllib.parse.urlencode(params)
@@ -325,11 +325,78 @@ def _tomtom(texto, perto, chave, baixar=None):
             continue
         lugares.append({"nome": nome, "endereco": "" if endereco == nome else endereco[:90],
                         "lat": pos["lat"], "lon": pos["lon"], "fonte": "TomTom",
-                        "nota": 30 if r.get("type") == "POI" else 14})
+                        # endereço com número (a casa/o lote) vale mais que a rua solta
+                        "exato": r.get("type") in ("Point Address", "Address Range"),
+                        "nota": {"POI": 30, "Point Address": 26, "Address Range": 20}.get(r.get("type"), 14)})
     return lugares
 
 
 ENDERECO = "https://api.tomtom.com/search/2/reverseGeocode/%.6f,%.6f.json?"
+_GEO_PONTO = re.compile(r"^\s*(-?\d{1,2}(?:\.\d+)?)\s*,\s*(-?\d{1,3}(?:\.\d+)?)")
+RECEBIDO_PERTO_M = 300      # os primeiros resultados a até isso um do outro: é o mesmo lugar, vai direto
+
+
+def de_geo(uri):
+    """O que outro app mandou ao tocar num endereço ("Abrir com" do Android):
+      geo:-16.70,-49.26              geo:-16.70,-49.26?q=-16.70,-49.26(Nome)
+      geo:0,0?q=Av T9, 4724, Goiânia  google.navigation:q=Av+T9+4724
+    Devolve {"lat", "lon", "nome"} (ponto exato), {"texto": endereço} (para
+    buscar) ou None (não entendi)."""
+    uri = (uri or "").strip()
+    esquema, _, resto = uri.partition(":")
+    if esquema.lower() not in ("geo", "google.navigation") or not resto:
+        return None
+    antes, _, consulta = resto.partition("?")
+    if esquema.lower() == "google.navigation":
+        antes, consulta = "", resto
+    q = ""
+    for par in consulta.split("&"):
+        chave, _, valor = par.partition("=")
+        if chave == "q":
+            q = urllib.parse.unquote_plus(valor).strip()
+    nome = ""
+    m = _GEO_PONTO.match(q)
+    if m:   # "lat,lon(Nome)"
+        rotulo = re.search(r"\((.+)\)\s*$", q)
+        nome = rotulo.group(1).strip() if rotulo else ""
+    else:
+        m = _GEO_PONTO.match(antes)
+        if m and abs(float(m.group(1))) < 1e-6 and abs(float(m.group(2))) < 1e-6:
+            m = None   # "0,0" = sem ponto: o que vale é o texto
+        if q and m is None:
+            return {"texto": q[:160]}
+        nome = q
+    if m is None:
+        return None
+    lat, lon = float(m.group(1)), float(m.group(2))
+    if not (-90 <= lat <= 90 and -180 <= lon <= 180):
+        return None
+    return {"lat": lat, "lon": lon, "nome": nome[:60] or "Local recebido"}
+
+
+def texto_de_endereco(texto):
+    """O endereço como os apps mandam ("Av T9, 4724, quadra 32, lote 07, Goiânia,
+    Brazil 74333-010") sem o que só atrapalha a busca: país, CEP, quadra e lote."""
+    t = re.sub(r"\b\d{5}-?\d{3}\b", " ", texto or "")
+    t = re.sub(r"(?i)\b(brazil|brasil)\b", " ", t)
+    t = re.sub(r"(?i)\b(quadra|qd\.?|lote|lt\.?)\s*[\w-]+", " ", t)
+    t = re.sub(r"\s*,(\s*,)+", ",", t)
+    return re.sub(r"\s+", " ", t).strip(" ,")
+
+
+def certeza(lugares):
+    """Dos resultados da busca de um endereço recebido, o lugar para ir DIRETO
+    (o 1º, se os três primeiros são o mesmo lugar: a até RECEBIDO_PERTO_M um do
+    outro), ou None se a pessoa precisa escolher."""
+    if not lugares:
+        return None
+    primeiro = lugares[0]
+    if primeiro.get("exato"):   # a TomTom achou o endereço com o número
+        return primeiro
+    for outro in lugares[1:3]:
+        if distancia_m((primeiro["lat"], primeiro["lon"]), (outro["lat"], outro["lon"])) > RECEBIDO_PERTO_M:
+            return None
+    return primeiro
 
 
 def endereco_de(lat, lon, chave=None, baixar=None):
@@ -352,7 +419,7 @@ def endereco_de(lat, lon, chave=None, baixar=None):
     return ""
 
 
-def buscar(texto, perto=None, salvos=(), chave_tomtom=None):
+def buscar(texto, perto=None, salvos=(), chave_tomtom=None, endereco=False):
     """Chamada que espera a resposta (use rede.em_segundo_plano).
     Devolve [{nome, endereco, lat, lon, dist_m, fonte}], o melhor primeiro."""
     colado = lugar_colado(texto)
@@ -370,7 +437,9 @@ def buscar(texto, perto=None, salvos=(), chave_tomtom=None):
             lugares += _google(texto, perto, chave)
         except Exception as e:
             print("[busca] Google falhou:", e)
-    falta = len(lugares) < POUCOS
+    # endereco=True: o texto é um endereço completo vindo de outro app; pergunta sempre à
+    # TomTom e ao mapa aberto, e o endereço com número achado por ela passa na frente
+    falta = endereco or len(lugares) < POUCOS
     chave_tomtom = chave_tomtom or chaves.chave("tomtom")
     if falta and chave_tomtom:   # a base do app achou pouco: pergunta também à TomTom
         try:
@@ -384,6 +453,10 @@ def buscar(texto, perto=None, salvos=(), chave_tomtom=None):
             print("[busca] Photon falhou:", e)
             if not lugares:
                 raise
+    if endereco:
+        for lugar in lugares:
+            if lugar.get("exato"):
+                lugar["nota"] += 25
     return _ordenar(lugares, perto)
 
 

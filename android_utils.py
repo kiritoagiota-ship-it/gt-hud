@@ -66,6 +66,45 @@ else:
             Window.size = (h, w)
 
 
+_HISTORICO = 0x00100000   # Intent.FLAG_ACTIVITY_LAUNCHED_FROM_HISTORY: reaberto pelos "recentes"
+
+
+def _dado_do_intent(intent):
+    try:
+        if intent is None or (intent.getFlags() & _HISTORICO):
+            return None   # (reabrir pelos recentes traz o pedido VELHO de volta: não vale)
+        dado = intent.getDataString()
+        if dado:
+            intent.setData(None)   # já foi usado
+        return dado or None
+    except Exception as e:
+        print("[android] intent:", e)
+        return None
+
+
+def endereco_recebido():
+    """O endereço com que o app foi ABERTO por outro app ("Abrir com": geo:...),
+    ou None. Só devolve uma vez."""
+    if not NO_ANDROID:
+        return None
+    return _dado_do_intent(_PythonActivity.mActivity.getIntent())
+
+
+def ouvir_enderecos(funcao):
+    """funcao(texto) é chamada (na thread do Kivy) quando outro app manda um
+    endereço com o GT-HUD já aberto."""
+    if not NO_ANDROID:
+        return
+    from android import activity
+    from kivy.clock import Clock
+
+    def chegou(intent):
+        dado = _dado_do_intent(intent)
+        if dado:
+            Clock.schedule_once(lambda dt: funcao(dado), 0)
+    activity.bind(on_new_intent=chegou)
+
+
 def manter_tela_ligada(ligar):
     _flag_tela(bool(ligar))
 

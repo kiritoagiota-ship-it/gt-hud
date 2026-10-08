@@ -25,6 +25,8 @@ android.presplash_color = #04070B
 # ligada nos Ajustes (por isso as orientacoes deitadas precisam constar aqui)
 orientation = portrait, landscape, landscape-reverse
 android.manifest.orientation = portrait
+# o GT-HUD aparece no "Abrir com" quando se toca num endereço em outro app (geo:)
+android.manifest.intent_filters = intent_filters.xml
 fullscreen = 0
 
 # INTERNET: mapa (tiles do OpenStreetMap), rota (Valhalla) e busca (Nominatim)
