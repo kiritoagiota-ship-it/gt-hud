@@ -26,6 +26,7 @@ import rota_tomtom
 import sons
 import tema
 from ajustes import Ajustes
+from bateria import Bateria
 from banco import Banco
 from filtro import FiltroVelocidade
 from ritmo import Ritmo
@@ -91,6 +92,7 @@ class GTHudApp(App):
         pasta = self.user_data_dir
         diagnostico.iniciar(pasta, self.versao())
         self.ajustes = Ajustes(pasta)
+        self.bateria = Bateria(self.ajustes)   # km rodados desde a última carga da moto
         self.posicao = None
         # tema ANTES de montar qualquer tela (claro de dia, escuro à noite)
         if not self.ajustes["tema_monarca_v1"]:
@@ -364,6 +366,7 @@ class GTHudApp(App):
 
     def on_pause(self):
         self._guardar_posicao()
+        self.bateria.guardar()
         self.fundo.ao_pausar()  # rota ativa: segue navegando minimizado
         return True  # não fecha o app ao trocar de tela no celular
 
@@ -379,6 +382,7 @@ class GTHudApp(App):
 
     def on_stop(self):
         self._guardar_posicao()
+        self.bateria.guardar()
         self.parar_corrida()
         self.fundo.terminou()
         self.salvar_viagem_atual()  # não perde a viagem se o app fechar
@@ -629,6 +633,8 @@ class GTHudApp(App):
         # antes de registrar: se retomou agora, esta leitura já entra
         self.viagem.checar_pausa_auto(vel, self.ajustes["pausa_auto"])
         self.viagem.registrar(d["lat"], d["lon"], vel)
+        if not self.ajustes["simulador"]:   # (passeio de mentira não gasta a bateria da moto)
+            self.bateria.registrar(d["lat"], d["lon"], vel, agora)
         self._checar_limite(vel)
         if self.nav is not None:
             self._navegar(d["lat"], d["lon"], vel, agora)

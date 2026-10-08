@@ -45,6 +45,15 @@ public class ServicoNavegacao extends Service {
         c.stopService(new Intent(c, ServicoNavegacao.class));
     }
 
+    // tema Monarca do app (preto, roxo e azul): vale quando o tema não é o claro
+    public static volatile boolean monarca = false;
+
+    /** Liga/desliga as cores do tema Monarca na notificação e na bolha. */
+    public static void temaMonarca(boolean ligado) {
+        monarca = ligado;
+        Bolha.temaMonarca(ligado);
+    }
+
     /** Tema do app e quanto da rota já foi feito: valem na próxima atualização. */
     public static void estilo(boolean temaClaro, int feito) {
         claro = temaClaro;
@@ -146,7 +155,7 @@ public class ServicoNavegacao extends Service {
                 .setShowWhen(false)
                 .setCategory(Notification.CATEGORY_NAVIGATION)
                 .setContentIntent(abrirApp(c));
-        b.setColor(claro ? 0xFF00788F : 0xFF00E5FF);
+        b.setColor(claro ? 0xFF00788F : (monarca ? 0xFF5AA0FF : 0xFF00E5FF));
         if (progresso >= 0) {
             b.setProgress(100, Math.min(100, progresso), false);   // barra: quanto da rota já foi
         }

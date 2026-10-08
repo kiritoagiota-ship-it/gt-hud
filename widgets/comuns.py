@@ -261,20 +261,21 @@ def abrir_janela(janela):
     return janela
 
 
-def escolher(titulo, opcoes, texto=""):
+def escolher(titulo, opcoes, texto="", altura_texto=None):
     """Janelinha com um botão por opção: opcoes = [(rótulo, função ou None), ...]
-    (None só fecha). Devolve a janela."""
+    (None só fecha). Devolve a janela. `altura_texto`: para um texto mais longo que 4 linhas."""
     from kivy.uix.popup import Popup
     from widgets.botao import BotaoHUD
 
     caixa = BoxLayout(orientation="vertical", spacing=dp(8), padding=dp(4))
     altura = dp(64) + len(opcoes) * dp(56)
     if texto:
-        aviso = Texto(text=texto, font_size=tema.T_ROTULO + 2, size_hint_y=None, height=dp(96),
+        altura_texto = altura_texto or dp(96)
+        aviso = Texto(text=texto, font_size=tema.T_ROTULO + 2, size_hint_y=None, height=altura_texto,
                       halign="left", valign="top")
         aviso.bind(size=lambda w, s: setattr(w, "text_size", s))
         caixa.add_widget(aviso)
-        altura += dp(104)
+        altura += altura_texto + dp(8)
     janela = Popup(title=titulo, content=caixa, size_hint=(0.92, None), height=altura,
                    title_color=tema.CIANO, title_size=tema.T_BOTAO, separator_color=tema.CIANO,
                    background="", background_color=tema.PAINEL, auto_dismiss=True)

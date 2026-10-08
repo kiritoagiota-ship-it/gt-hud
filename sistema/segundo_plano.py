@@ -179,6 +179,8 @@ class _Android:
         """Tema do app e % da rota já feita (-1 = sem barra): pintam a
         notificação e a bolha."""
         if self.servico is not None:
+            # (antes do estilo: é ele que repinta a bolha, já com as cores do Monarca)
+            self._chamar(self.servico.temaMonarca, tema.monarca())
             self._chamar(self.servico.estilo, bool(claro), int(feito))
 
     def notificar(self, titulo, texto):
@@ -228,6 +230,7 @@ class _Android:
     def atualizar_painel(self, dados, claro):
         if self.painel is not None and dados is not None:
             distancia, instrucao, rua, vel, resto, desenho, alerta, inicio, aqui, vel_ms = dados
+            self._chamar(self.painel.temaMonarca, tema.monarca())
             self._chamar(self.painel.atualizar, distancia, instrucao, rua, vel, resto, desenho,
                          bool(claro), int(alerta), float(inicio), float(aqui), float(vel_ms))
 

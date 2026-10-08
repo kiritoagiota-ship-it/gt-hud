@@ -287,6 +287,9 @@ class TelaMapa(Screen):
         # --- velocímetro e botões do mapa ---
         self.disco = DiscoVelocimetro()
         self.placa_limite = PlacaLimite()
+        # km rodados nesta carga da moto e as barrinhas (bateria.py); o toque abre a janela
+        self.btn_bateria = BotaoHUD(text=app.bateria.texto_curto(), opaco=True, size_hint=(None, None),
+                                    font_size=tema.T_ROTULO + 1, on_release=lambda *a: self._abrir_bateria())
         self._limite_via = None      # km/h da via em que ele está navegando (None = o mapa não sabe)
         self._curva_desenhada = None
         # botões do mapa com ÍCONE (lê mais rápido que palavra, com a bike andando)
@@ -711,6 +714,8 @@ class TelaMapa(Screen):
                 visiveis.append(self.chip_subida)
             if self._tem_alerta:
                 visiveis.append(self.chip_alerta)
+        if self.disco in visiveis and (self.estado == LIVRE or self.width <= self.height):
+            visiveis.append(self.btn_bateria)   # (deitada e navegando, o lugar é dos avisos)
         for w in list(self.raiz.children):
             if w not in visiveis:
                 self.raiz.remove_widget(w)
@@ -753,6 +758,9 @@ class TelaMapa(Screen):
         self.disco.size = (tam_velo, tam_velo)
         # a placa do limite da via: encostada no canto de cima, à direita, do velocímetro
         self.placa_limite.pos = (self.disco.x + tam_velo - dp(30), self.disco.y + tam_velo - dp(34))
+        # a bateria: logo acima do velocímetro (navegando, um pouco mais alto: a placa do limite passa ali)
+        self.btn_bateria.size = (dp(124), dp(40))
+        self.btn_bateria.pos = (self.disco.x, self.disco.y + tam_velo + (dp(22) if self.estado == NAVEGANDO else dp(8)))
         self.barra_livre.pos, self.barra_livre.size = (bx, m), (bw, dp(132))
         self.barra_nav.pos, self.barra_nav.size = (bx, m), (bw, dp(76))
 
@@ -1011,6 +1019,55 @@ class TelaMapa(Screen):
         app.abrir("busca")
         Clock.schedule_once(lambda dt: app.sm.get_screen("busca")._opcoes_atalho(chave), 0.35)
 
+    def _abrir_bateria(self):
+        """A janela da bateria: km desta carga, as barrinhas e o que dá para marcar."""
+        bat = App.get_running_app().bateria
+        opcoes = []
+        if bat.ativa and bat.barras > 0:
+            opcoes.append(("Caiu uma barrinha", self._caiu_barra))
+        opcoes.append(("Carreguei 100%", self._carreguei))
+        if bat.ativa and bat.carga["quedas"]:
+            opcoes.append(("Desfazer a última barrinha", self._desfazer_barra))
+        if App.get_running_app().ajustes["bateria_cargas"]:
+            opcoes.append(("Cargas anteriores", self._ver_cargas))
+        opcoes.append(("Fechar", None))
+        escolher("Bateria da moto", opcoes, texto=bat.texto())
+
+    def _atualizar_bateria(self, aviso):
+        self.btn_bateria.text = App.get_running_app().bateria.texto_curto()
+        self.mensagem(aviso)
+
+    def _caiu_barra(self):
+        bat = App.get_running_app().bateria
+        if bat.caiu_barra():
+            self._atualizar_bateria("Anotado: %d de %d barrinhas" % (bat.barras, 5))
+
+    def _desfazer_barra(self):
+        bat = App.get_running_app().bateria
+        if bat.desfazer_barra():
+            self._atualizar_bateria("Voltou: %d de %d barrinhas" % (bat.barras, 5))
+
+    def _carreguei(self):
+        """Carga cheia. Se havia uma carga contando, pergunta antes quantas barrinhas
+        sobravam (é isso que ensina a autonomia real; e serve de confirmação)."""
+        bat = App.get_running_app().bateria
+
+        def marcar(sobra=None):
+            bat.carregou(sobra)
+            self._atualizar_bateria("Carga cheia marcada")
+        if not bat.ativa or bat.metros < 300:
+            marcar()
+            return
+        nomes = {5: "5 (ainda cheia)", 0: "0 (acabou)"}
+        opcoes = [(nomes.get(n, str(n)), lambda n=n: marcar(n)) for n in (5, 4, 3, 2, 1, 0)]
+        escolher("Quantas barrinhas sobravam?", opcoes + [("Cancelar", None)],
+                 texto="Antes de pôr na tomada, quantas das 5 barrinhas o painel da moto mostrava?",
+                 altura_texto=dp(52))
+
+    def _ver_cargas(self):
+        bat = App.get_running_app().bateria
+        escolher("Cargas anteriores", [("Fechar", None)], texto=bat.texto_historico(), altura_texto=dp(150))
+
     def _abrir_menu(self):
         app = App.get_running_app()
         metros, segundos = app.resumo_de_hoje()
@@ -1060,6 +1117,7 @@ class TelaMapa(Screen):
 
     def _tique(self, dt):
         app = App.get_running_app()
+        self.btn_bateria.text = app.bateria.texto_curto()
         cor, texto = app.resumo_gps()
         self.ponto.cor = cor
         self.lbl_gps.text = texto

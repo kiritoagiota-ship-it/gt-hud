@@ -43,6 +43,17 @@ public class Bolha {
     private static volatile boolean claro = false;
     private static volatile int progresso = -1;
 
+    // tema Monarca do app (preto, roxo e azul): vale quando o tema não é o claro
+    public static volatile boolean monarca = false;
+
+    public static void temaMonarca(boolean ligado) {
+        monarca = ligado;
+    }
+
+    private static String cor(String noClaro, String noEscuro, String noMonarca) {
+        return claro ? noClaro : (monarca ? noMonarca : noEscuro);
+    }
+
     /** Tema e progresso da rota; pode ser chamado com a bolha fechada. */
     public static void estilo(boolean temaClaro, int feito) {
         claro = temaClaro;
@@ -61,20 +72,20 @@ public class Bolha {
         }
         try {
             Context c = vista.getContext();
-            int destaque = Color.parseColor(claro ? "#00788F" : "#00E5FF");
+            int destaque = Color.parseColor(cor("#00788F", "#00E5FF", "#5AA0FF"));
             GradientDrawable fundo = new GradientDrawable();
-            fundo.setColor(Color.parseColor(claro ? "#F2FFFFFF" : "#E6050A10"));
+            fundo.setColor(Color.parseColor(cor("#F2FFFFFF", "#E6050A10", "#E605040C")));
             fundo.setCornerRadius(dp(c, 18));
             fundo.setStroke(dp(c, 2), destaque);
             vista.setBackground(fundo);
             linha1.setTextColor(destaque);
-            linha2.setTextColor(Color.parseColor(claro ? "#0A1A24" : "#FFFFFF"));
+            linha2.setTextColor(Color.parseColor(cor("#0A1A24", "#FFFFFF", "#EEF0FF")));
             if (barra != null) {
                 barra.setVisibility(progresso >= 0 ? View.VISIBLE : View.GONE);
                 barra.setProgress(Math.max(0, Math.min(100, progresso)));
                 barra.setProgressTintList(ColorStateList.valueOf(destaque));
                 barra.setProgressBackgroundTintList(ColorStateList.valueOf(
-                        Color.parseColor(claro ? "#C2D3DA" : "#0D3440")));
+                        Color.parseColor(cor("#C2D3DA", "#0D3440", "#1B1A48"))));
             }
         } catch (Exception e) {
             // visual é detalhe: nunca derruba a bolha

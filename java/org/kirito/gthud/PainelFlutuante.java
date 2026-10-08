@@ -68,6 +68,17 @@ public class PainelFlutuante {
     private static volatile int[] ruasGrossura = new int[0];
     private static volatile boolean claro = false;
     private static volatile int alerta = 0;                 // 0 normal, 1 laranja, 2 vermelho
+    // tema Monarca do app (preto, roxo e azul): vale quando o tema não é o claro
+    public static volatile boolean monarca = false;
+
+    public static void temaMonarca(boolean ligado) {
+        monarca = ligado;
+    }
+
+    private static String cor(String noClaro, String noEscuro, String noMonarca) {
+        return claro ? noClaro : (monarca ? noMonarca : noEscuro);
+    }
+
     // para o diagnóstico (o Python lê): 0 = fechado, 1 = na tela, -1 = não abriu
     public static volatile int estado = 0;
     public static volatile String erro = "";
@@ -307,6 +318,7 @@ public class PainelFlutuante {
         private LinearGradient degrade;
         private float degradeAltura = -1f;
         private boolean degradeClaro = false;
+        private boolean degradeMonarca = false;
 
         Vista(Context c) {
             super(c);
@@ -390,16 +402,16 @@ public class PainelFlutuante {
         private void desenhar(Canvas tela) {
             float w = getWidth(), h = getHeight();
             u = w / LARGURA_DP;
-            int destaque = Color.parseColor(claro ? "#00788F" : "#19E3FF");
-            int forte = Color.parseColor(claro ? "#0A1A24" : "#F2FBFF");
-            int suave = Color.parseColor(claro ? "#3F6272" : "#A9DCEA");
-            int fundoCima = Color.parseColor(claro ? "#FBFFFFFF" : "#F50C1826");
-            int fundoBaixo = Color.parseColor(claro ? "#FBEFF4F7" : "#F505090F");
-            int corMapa = Color.parseColor(claro ? "#FFE3EAEF" : "#FF0A131D");
-            int corRua = Color.parseColor(claro ? "#FFFFFFFF" : "#FF24364A");
-            int corRuaGrande = Color.parseColor(claro ? "#FFFFE9A8" : "#FF2F465F");
-            int borda = alerta >= 2 ? Color.parseColor(claro ? "#D01F40" : "#FF3355")
-                    : alerta == 1 ? Color.parseColor(claro ? "#C85A00" : "#FF8A00") : destaque;
+            int destaque = Color.parseColor(cor("#00788F", "#19E3FF", "#5AA0FF"));
+            int forte = Color.parseColor(cor("#0A1A24", "#F2FBFF", "#EEF0FF"));
+            int suave = Color.parseColor(cor("#3F6272", "#A9DCEA", "#9590E6"));
+            int fundoCima = Color.parseColor(cor("#FBFFFFFF", "#F50C1826", "#F5110D30"));
+            int fundoBaixo = Color.parseColor(cor("#FBEFF4F7", "#F505090F", "#F505040C"));
+            int corMapa = Color.parseColor(cor("#FFE3EAEF", "#FF0A131D", "#FF0D0A1E"));
+            int corRua = Color.parseColor(cor("#FFFFFFFF", "#FF24364A", "#FF2A2458"));
+            int corRuaGrande = Color.parseColor(cor("#FFFFE9A8", "#FF2F465F", "#FF3A3378"));
+            int borda = alerta >= 2 ? Color.parseColor(cor("#D01F40", "#FF3355", "#FF3B6B"))
+                    : alerta == 1 ? Color.parseColor(cor("#C85A00", "#FF8A00", "#FFA63D")) : destaque;
 
             // ------------------------------------------------ moldura com brilho
             float m = 7f * u;
@@ -414,10 +426,11 @@ public class PainelFlutuante {
             tinta.setColor(comAlfa(borda, 0x50));
             tela.drawPath(moldura, tinta);
             tinta.setStyle(Paint.Style.FILL);
-            if (degrade == null || degradeAltura != h || degradeClaro != claro) {   // (não cria um novo a cada quadro)
+            if (degrade == null || degradeAltura != h || degradeClaro != claro || degradeMonarca != monarca) {   // (não cria um novo a cada quadro)
                 degrade = new LinearGradient(0, m, 0, h - m, fundoCima, fundoBaixo, Shader.TileMode.CLAMP);
                 degradeAltura = h;
                 degradeClaro = claro;
+                degradeMonarca = monarca;
             }
             // (com degradê, a transparência da tinta ainda vale: sem voltar a cor para
             // opaca, o corpo saía com os 31% da linha de brilho e dava para ver os apps atrás)
@@ -541,7 +554,7 @@ public class PainelFlutuante {
             caminho.lineTo(ox - s9 * 0.9f, oy + s9 * 0.85f);
             caminho.close();
             tinta.setStyle(Paint.Style.FILL);
-            tinta.setColor(claro ? Color.WHITE : Color.parseColor("#FF07111B"));
+            tinta.setColor(claro ? Color.WHITE : Color.parseColor(monarca ? "#FF05040C" : "#FF07111B"));
             tela.drawPath(caminho, tinta);
             tinta.setStyle(Paint.Style.STROKE);
             tinta.setStrokeWidth(2.4f * u);
