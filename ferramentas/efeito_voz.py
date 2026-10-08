@@ -10,12 +10,15 @@ audio/voz/. Pode rodar quantas vezes quiser, com outro efeito ou velocidade:
 não gasta crédito nenhum, e o efeito nunca se acumula (parte sempre da limpa).
 
 É um efeito ORIGINAL feito só com contas (numpy): não copia a voz do personagem
-nem do ator, só o clima. Como é feito:
-- TOM mais grave SEM mudar a duração além do pedido: um "phase vocoder" encurta
-  a fala no tempo e a reamostragem estica de volta, descendo o tom;
-- uma SEGUNDA VOZ uma oitava abaixo, misturada por baixo (o "monstro" falando junto);
-- RONCO: essa voz de baixo treme ~30 vezes por segundo;
-- grave reforçado, um pouco de distorção e um eco curto e escuro;
+nem do ator, só o clima. Como é feito (2ª versão: a 1ª ficou "robotizada demais", disse o dono):
+- TOM mais grave SEM mudar a duração além do pedido: a fala é encurtada no tempo
+  colando pedacinhos dela mesma onde a onda encaixa (WSOLA, o método usado para
+  fala) e a reamostragem estica de volta, descendo o tom. A 1ª versão usava um
+  "phase vocoder", que deixa um chiado metálico: era o robô;
+- uma SEGUNDA VOZ uma oitava abaixo, só nos graves (abaixo de ~400 Hz), por baixo;
+- sem o tremor ("ronco") da 1ª versão, que soava como máquina, e com bem menos
+  distorção;
+- grave reforçado e um eco curto e escuro;
 - a faixa de 2 a 4 kHz (onde moram as consoantes) é preservada: no guidão, com
   vento, entender "vire à esquerda" vale mais que o efeito.
 
@@ -40,9 +43,9 @@ CLAREZA = 1.6   # quanto do agudo original volta por cima no efeito mais forte (
 #   tom: 1.0 = igual; 0.75 = uns 5 semitons mais grave
 EFEITOS = {
     "nenhum": (1.00, 0.00, 0.00, 0.0, 0.0, 0.00),
-    "leve":   (0.88, 0.00, 0.00, 0.6, 0.4, 0.05),
-    "medio":  (0.80, 0.30, 0.20, 1.2, 0.7, 0.10),
-    "forte":  (0.72, 0.50, 0.38, 2.0, 1.0, 0.16),
+    "leve":   (0.90, 0.00, 0.00, 0.4, 0.4, 0.04),
+    "medio":  (0.83, 0.25, 0.00, 0.7, 0.7, 0.07),
+    "forte":  (0.76, 0.42, 0.00, 1.0, 1.0, 0.10),
 }
 
 
@@ -74,6 +77,38 @@ def esticar(a, fator, quadro=1024, salto=256):
     return saida[corte:len(saida) - corte] if len(saida) > 2 * corte + quadro else saida
 
 
+def wsola(a, fator, sr=24000):
+    """Muda a DURAÇÃO da fala (fator > 1 = mais longa) sem mudar o tom, colando janelas
+    de 40 ms dela mesma; cada janela é procurada (±10 ms) onde a onda melhor continua a
+    anterior. Não mexe na fase do som: não deixa o chiado metálico do phase vocoder."""
+    if abs(fator - 1.0) < 1e-3:
+        return np.asarray(a, dtype=np.float64).copy()
+    quadro = int(sr * 0.040) // 2 * 2
+    salto = quadro // 2
+    busca = int(sr * 0.010)
+    janela = np.hanning(quadro)
+    n_saida = int(len(a) * fator)
+    a = np.concatenate([np.zeros(busca + quadro), np.asarray(a, dtype=np.float64), np.zeros(busca + 2 * quadro)])
+    saida = np.zeros(n_saida + 2 * quadro)
+    pos = busca + quadro           # onde a última janela começou no som original
+    saida[:quadro] += a[pos:pos + quadro] * janela
+    k = 1
+    while k * salto + quadro < len(saida):
+        ideal = busca + quadro + int(k * salto / fator)      # onde o tempo novo "quer" ler
+        if ideal + busca + quadro >= len(a):
+            break
+        natural = a[pos + salto:pos + salto + quadro]         # a continuação natural da janela anterior
+        melhor, melhor_c = ideal, -1e30
+        for d in range(-busca, busca + 1, 4):
+            c = float(np.dot(natural, a[ideal + d:ideal + d + quadro]))
+            if c > melhor_c:
+                melhor, melhor_c = ideal + d, c
+        pos = melhor
+        saida[k * salto:k * salto + quadro] += a[pos:pos + quadro] * janela
+        k += 1
+    return saida[:n_saida]
+
+
 def reamostrar(a, fator):
     """Estica o som como uma fita mais lenta: fator > 1 = mais longo E mais grave."""
     n = max(2, int(round(len(a) * fator)))
@@ -82,7 +117,7 @@ def reamostrar(a, fator):
 
 def mudar_tom(a, tom, duracao):
     """A fala com o tom multiplicado por `tom` (<1 = mais grave) e a duração por `duracao`."""
-    return reamostrar(esticar(a, duracao * tom), 1.0 / tom)
+    return reamostrar(wsola(a, duracao * tom), 1.0 / tom)
 
 
 def igualar(a, sr, grave, presenca=0.25):
@@ -106,7 +141,12 @@ def aplicar(a, sr, efeito="forte", velocidade=0.85):
         n = min(len(voz), len(sub))
         voz, sub = voz[:n], sub[:n]
         t = np.arange(n) / float(sr)
-        sub = sub * (1.0 - ronco + ronco * np.abs(np.sin(2.0 * np.pi * 15.0 * t)))   # treme ~30x por segundo
+        if ronco > 0:
+            sub = sub * (1.0 - ronco + ronco * np.abs(np.sin(2.0 * np.pi * 15.0 * t)))   # treme ~30x por segundo
+        # só o grave da voz de baixo: acima de ~400 Hz ela embolaria as palavras
+        espectro_sub = np.fft.rfft(sub)
+        f_sub = np.fft.rfftfreq(len(sub), 1.0 / sr)
+        sub = np.fft.irfft(espectro_sub / (1.0 + (f_sub / 400.0) ** 6), len(sub))
         sub = igualar(sub, sr, grave, presenca=0.0)
         voz = voz + baixo * sub * (np.sqrt(np.mean(voz ** 2)) / (np.sqrt(np.mean(sub ** 2)) or 1.0))
     voz = igualar(voz, sr, grave)
@@ -114,7 +154,7 @@ def aplicar(a, sr, efeito="forte", velocidade=0.85):
         # CLAREZA: descer o tom leva junto as consoantes ("s", "t", "ch"), que ficam abafadas. Por
         # cima da voz grave volta só o agudo (acima de ~2 kHz) da fala original, no tempo novo:
         # o timbre continua de monstro e as palavras continuam nítidas.
-        claro = esticar(a, duracao)
+        claro = wsola(a, duracao)
         espectro = np.fft.rfft(claro)
         f = np.fft.rfftfreq(len(claro), 1.0 / sr)
         claro = np.fft.irfft(espectro / (1.0 + (2200.0 / np.maximum(f, 1.0)) ** 6), len(claro))
