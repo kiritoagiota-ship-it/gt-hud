@@ -43,6 +43,8 @@ from widgets.velocimetro import Velocimetro
 
 VELO_A_CADA_S = 0.2    # o velocímetro pega a velocidade prevista 5x por segundo
 PULSA_A_M = 70.0       # a faixa da curva pulsa nos últimos metros antes de virar
+SOBE_FOLHA_S = 0.45    # abertura: a folha de baixo e o velocímetro sobem nesse tempo...
+ESPERA_FOLHA_S = 0.25  # ... depois de o mapa ter esse tempo para aparecer
 CONTA_RESUMO_S = 0.9   # os números do cartão de chegada sobem de zero nesse tempo
 RESUMO_FICA_S = 20.0   # o cartão de resumo da rota some sozinho depois disso
 LIVRE, PREVIA, NAVEGANDO = "livre", "previa", "navegando"
@@ -433,14 +435,29 @@ class TelaMapa(Screen):
 
     def _subir_folha(self):
         """Abertura do app: a folha de baixo, o velocímetro e a bateria sobem até o lugar,
-        um depois do outro, e o menu desce (pedido do dono, 09/10/2026). Só o DESENHO
+        juntos (pedido do dono, 09/10/2026). Só o DESENHO
         anda: a posição de verdade (e o toque) já está no lugar."""
-        for w, de, espera in ((self.barra_livre, -dp(170), 0.10), (self.disco, -dp(90), 0.22),
-                              (self.btn_bateria, -dp(60), 0.32), (self.menu, dp(80), 0.22)):
-            anda = mexer(w)[0]
-            Animation.cancel_all(anda)
-            anda.y = de
-            (Animation(d=espera) + Animation(y=0.0, d=0.5, t="out_cubic")).start(anda)
+        # Tudo sobe JUNTO, a mesma distância (na 1.0.69 cada peça vinha de um lugar, em tempos
+        # diferentes, com o menu descendo: o dono achou estranho). E o passo é por QUADRO, de
+        # no máximo 1/30 s: nesta hora o mapa ainda está carregando e os quadros demoram; pelo
+        # relógio, a animação pulava direto para o fim.
+        pecas = [mexer(w)[0] for w in (self.barra_livre, self.disco, self.btn_bateria)]
+        estado = {"f": -ESPERA_FOLHA_S / SOBE_FOLHA_S}
+
+        def por(f):
+            falta = (1.0 - max(0.0, min(1.0, f))) ** 3
+            for anda in pecas:
+                anda.y = -dp(150) * falta
+
+        def passo(dt):
+            estado["f"] += min(dt, 1 / 30.0) / SOBE_FOLHA_S
+            por(estado["f"])
+            return estado["f"] < 1.0
+        por(0.0)
+        if SOBE_FOLHA_S > 0:
+            Clock.schedule_interval(passo, 0)
+        else:
+            por(1.0)
 
     def on_leave(self, *a):
         if self._ev_tique is not None:

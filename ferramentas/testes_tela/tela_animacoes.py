@@ -117,6 +117,9 @@ def botao_e_janela(dt):
     depois(0.5, lambda: checar(abs(mexer(b)[1].x - 1.0) < 0.005, "... e volta ao tamanho: %.3f" % mexer(b)[1].x))
     j = comuns.escolher("Janela de teste", [("Uma opção", lambda: None), ("Fechar", None)], "Fecha encolhendo.")
     T["janela"] = j
+    j.botoes[0].dispatch("on_release")
+    checar(j.parent is None, "escolher uma opção fecha a janela na hora (sem atropelar o que vem depois)")
+    j = comuns.escolher("Janela de teste", [("Uma opção", lambda: None), ("Fechar", None)], "Fecha encolhendo.")
 
     def fechar():
         j.dismiss()
@@ -208,6 +211,7 @@ def telas(dt):
         capa = getattr(a, "_capa_tema", None)
         checar(a.sm.current == "mapa" and capa is not None and capa.parent is not None,
                "ao voltar, a tela dos Ajustes se dissolve por cima do mapa")
+        depois(0.07, lambda: tirar("a3_tela_saindo"))
         depois(0.6, lambda: checar(capa.parent is None, "... e some"))
     depois(0.6, voltar)
 

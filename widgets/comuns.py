@@ -295,6 +295,10 @@ def abrir_janela(janela):
         saida.start(janela)
         Animation(x=0.9, y=0.9, d=FECHA_JANELA_S, t="in_quad").start(escala)
     janela.dismiss = fechar
+    # escolheu uma opção que FAZ algo (abre outra janela, troca de tela): esta sai na hora, senão
+    # as duas animações se atropelam (a 1.0.69 fazia isso e o dono achou estranho). A saída
+    # animada fica para o "Fechar"/"Cancelar" e o toque fora.
+    janela.fechar_ja = lambda: None if fechando else fechar_de_vez(animation=False)
     janela.opacity = 0.0
     janela.open()
     desenhar()
@@ -323,9 +327,11 @@ def escolher(titulo, opcoes, texto="", altura_texto=None):
                    background="", background_color=tema.PAINEL, auto_dismiss=True)
 
     def tocar(funcao):
-        janela.dismiss()
-        if funcao is not None:
-            funcao()
+        if funcao is None:
+            janela.dismiss()
+            return
+        janela.fechar_ja()
+        funcao()
     janela.botoes = []
     for k, (rotulo, funcao) in enumerate(opcoes):
         b = BotaoHUD(text=rotulo, destaque=(k == 0 and funcao is not None), font_size=tema.T_ROTULO + 2,
@@ -361,7 +367,7 @@ def pedir_nome(ao_confirmar, sugestao="", titulo="Nome do lugar", botao="Salvar"
         if not nome:
             campo.focus = True
             return
-        janela.dismiss()
+        janela.fechar_ja()
         ao_confirmar(nome)
 
     botoes.add_widget(BotaoHUD(text="Cancelar", font_size=tema.T_ROTULO + 2,

@@ -279,7 +279,7 @@ class GTHudApp(App):
         self._fluxo_tiles = None
         self.atualizar_fluxo()
 
-    def _dissolver(self, textura, segundos=1.3):
+    def _dissolver(self, textura, segundos=1.3, com_fundo=False):
         """A foto da tela antiga por cima de tudo, sumindo aos poucos."""
         from kivy.animation import Animation
         from kivy.graphics import Color, Rectangle
@@ -287,8 +287,15 @@ class GTHudApp(App):
         capa = Widget(size=Window.size, pos=(0, 0), size_hint=(None, None))
         capa.disabled = True                       # não rouba toque
         with capa.canvas:
+            if com_fundo:
+                Color(*tema.FUNDO)
+                Rectangle(pos=(0, 0), size=Window.size)
             Color(1, 1, 1, 1)
-            Rectangle(texture=textura, pos=(0, 0), size=Window.size)
+            # (a foto vem de cabeça para baixo: até a 1.0.69 a tela antiga aparecia INVERTIDA
+            # enquanto se dissolvia; aqui os cantos da textura são trocados para desvirar)
+            c = textura.tex_coords
+            Rectangle(texture=textura, pos=(0, 0), size=Window.size,
+                      tex_coords=(c[6], c[7], c[4], c[5], c[2], c[3], c[0], c[1]))
         Window.add_widget(capa)
         self._capa_tema = capa
 
@@ -491,7 +498,9 @@ class GTHudApp(App):
                 print("[tela] sem a foto da tela que sai:", e)
         self.sm.current = nome
         if foto is not None:
-            self._dissolver(foto, SAIDA_TELA_S)
+            # (com o fundo do app por trás: a tela não tem fundo próprio, e a foto só dos
+            # textos virava um "fantasma" por cima do mapa; o dono achou estranho na 1.0.69)
+            self._dissolver(foto, SAIDA_TELA_S, com_fundo=True)
         if mudou and nome != "mapa":  # o mapa entra direto (é pesado; e é para onde se volta com pressa)
             tela = self.sm.get_screen(nome)
             if tela.children:
