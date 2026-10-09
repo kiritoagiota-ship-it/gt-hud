@@ -88,11 +88,16 @@ public class ServicoNavegacao extends Service {
 
     @Override
     public int onStartCommand(Intent intent, int flags, int startId) {
-        Notification n = montar(this);
-        if (Build.VERSION.SDK_INT >= 29) {
-            startForeground(ID, n, ServiceInfo.FOREGROUND_SERVICE_TYPE_LOCATION);
-        } else {
-            startForeground(ID, n);
+        try {
+            Notification n = montar(this);
+            if (Build.VERSION.SDK_INT >= 29) {
+                startForeground(ID, n, ServiceInfo.FOREGROUND_SERVICE_TYPE_LOCATION);
+            } else {
+                startForeground(ID, n);
+            }
+        } catch (Exception e) {
+            // o Android recusou (ex.: o app já tinha saído da tela): desiste em vez de derrubar o app
+            stopSelf();
         }
         return START_NOT_STICKY;
     }

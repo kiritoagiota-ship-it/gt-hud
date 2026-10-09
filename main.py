@@ -126,6 +126,7 @@ class GTHudApp(App):
         self.ultimo_resumo = None    # números da última viagem finalizada (cartão de chegada)
         self._estava_fora = False    # saiu da rota: vibra uma vez
         self._hoje = None            # (dia, metros, segundos andando) das viagens de hoje
+        self.gps_permitido = False
         self.viagem = Viagem()
         self.gps = ServicoGPS(self._ao_receber_gps, self._ao_status_gps, self.ao_posicao_aproximada)
         self.voz = Voz(pasta)
@@ -372,6 +373,7 @@ class GTHudApp(App):
 
     def on_resume(self):
         self.fundo.ao_voltar()
+        self.fundo.sincronizar()   # (ver _resposta_permissao)
         if self.sm.current == "config":  # pode estar voltando da tela de permissão da bolha
             self.sm.get_screen("config").on_pre_enter()
         self.aplicar_tela_ligada()
@@ -489,12 +491,16 @@ class GTHudApp(App):
 
     def _resposta_permissao(self, ok):
         boot = self.sm.get_screen("boot")
+        self.gps_permitido = bool(ok)   # (sem a permissão, o serviço de localização nem pode ser ligado)
         if ok or self.ajustes["simulador"]:
             self.gps.iniciar(usar_simulador=self.ajustes["simulador"])
             self._t_gps_inicio = time.monotonic()
             self._t_leitura = self._t_valida = 0.0
             self.ja_teve_sinal = False
             boot.aguardando_sinal()
+            # contando os km da carga da moto: o serviço que mantém o GPS com o app minimizado
+            # tem de ser ligado AGORA, com o app na tela (o Android recusa depois de minimizar)
+            self.fundo.sincronizar()
         else:
             boot.permissao_negada()
 

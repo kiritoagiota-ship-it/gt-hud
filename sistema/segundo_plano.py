@@ -301,7 +301,8 @@ class SegundoPlano:
         09/10/2026). Fica ligado até ele fechar o app: escolha dele, para a volta
         contar sem abrir de novo."""
         bat = getattr(self.app, "bateria", None)
-        return bat is not None and bat.ativa and not self._com_rota_ou_viagem()
+        return (bat is not None and bat.ativa and not self._com_rota_ou_viagem()
+                and bool(getattr(self.app, "gps_permitido", True)))
 
     def sincronizar(self):
         """Liga ou desliga o serviço Android conforme o estado do app.
@@ -419,6 +420,13 @@ class SegundoPlano:
 
     # --- app minimizado / de volta -------------------------------------------------
     def ao_pausar(self):
+        if not self._ligado and self._so_bateria():
+            # O Android NÃO deixa ligar o serviço de localização com o app já saindo da
+            # tela: a 1.0.67 ligava aqui e o app caía ao minimizar ("falhas contínuas").
+            # Só contando a bateria, o serviço é ligado com o app ABERTO (main chama
+            # sincronizar ao receber a permissão do GPS, ao voltar e ao marcar a carga).
+            print("[fundo] minimizado sem o servico ligado: os km da carga nao contam ate reabrir")
+            return
         self.sincronizar()  # garantia: se a gravação começou por um caminho que não avisou
         if not self._ligado:
             return

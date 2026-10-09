@@ -1054,6 +1054,7 @@ class TelaMapa(Screen):
 
         def marcar(sobra=None):
             bat.carregou(sobra)
+            App.get_running_app().fundo.sincronizar()   # liga já o serviço que conta com o app minimizado
             self._atualizar_bateria("Carga cheia marcada")
         if not bat.ativa or bat.metros < 300:
             marcar()

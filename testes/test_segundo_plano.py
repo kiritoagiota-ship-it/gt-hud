@@ -142,9 +142,13 @@ class TesteSegundoPlano(unittest.TestCase):
         app.nav, app.bateria = None, Bateria()
         self.assertEqual(textos(app)[0], "Contando os km da carga  ·  12,4 km")
         fundo = SegundoPlano(app, android)
+        fundo.ao_pausar()                                        # serviço ainda desligado: o Android não
+        self.assertFalse(fundo.minimizado)                       # deixa ligar com o app saindo da tela
+        self.assertNotIn("iniciar", android.nomes())             # (a 1.0.67 ligava aqui e o app caía)
+        fundo.sincronizar()                                      # com o app aberto: liga
+        self.assertIn("iniciar", android.nomes())
         fundo.ao_pausar()
         self.assertTrue(fundo.minimizado)
-        self.assertIn("iniciar", android.nomes())
         self.assertNotIn("mostrar_bolha", android.nomes())
         self.assertNotIn("mostrar_painel", android.nomes())
         app.gps.leituras.append({"lat": -16.68, "lon": -49.25, "speed": 10.0})
