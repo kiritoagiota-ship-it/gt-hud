@@ -42,6 +42,11 @@ def textos(app):
     if nav is None:
         v = getattr(app, "viagem", None)
         if v is None or v.estado == v.PARADA:
+            bat = getattr(app, "bateria", None)
+            if bat is not None and bat.ativa:   # só contando os km da carga da moto (sem rota)
+                km = fmt_dist_nav(bat.metros)
+                return ("Contando os km da carga  ·  %s" % km,
+                        "%d de 5 barrinhas. Para parar, feche o GT-HUD." % bat.barras, km, "")
             return "GT-HUD", "", "", ""
         # só gravando a viagem (sem rota): distância e tempo
         dist, tempo = fmt_dist(v.distancia_m), fmt_tempo(v.tempo_total_s)
@@ -284,8 +289,19 @@ class SegundoPlano:
         sendo gravada (pausada também: a pausa automática precisa do GPS
         para voltar a gravar). Até a 1.0.21 só a rota contava: gravando sem
         rota, apagar a tela parava a contagem."""
+        return self._com_rota_ou_viagem() or self._so_bateria()
+
+    def _com_rota_ou_viagem(self):
         v = getattr(self.app, "viagem", None)
         return self.app.nav is not None or (v is not None and v.estado != v.PARADA)
+
+    def _so_bateria(self):
+        """Sem rota nem viagem, mas com uma carga da moto sendo contada (bateria.py): o
+        dono abre o app, minimiza e põe no bolso, e os km têm de contar (pedido dele,
+        09/10/2026). Fica ligado até ele fechar o app: escolha dele, para a volta
+        contar sem abrir de novo."""
+        bat = getattr(self.app, "bateria", None)
+        return bat is not None and bat.ativa and not self._com_rota_ou_viagem()
 
     def sincronizar(self):
         """Liga ou desliga o serviço Android conforme o estado do app.
@@ -299,6 +315,10 @@ class SegundoPlano:
             self._ligado = False
             self.android.parar()
         elif deve:
+            if self._so_bateria():   # a rota acabou e ficou só a contagem da carga: a janela sai
+                self._painel_a_vista = False
+                self.android.esconder_bolha()
+                self.android.esconder_painel()
             self.atualizar(forcar=True)
 
     def comecou(self):
@@ -403,7 +423,8 @@ class SegundoPlano:
         if not self._ligado:
             return
         self.minimizado = True
-        tipo = self._tipo_flutuante()
+        # (só contando a bateria: nada de janela por cima dos outros apps, basta a notificação)
+        tipo = None if self._so_bateria() else self._tipo_flutuante()
         self._painel_a_vista = False
         self._conferir_painel_em = None
         permitida = self.android.bolha_permitida()

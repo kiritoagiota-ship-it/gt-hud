@@ -133,6 +133,28 @@ class TesteSegundoPlano(unittest.TestCase):
         self.assertFalse(fundo.minimizado)
         self.assertEqual(android.chamadas, [])
 
+    def test_so_contando_a_bateria_segue_no_bolso_sem_janela(self):
+        """Sem rota, com uma carga da moto sendo contada: minimizar mantém o GPS (o dono
+        abre o app, minimiza e põe no bolso), só com a notificação."""
+        class Bateria:
+            ativa, metros, barras = True, 12400.0, 4
+        app, android = AppFalso(), AndroidFalso()
+        app.nav, app.bateria = None, Bateria()
+        self.assertEqual(textos(app)[0], "Contando os km da carga  ·  12,4 km")
+        fundo = SegundoPlano(app, android)
+        fundo.ao_pausar()
+        self.assertTrue(fundo.minimizado)
+        self.assertIn("iniciar", android.nomes())
+        self.assertNotIn("mostrar_bolha", android.nomes())
+        self.assertNotIn("mostrar_painel", android.nomes())
+        app.gps.leituras.append({"lat": -16.68, "lon": -49.25, "speed": 10.0})
+        self.assertTrue(esperar(lambda: app.processadas))        # a leitura chegou com o app minimizado
+        fundo.ao_voltar()
+        Bateria.ativa = False                                    # nunca marcou carga: como antes, nada
+        android2 = AndroidFalso()
+        SegundoPlano(app, android2).ao_pausar()
+        self.assertEqual(android2.chamadas, [])
+
     def test_bolha_sem_permissao_nao_aparece_mas_navega(self):
         app, android = AppFalso(), AndroidFalso(permitida=False)
         fundo = SegundoPlano(app, android)

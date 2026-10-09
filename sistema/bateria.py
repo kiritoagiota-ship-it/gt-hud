@@ -7,7 +7,8 @@ sem rota) e guarda com quantos km cada barrinha caiu. Com isso, e com a sobra
 informada na hora de recarregar, dá para estimar a autonomia REAL dele (a de
 fábrica, 60 km, é medida devagar e no plano).
 
-Só conta com o app recebendo o GPS: aberto, ou minimizado com rota ativa.
+Só conta com o app recebendo o GPS: aberto, ou minimizado (com uma carga sendo
+contada, segundo_plano.py mantém o GPS mesmo sem rota). Fechado, não conta.
 """
 import time
 
