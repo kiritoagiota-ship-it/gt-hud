@@ -34,7 +34,7 @@ import tema
 from falas import texto_manobra
 from util import fmt_dist, fmt_dist_nav, fmt_duracao, fmt_hora_chegada, fmt_tempo
 from viagem import Viagem
-from widgets.botao import BotaoHUD
+from widgets.botao import BotaoHUD, mexer
 from widgets.comuns import Aviso, PainelHUD, Ponto, Texto, escolher, pedir_nome
 from widgets.manobra import IconeManobra
 from widgets.mapa import MapaHUD
@@ -42,6 +42,8 @@ from widgets.perfil import PerfilAltimetria
 from widgets.velocimetro import Velocimetro
 
 VELO_A_CADA_S = 0.2    # o velocímetro pega a velocidade prevista 5x por segundo
+PULSA_A_M = 70.0       # a faixa da curva pulsa nos últimos metros antes de virar
+CONTA_RESUMO_S = 0.9   # os números do cartão de chegada sobem de zero nesse tempo
 RESUMO_FICA_S = 20.0   # o cartão de resumo da rota some sozinho depois disso
 LIVRE, PREVIA, NAVEGANDO = "livre", "previa", "navegando"
 TRILHA_A_CADA_S = 3
@@ -234,6 +236,9 @@ class TelaMapa(Screen):
         self._tem_depois = False
         self._tem_subida = False
         self._tem_alerta = False
+        self._pulso_curva = None     # a animação da faixa pulsando perto da curva
+        self._ev_contar = None
+        self._entrou = False         # a folha de baixo já subiu uma vez (abertura do app)
 
         self.raiz = FloatLayout()
         self.mapa = MapaHUD(app.user_data_dir, girar=app.ajustes["girar_mapa"])
@@ -271,6 +276,7 @@ class TelaMapa(Screen):
             textos.add_widget(w)
         self.faixa.add_widget(self.icone)
         self.faixa.add_widget(textos)
+        self._textos_faixa = textos
         self.depois = PainelHUD(size_hint=(None, None), padding=(dp(10), dp(4)))
         self.depois.add_widget(Texto(text="Depois", font_size=tema.T_ROTULO, color=tema.CIANO_FRACO))
         self.icone_depois = IconeManobra(size_hint_x=None, width=dp(30))
@@ -421,6 +427,20 @@ class TelaMapa(Screen):
         if self._ev_velo is None:
             self._ev_velo = Clock.schedule_interval(self._passo_velo, VELO_A_CADA_S)
         self.mapa.retomar()
+        if not self._entrou and App.get_running_app().sm.current != "boot":
+            self._entrou = True
+            self._subir_folha()
+
+    def _subir_folha(self):
+        """Abertura do app: a folha de baixo, o velocímetro e a bateria sobem até o lugar,
+        um depois do outro, e o menu desce (pedido do dono, 09/10/2026). Só o DESENHO
+        anda: a posição de verdade (e o toque) já está no lugar."""
+        for w, de, espera in ((self.barra_livre, -dp(170), 0.10), (self.disco, -dp(90), 0.22),
+                              (self.btn_bateria, -dp(60), 0.32), (self.menu, dp(80), 0.22)):
+            anda = mexer(w)[0]
+            Animation.cancel_all(anda)
+            anda.y = de
+            (Animation(d=espera) + Animation(y=0.0, d=0.5, t="out_cubic")).start(anda)
 
     def on_leave(self, *a):
         if self._ev_tique is not None:
@@ -439,6 +459,7 @@ class TelaMapa(Screen):
         self.mapa.modo_navegacao(False)
         self.mapa.sinais_rota = None
         self._rota_na_tela = None
+        self._pulsar_curva(False)
         self._parar_contagem()
         self._limite_via = None
         self._curva_desenhada = None
@@ -456,22 +477,50 @@ class TelaMapa(Screen):
         self.lbl_resumo_titulo.text = titulo
         recompensas = tema.texto("recompensas", "")   # (no tema Monarca os números da viagem são "recompensas")
         self.lbl_resumo_destino.text = "  ·  ".join(x for x in (destino or "", recompensas) if x)
-        self.res_dist.valor.text = fmt_dist(resumo["distancia_m"])
-        self.res_tempo.valor.text = fmt_tempo(resumo["duracao_s"])
-        self.res_media.valor.text = "%.0f" % (resumo["vel_media_kmh"] or 0)
-        self.res_max.valor.text = "%.0f" % (resumo["vel_max_kmh"] or 0)
+        self._numeros_do_resumo(resumo, 1.0)
         self._resumo = True
         if self._ev_resumo is not None:
             self._ev_resumo.cancel()
         self._ev_resumo = Clock.schedule_once(lambda dt: self._fechar_resumo(), RESUMO_FICA_S)
         self._montar()
+        # o cartão entra crescendo, com um quique, e os números sobem de zero até o valor
+        Animation.cancel_all(self.card_resumo, "opacity")
         self.card_resumo.opacity = 0.0
-        Animation(opacity=1.0, d=0.3, t="out_quad").start(self.card_resumo)
+        Animation(opacity=1.0, d=0.25, t="out_quad").start(self.card_resumo)
+        cresce = mexer(self.card_resumo)[1]
+        Animation.cancel_all(cresce)
+        cresce.x = cresce.y = 0.8
+        Animation(x=1.0, y=1.0, d=0.42, t="out_back").start(cresce)
+        self._parar_contagem_resumo()
+        if CONTA_RESUMO_S > 0:
+            t0 = time.monotonic()
+            self._numeros_do_resumo(resumo, 0.0)
+
+            def contar(dt):
+                f = min(1.0, (time.monotonic() - t0) / CONTA_RESUMO_S)
+                self._numeros_do_resumo(resumo, 1.0 - (1.0 - f) ** 3)
+                if f >= 1.0:
+                    self._ev_contar = None
+                    return False
+            self._ev_contar = Clock.schedule_interval(contar, 1 / 30.0)
+
+    def _numeros_do_resumo(self, resumo, parte):
+        """Os quatro números do cartão de chegada, em `parte` (0 a 1) do valor final."""
+        self.res_dist.valor.text = fmt_dist(resumo["distancia_m"] * parte)
+        self.res_tempo.valor.text = fmt_tempo(resumo["duracao_s"] * parte)
+        self.res_media.valor.text = "%.0f" % ((resumo["vel_media_kmh"] or 0) * parte)
+        self.res_max.valor.text = "%.0f" % ((resumo["vel_max_kmh"] or 0) * parte)
+
+    def _parar_contagem_resumo(self):
+        if self._ev_contar is not None:
+            self._ev_contar.cancel()
+            self._ev_contar = None
 
     def _fechar_resumo(self, montar=True):
         if self._ev_resumo is not None:
             self._ev_resumo.cancel()
             self._ev_resumo = None
+        self._parar_contagem_resumo()
         if self._resumo:
             self._resumo = False
             if montar:
@@ -676,11 +725,12 @@ class TelaMapa(Screen):
     def mensagem(self, texto, cor=tema.VERDE, segundos=3.5):
         if texto and len(texto) <= 40:   # no tema Monarca os avisos curtos vêm "do Sistema"
             texto = tema.texto("aviso", "") + texto
+        self.lbl_msg.firmar()   # (se o aviso de antes estava se apagando, este fica)
         self.lbl_msg.text = texto
         self.lbl_msg.color = cor
         if self._ev_msg:
             self._ev_msg.cancel()
-        self._ev_msg = Clock.schedule_once(lambda dt: setattr(self.lbl_msg, "text", ""), segundos)
+        self._ev_msg = Clock.schedule_once(lambda dt: self.lbl_msg.sair(), segundos)
 
     # --- montagem e posição dos elementos -----------------------------------------
     def _montar(self, *a):
@@ -1035,6 +1085,7 @@ class TelaMapa(Screen):
 
     def _atualizar_bateria(self, aviso):
         self.btn_bateria.text = App.get_running_app().bateria.texto_curto()
+        self.btn_bateria.pulsar()   # o botão confirma que anotou
         self.mensagem(aviso)
 
     def _caiu_barra(self):
@@ -1165,6 +1216,22 @@ class TelaMapa(Screen):
             vermelho = a["tipo"] == "incidente" or sinais.e_radar(a["tipo"])
             self.mapa.destacar_alerta(onde, tema.VERMELHO if vermelho else tema.LARANJA)
 
+    def _pulsar_curva(self, ligado):
+        """Últimos metros antes de virar: a borda da faixa da curva pulsa (clara e de volta),
+        para perceber de relance, sem ler."""
+        if ligado == (self._pulso_curva is not None):
+            return
+        if not ligado:
+            self._pulso_curva.cancel(self.faixa)
+            self._pulso_curva = None
+            self.faixa.cor_borda = list(tema.CIANO)
+            return
+        Animation.cancel_all(self.faixa, "cor_borda")
+        self._pulso_curva = (Animation(cor_borda=list(tema.BRANCO), d=0.30, t="out_quad", s=1 / 30.0)
+                             + Animation(cor_borda=list(tema.CIANO), d=0.42, t="in_out_quad", s=1 / 30.0))
+        self._pulso_curva.repeat = True
+        self._pulso_curva.start(self.faixa)
+
     def _atualizar_navegacao(self, e):
         self._sinalizar(e)
         m = e["manobra"]
@@ -1177,6 +1244,17 @@ class TelaMapa(Screen):
                         Animation.cancel_all(w, "opacity")
                         w.opacity = 0.0
                         Animation(opacity=1.0, d=0.35, t="out_quad").start(w)
+                    # ... o texto entra deslizando da direita e o ícone dá um pulo: fica claro
+                    # que a instrução MUDOU (pedido do dono, 09/10/2026)
+                    desliza = mexer(self._textos_faixa)[0]
+                    Animation.cancel_all(desliza)
+                    desliza.x = dp(54)
+                    Animation(x=0.0, d=0.34, t="out_cubic").start(desliza)
+                    pulo = mexer(self.icone)[1]
+                    Animation.cancel_all(pulo)
+                    pulo.x = pulo.y = 1.4
+                    Animation(x=1.0, y=1.0, d=0.4, t="out_back").start(pulo)
+                    self._pulsar_curva(False)
                     Animation.cancel_all(self.faixa, "cor_borda")
                     self.faixa.cor_borda = list(tema.VERDE)
                     Animation(cor_borda=list(tema.CIANO), d=0.9, t="out_quad").start(self.faixa)
@@ -1185,6 +1263,7 @@ class TelaMapa(Screen):
             self.lbl_dist.text = fmt_dist_nav(e["dist_manobra"])
             self.lbl_instr.text = texto_manobra(m["acao"], m.get("saida"))
             self.lbl_rua.text = m["ruas"] or ""
+        self._pulsar_curva(m is not None and not e["fora_da_rota"] and e["dist_manobra"] <= PULSA_A_M)
         if e["fora_da_rota"]:
             app = App.get_running_app()
             self.lbl_instr.text = "Recalculando a rota..." if app.recalculando else "Fora da rota"

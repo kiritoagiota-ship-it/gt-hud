@@ -63,6 +63,7 @@ VIBRA_FORCAS = [0, 255, 0, 255]
 RUMO_MIN_KMH = 3.0          # parado, o rumo do GPS é ruído: fica o último
 RUMO_VALIDO_S = 6.0         # rumo mais velho que isso não vai no pedido de rota
 GPS_PERDIDO_FALA_S = 10     # navegando sem sinal por isso: o assistente avisa
+SAIDA_TELA_S = 0.18            # a tela que sai (Ajustes, Viagens, Busca) se dissolve nesse tempo
 FLUXO_A_CADA_S = 15.0          # mapa: confere se a vista tem as cores do trânsito (só baixa o que falta/venceu)
 TRANSITO_MAPA_A_CADA_S = 240.0  # mapa: o trânsito de Goiânia é olhado de novo a cada isso (~360 consultas/dia no máximo, de 2.500)
 # posição aproximada (rede/última conhecida), usada só enquanto o satélite não chega
@@ -479,7 +480,18 @@ class GTHudApp(App):
 
     def _mostrar_tela(self, nome):
         mudou = self.sm.current != nome
+        # a tela que sai vira uma "foto" por cima da nova e se dissolve rápido, em vez de
+        # cortar seco (pedido do dono, 09/10/2026). O mapa não: fotografar ele é pesado.
+        foto = None
+        if (mudou and SAIDA_TELA_S > 0 and self.sm.current not in ("mapa", "boot")
+                and not self.fundo.minimizado and self.sm.width > 2):
+            try:
+                foto = self.sm.current_screen.export_as_image().texture
+            except Exception as e:
+                print("[tela] sem a foto da tela que sai:", e)
         self.sm.current = nome
+        if foto is not None:
+            self._dissolver(foto, SAIDA_TELA_S)
         if mudou and nome != "mapa":  # o mapa entra direto (é pesado; e é para onde se volta com pressa)
             tela = self.sm.get_screen(nome)
             if tela.children:

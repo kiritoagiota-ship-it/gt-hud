@@ -89,9 +89,10 @@ ADIANTAR_POR_VEZ = 14      # pedaços vizinhos/de outros zooms pedidos "para dep
 # animações da prévia da rota (pedido do dono, 07/10/2026: escolher um destino
 # dava uma travada e o caminho aparecia seco)
 RADAR_VOLTA_S = 1.7        # cada onda do "procurando caminho" leva isso
+ZOOM_TOQUE_S = 0.28        # o zoom do toque duplo desliza por esse tempo
 FESTA_S = 3.2              # ondas verdes no destino ao chegar
 RADAR_MAX_S = 40.0         # sem resposta nesse tempo, o radar se apaga sozinho
-PINO_CAI_S = 0.5           # o pino do destino caindo
+PINO_CAI_S = 0.85          # o pino do destino caindo
 BRILHO_S = 0.7             # clarão da rota quando termina de se desenhar
 PONTOS_REVELAR = 160       # a rota se desenhando usa no máximo tantos pontos (leve a cada quadro)
 MAX_TEXTURAS_NOVAS = 8     # por escolha de nomes, no máximo tantos nomes novos desenhados
@@ -230,7 +231,9 @@ class MapaHUD(CamadasDoMapa, Widget):
         self._festa = None                  # chegada: (hora, (lat, lon)) das ondas verdes no destino
         self._destaque = None               # alerta chegando: ((lat, lon), cor) -> placa maior e anel pulsando
         self._salto = None                  # ícone tocado dando um pulo: (hora, (lat, lon))
-        self._onda_toque = None             # ... e a onda que sai dele: (hora, (x, y) locais)
+        self._onda_toque = None             # ... e a onda que sai dele: (hora, (x, y) locais[, cor])
+        self._zoom_toque = None             # toque duplo: o zoom deslizando até o nível seguinte
+        self._dest_pousou = True            # o pino que está caindo já tocou o chão?
         self._curva = []                    # a seta da próxima curva, desenhada no chão: [(lat, lon)]
         self._rastro = collections.deque(maxlen=RASTRO_PONTOS)   # por onde a seta acabou de passar (locais)
         self._dest_t0 = None                # pino do destino caindo
@@ -463,6 +466,7 @@ class MapaHUD(CamadasDoMapa, Widget):
         """cair=True: o pino desce e \"quica\" no lugar (destino recém-escolhido)."""
         self._destino = lat_lon
         self._dest_t0 = time.monotonic() if (cair and lat_lon) else None
+        self._dest_pousou = self._dest_t0 is None
         if self._dest_t0 is not None:
             self._ligar_animacao()
         self._desenhar_tela()
@@ -575,6 +579,7 @@ class MapaHUD(CamadasDoMapa, Widget):
         self._aplicar()
 
     def mudar_zoom(self, delta, animado=True):
+        self._zoom_toque = None
         alvo = max(ZOOM_MIN, min(ZOOM_MAX, (self._alvo_zoom or self.zoom) + delta))
         if animado:
             self._alvo_zoom = alvo
@@ -1222,10 +1227,22 @@ class MapaHUD(CamadasDoMapa, Widget):
                 f = (agora - self._dest_t0) / PINO_CAI_S
                 if f >= 1.0:
                     self._dest_t0 = None
-                else:   # cai de cima e passa um pouco do tamanho antes de assentar
-                    sobe = dp(70) * (1.0 - min(1.0, f / 0.55)) ** 2
-                    g = f - 1.0
-                    cresce = max(0.05, 1.0 + 2.6 * g * g * g + 1.6 * g * g)
+                else:
+                    # cai de cima acelerando, bate no chão e quica duas vezes, cada vez menos
+                    # (pedido do dono, 09/10/2026); ao bater, uma onda sai do ponto
+                    if f < 0.42:
+                        u = f / 0.42
+                        sobe, cresce = dp(130) * (1.0 - u * u), 0.55 + 0.45 * u
+                    else:
+                        if not self._dest_pousou:
+                            self._dest_pousou = True
+                            self._onda_toque = (agora, self._local(*self._destino), tema.LARANJA[:3])
+                        if f < 0.74:
+                            u = (f - 0.42) / 0.32
+                            sobe = dp(26) * 4.0 * u * (1.0 - u)
+                        else:
+                            u = (f - 0.74) / 0.26
+                            sobe = dp(8) * 4.0 * u * (1.0 - u)
             for e, (w, h) in zip(self._e_dest, self._tam_dest):
                 e.size = (w * cresce, h * cresce)
                 e.pos = (x - w * cresce / 2.0, y + sobe - h * cresce / 2.0)
@@ -1274,7 +1291,7 @@ class MapaHUD(CamadasDoMapa, Widget):
             else:
                 ox, oy = self._local_para_tela(*self._onda_toque[1])
                 self._l_onda_toque.circle = (ox, oy, dp(12) + f * dp(30))
-                self._c_onda_toque.rgb = tema.ROXO[:3]
+                self._c_onda_toque.rgb = self._onda_toque[2] if len(self._onda_toque) > 2 else tema.ROXO[:3]
                 self._c_onda_toque.a = 0.85 * (1.0 - f) ** 1.3
                 quais.append(self._m_onda_toque)
         if self._destaque is not None:
@@ -1447,7 +1464,16 @@ class MapaHUD(CamadasDoMapa, Widget):
                 mexeu = True
             else:
                 self._velocidade = (0.0, 0.0)
-            if self._alvo_zoom is not None and self._voo is None:
+            if self._zoom_toque is not None:
+                zt = self._zoom_toque
+                f = min(1.0, (agora - zt["t0"]) / ZOOM_TOQUE_S)
+                self._zoom_no_ponto(zt["z0"] + (zt["z1"] - zt["z0"]) * (1.0 - (1.0 - f) ** 3), *zt["onde"])
+                self._em_lote = True   # (_zoom_no_ponto solta o lote; o _aplicar é um só, no fim)
+                if f >= 1.0:
+                    self._zoom_toque = None
+                    self._t_rotulos = 0.0   # chegou: os nomes da vista nova
+                mexeu = True
+            elif self._alvo_zoom is not None and self._voo is None:
                 dz = self._alvo_zoom - self.zoom
                 if abs(dz) < 0.005:
                     self.zoom = self._alvo_zoom
@@ -1485,6 +1511,7 @@ class MapaHUD(CamadasDoMapa, Widget):
 
     def _sair_do_seguir(self):
         self._cancelar_voo()
+        self._zoom_toque = None
         if self.seguindo:
             self.seguindo = False
         if not self._navegando:
@@ -1504,9 +1531,14 @@ class MapaHUD(CamadasDoMapa, Widget):
             return True
         self._velocidade = (0.0, 0.0)
         if touch.is_double_tap:
+            # dois toques: aproxima um nível NAQUELE ponto, deslizando (antes pulava de uma
+            # vez só), e uma onda marca onde foi (pedido do dono, 09/10/2026)
             self._alvo_zoom = None
-            self._zoom_no_ponto(self.zoom + 1.0, *touch.pos)
-            self._aplicar()
+            de = self._zoom_toque["z1"] if self._zoom_toque else self.zoom   # (toques seguidos somam)
+            self._zoom_toque = {"t0": time.monotonic(), "z0": self.zoom,
+                                "z1": max(ZOOM_MIN, min(ZOOM_MAX, de + 1.0)), "onde": tuple(touch.pos)}
+            self._onda_toque = (time.monotonic(), self._tela_para_local(*touch.pos), tema.CIANO[:3])
+            self._ligar_animacao()
             return True
         touch.grab(self)
         self._toques.append(touch)
@@ -1542,7 +1574,7 @@ class MapaHUD(CamadasDoMapa, Widget):
             antes = math.hypot(touch.px - outro.x, touch.py - outro.y)
             agora = math.hypot(touch.x - outro.x, touch.y - outro.y)
             if antes > dp(10) and agora > dp(10):
-                self._alvo_zoom = None
+                self._alvo_zoom = self._zoom_toque = None
                 meio = ((touch.x + outro.x) / 2.0, (touch.y + outro.y) / 2.0)
                 self._zoom_no_ponto(self.zoom + math.log2(agora / antes), *meio)
                 self._aplicar()

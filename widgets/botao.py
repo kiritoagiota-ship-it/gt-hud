@@ -14,7 +14,7 @@ toque mexe em duas cores já criadas (nada é redesenhado por quadro).
 """
 from kivy.animation import Animation
 from kivy.app import App
-from kivy.graphics import Color, Line, Mesh
+from kivy.graphics import Color, Line, Mesh, PopMatrix, PushMatrix, Scale, Translate
 from kivy.graphics.texture import Texture
 from kivy.metrics import dp
 from kivy.properties import BooleanProperty, ListProperty, NumericProperty, StringProperty
@@ -27,6 +27,7 @@ from widgets import icones
 _degrade = {}
 VIBRA_TOQUE_MS = 12
 VIBRA_TOQUE_FORCA = 70
+AFUNDA = 0.055            # quanto o botão encolhe apertado (5,5%)
 
 
 def degrade(base=None):
@@ -69,6 +70,22 @@ def cantos(pts, c):
             [cx, cy + e, cx, cy, dx, dy, dx - e, dy]]
 
 
+def mexer(w):
+    """(deslocamento, escala) do desenho INTEIRO do widget `w` (o fundo, o texto, os
+    filhos): para animar sem mexer na posição de verdade (o toque e o layout seguem no
+    lugar). Postos uma vez só, em volta de tudo que o widget desenha."""
+    par = getattr(w, "_mexer", None)
+    if par is None:
+        w.canvas.before, w.canvas.after   # (os dois grupos precisam existir antes: entram no meio)
+        par = w._mexer = (Translate(0, 0), Scale(1, 1, 1))
+        w.canvas.insert(0, PushMatrix())
+        w.canvas.insert(1, par[0])
+        w.canvas.insert(2, par[1])
+        w.canvas.insert(len(w.canvas.children), PopMatrix())   # (no fim MESMO: add() poria antes do canvas.after)
+    par[1].origin = w.center
+    return par
+
+
 def vibrar_toque():
     android_utils.vibrar([0, VIBRA_TOQUE_MS], [0, VIBRA_TOQUE_FORCA])
 
@@ -78,6 +95,7 @@ class BotaoHUD(Button):
     cor = ListProperty(tema.CIANO)
     opaco = BooleanProperty(False)  # por cima do mapa: fundo escuro, senão some na rua clara
     brilho = NumericProperty(0.0)   # 1 = recém-tocado; cai a 0 depois de soltar
+    aperto = NumericProperty(0.0)   # 1 = apertado (o botão encolhe um pouco); negativo = estufado
     icone = StringProperty("")      # desenho de widgets/icones.py (o texto, se houver, vai embaixo)
 
     def __init__(self, **kw):
@@ -93,7 +111,8 @@ class BotaoHUD(Button):
         self._anim = None
         self.bind(pos=self._desenhar, size=self._desenhar, destaque=self._desenhar, cor=self._desenhar,
                   opaco=self._desenhar, disabled=self._desenhar, state=self._ao_tocar,
-                  brilho=self._pintar_brilho, icone=self._desenhar, text=self._desenhar)
+                  brilho=self._pintar_brilho, icone=self._desenhar, text=self._desenhar,
+                  aperto=self._apertar)
         self._desenhar()
 
     def _ao_tocar(self, *a):
@@ -102,13 +121,28 @@ class BotaoHUD(Button):
             self._anim = None
         if self.state == "down":
             self.brilho = 1.0
+            self.aperto = 1.0   # afunda na hora (pedido do dono, 09/10/2026) e volta com um quique ao soltar
             vibrar_toque()
             tocador = getattr(App.get_running_app(), "sons", None)
             if tocador is not None:
                 tocador.tocar("toque")
         else:
-            self._anim = Animation(brilho=0.0, d=0.28, t="out_quad")
+            self._anim = (Animation(brilho=0.0, d=0.28, t="out_quad")
+                          & Animation(aperto=0.0, d=0.24, t="out_back"))
             self._anim.start(self)
+
+    def _apertar(self, *a):
+        escala = mexer(self)[1]
+        escala.x = escala.y = 1.0 - AFUNDA * self.aperto
+
+    def pulsar(self):
+        """Acende e dá um pulinho sem ser tocado: confirma que algo foi anotado."""
+        if self._anim is not None:
+            self._anim.cancel(self)
+        self.brilho, self.aperto = 1.0, -2.2
+        self._anim = (Animation(brilho=0.0, d=0.6, t="out_quad")
+                      & Animation(aperto=0.0, d=0.42, t="out_back"))
+        self._anim.start(self)
 
     def _pintar_brilho(self, *a):
         if self._cor_toque is None:

@@ -11,7 +11,10 @@ from kivy.uix.label import Label
 from kivy.uix.widget import Widget
 
 import tema
-from widgets.botao import BotaoHUD, _poligono, cantos, degrade, malha_degrade, vibrar_toque
+from widgets.botao import BotaoHUD, _poligono, cantos, degrade, malha_degrade, mexer, vibrar_toque
+
+FECHA_JANELA_S = 0.12     # a janela encolhe e some ao fechar (0 = fecha de estalo, como antes)
+AVISO_SAI_S = 0.30        # o aviso curto se apaga em vez de sumir de estalo
 
 
 def soltar(*widgets):
@@ -196,10 +199,31 @@ class Aviso(Texto):
 
     def _mudou(self, *a):
         Animation.cancel_all(self, "opacity")
-        if self.text:
-            self.opacity = 0.0
-            Animation(opacity=1.0, d=0.18, t="out_quad").start(self)
+        if self.text:   # entra subindo um pouco enquanto aparece
+            sobe = mexer(self)[0]
+            Animation.cancel_all(sobe)
+            self.opacity, sobe.y = 0.0, -dp(14)
+            Animation(opacity=1.0, d=0.2, t="out_quad").start(self)
+            Animation(y=0.0, d=0.26, t="out_cubic").start(sobe)
         self._d()
+
+    def firmar(self):
+        """Vai mostrar de novo (talvez o mesmo texto): desiste de sair, se estava saindo."""
+        Animation.cancel_all(self, "opacity")
+        if self.text:
+            self.opacity = 1.0
+
+    def sair(self):
+        """Some se apagando (e só então o texto sai)."""
+        if not self.text:
+            return
+        Animation.cancel_all(self, "opacity")
+        if AVISO_SAI_S <= 0:
+            self.text = ""
+            return
+        saida = Animation(opacity=0.0, d=AVISO_SAI_S, t="in_quad")
+        saida.bind(on_complete=lambda *a: setattr(self, "text", ""))
+        saida.start(self)
 
     def _d(self, *a):
         self.canvas.before.clear()
@@ -253,6 +277,24 @@ def abrir_janela(janela):
         for traco in cantos(pts, c):
             borda.add(Line(points=traco, width=dp(2.4), cap="square", joint="miter"))
     janela.bind(pos=desenhar, size=desenhar)
+    # ... e fecha encolhendo e se apagando (pedido do dono, 09/10/2026), em vez de sumir de estalo
+    fechar_de_vez = janela.dismiss
+    fechando = []
+
+    def fechar(*a, **kw):
+        if fechando:
+            return
+        if FECHA_JANELA_S <= 0:
+            fechar_de_vez(*a, **kw)
+            return
+        fechando.append(True)
+        Animation.cancel_all(janela, "opacity")
+        Animation.cancel_all(escala)
+        saida = Animation(opacity=0.0, d=FECHA_JANELA_S, t="in_quad")
+        saida.bind(on_complete=lambda *x: fechar_de_vez(animation=False))
+        saida.start(janela)
+        Animation(x=0.9, y=0.9, d=FECHA_JANELA_S, t="in_quad").start(escala)
+    janela.dismiss = fechar
     janela.opacity = 0.0
     janela.open()
     desenhar()
