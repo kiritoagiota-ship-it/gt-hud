@@ -308,6 +308,7 @@ class SegundoPlano:
         self._ler_tile = None           # função que lê um arquivo do mapa (z, x, y)
         self._ligado = False            # o serviço Android está no ar
         self.leituras_no_fundo = 0      # (diagnóstico e testes)
+        self._notificado = None         # o que a notificação está mostrando
 
     # --- rota ou gravação começou / acabou -------------------------------------------
     def ativo(self):
@@ -381,9 +382,13 @@ class SegundoPlano:
             return
         self._t_aviso = agora
         titulo, texto, l1, l2 = textos(self.app)
-        self.android.estilo(tema.claro(), feito(self.app))
-        self.android.botao_encerrar(self._so_bateria())
-        self.android.notificar(titulo, texto)
+        # (só reescreve quando MUDA: parado, eram os mesmos dizeres a cada 2 s, à toa)
+        agora_mostra = (titulo, texto, feito(self.app), self._so_bateria(), tema.modo)
+        if forcar or agora_mostra != self._notificado:
+            self._notificado = agora_mostra
+            self.android.estilo(tema.claro(), agora_mostra[2])
+            self.android.botao_encerrar(agora_mostra[3])
+            self.android.notificar(titulo, texto)
         if self.minimizado and not self._painel_a_vista:
             self.android.atualizar_bolha(l1, l2)
 

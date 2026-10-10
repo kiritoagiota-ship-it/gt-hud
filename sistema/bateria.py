@@ -18,6 +18,7 @@ BARRAS = 5
 GRAVAR_A_CADA_M = 150.0     # de quanto em quanto grava no arquivo (não a cada leitura do GPS)
 CARGA_MINIMA_M = 300.0      # carga com menos que isso não entra no histórico (toque sem querer)
 HISTORICO_MAX = 40
+MEDIA_ABSURDA_KMH = 70.0    # média acima disso não é da moto: é conta estragada, não mostra
 CARGAS_NA_MEDIA = 5         # a autonomia estimada usa as últimas cargas
 
 
@@ -39,6 +40,7 @@ class Bateria:
         if self.carga is not None:
             self.carga["quedas"] = list(self.carga.get("quedas") or [])
             self._gravado_m = self.carga.get("m", 0.0)
+            self.carga.setdefault("m_gps", self.carga.get("m", 0.0))
 
     # --- leitura --------------------------------------------------------
     @property
@@ -56,9 +58,12 @@ class Bateria:
 
     @property
     def vel_media_kmh(self):
+        """Só com os metros que o GPS CONTOU (m_gps): os km lançados à mão em "Esqueci de
+        marcar uma" entram na distância sem tempo, e a média saía até 3x maior (1.0.72)."""
         if not self.carga or self.carga.get("mov_s", 0) <= 0:
             return 0.0
-        return self.carga["m"] / self.carga["mov_s"] * 3.6
+        media = self.carga.get("m_gps", self.carga["m"]) / self.carga["mov_s"] * 3.6
+        return media if media <= MEDIA_ABSURDA_KMH else 0.0   # (carga marcada na 1.0.72: não dá para saber)
 
     def km_por_barra(self):
         """Quantos metros cada barrinha que já caiu durou: [1ª, 2ª, ...]."""
@@ -137,7 +142,7 @@ class Bateria:
                            "quedas": [round(q, 1) for q in self.carga["quedas"]],
                            "media": round(self.vel_media_kmh, 1)})
             self.ajustes["bateria_cargas"] = cargas[-HISTORICO_MAX:]
-        self.carga = {"desde": self._relogio(), "m": 0.0, "mov_s": 0.0, "quedas": []}
+        self.carga = {"desde": self._relogio(), "m": 0.0, "m_gps": 0.0, "mov_s": 0.0, "quedas": []}
         self._ultimo = None
         self._gravar()
 
@@ -185,7 +190,9 @@ class Bateria:
         d = haversine_m(anterior[0], anterior[1], lat, lon)
         if d / dt * 3.6 >= VELOCIDADE_IMPOSSIVEL_KMH:
             return
-        self.carga["m"] += min(d, vel_kmh / 3.6 * dt * 1.5 + 2.0)
+        trecho = min(d, vel_kmh / 3.6 * dt * 1.5 + 2.0)
+        self.carga["m"] += trecho
+        self.carga["m_gps"] = self.carga.get("m_gps", 0.0) + trecho
         self.carga["mov_s"] = self.carga.get("mov_s", 0.0) + dt
         if self.carga["m"] - self._gravado_m >= GRAVAR_A_CADA_M:
             self._gravar()

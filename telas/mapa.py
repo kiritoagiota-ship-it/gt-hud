@@ -42,6 +42,7 @@ from widgets.perfil import PerfilAltimetria
 from widgets.velocimetro import Velocimetro
 
 VELO_A_CADA_S = 0.2    # o velocímetro pega a velocidade prevista 5x por segundo
+PULSA_ACIMA_KMH = 4.0  # ... e só andando
 PULSA_A_M = 70.0       # a faixa da curva pulsa nos últimos metros antes de virar
 SOBE_FOLHA_S = 0.45    # abertura: a folha de baixo e o velocímetro sobem nesse tempo...
 ESPERA_FOLHA_S = 0.25  # ... depois de o mapa ter esse tempo para aparecer
@@ -1297,7 +1298,10 @@ class TelaMapa(Screen):
             self.lbl_dist.text = fmt_dist_nav(e["dist_manobra"])
             self.lbl_instr.text = texto_manobra(m["acao"], m.get("saida"))
             self.lbl_rua.text = m["ruas"] or ""
-        self._pulsar_curva(m is not None and not e["fora_da_rota"] and e["dist_manobra"] <= PULSA_A_M)
+        # (só ANDANDO: parado no semáforo perto da esquina, ela piscava sem parar)
+        andando = App.get_running_app().filtro.valor >= PULSA_ACIMA_KMH
+        self._pulsar_curva(m is not None and not e["fora_da_rota"] and andando
+                           and e["dist_manobra"] <= PULSA_A_M)
         if e["fora_da_rota"]:
             app = App.get_running_app()
             self.lbl_instr.text = "Recalculando a rota..." if app.recalculando else "Fora da rota"

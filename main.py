@@ -185,6 +185,9 @@ class GTHudApp(App):
         self.sm = self._montar_telas("boot")
         Clock.schedule_interval(lambda dt: self.vigiar_gps(), 2.0)
         Clock.schedule_interval(self.conferir_tema, 60.0)
+        # "Encerrar" na notificação com o app ABERTO: fecha em até 1 s (a 1.0.71 só conferia a
+        # cada leitura do GPS: sem sinal, o app fechava sozinho minutos depois)
+        Clock.schedule_interval(lambda dt: self.fundo.conferir_fechar(), 1.0)
         self.fundo = SegundoPlano(self)
         return self.sm
 
@@ -395,6 +398,14 @@ class GTHudApp(App):
         "Encerrar" da notificação): pode rodar na thread de segundo plano."""
         self.bateria.guardar()
         self._guardar_posicao()
+        try:   # a viagem que estava sendo gravada (a 1.0.71 perdia: fechava sem salvar)
+            nome = (self.destino or {}).get("nome", "") if self.nav is not None else ""
+            resultado = self.viagem.finalizar()
+            if resultado and resultado[0]["distancia_m"] >= DISTANCIA_MINIMA_M:
+                resultado[0]["destino"] = nome
+                self.banco.salvar_viagem(*resultado)
+        except Exception as e:
+            print("[viagem] ao fechar:", e)
         self.gps.parar()
 
     def on_stop(self):
