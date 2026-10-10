@@ -149,6 +149,19 @@ class Bateria:
         self._gravar()
         return True
 
+    def barra_esquecida(self, durou_m):
+        """Uma barrinha caiu e o dono esqueceu de marcar na hora: ele informa quantos
+        metros ela DUROU (pedido dele, 09/10/2026: "mais um pico deu 11 km"). Conta a
+        partir da barrinha anterior. Se passar do que o app contou (ele andou com o app
+        fechado), vale o número dele: a contagem da carga sobe até lá."""
+        if not self.carga or self.barras <= 0 or not 0 < durou_m < 200000:
+            return False
+        caiu_em = (self.carga["quedas"][-1] if self.carga["quedas"] else 0.0) + durou_m
+        self.carga["quedas"].append(caiu_em)
+        self.carga["m"] = max(self.carga["m"], caiu_em)
+        self._gravar()
+        return True
+
     def desfazer_barra(self):
         if not self.carga or not self.carga["quedas"]:
             return False

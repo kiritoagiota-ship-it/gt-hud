@@ -127,7 +127,8 @@ def rodar(dt):
     checar(t.btn_bateria.text == "4/5  12,4 km", "botão: %r" % t.btn_bateria.text)
     t._abrir_bateria()
     rotulos = [b.text for b in janela().botoes]
-    checar(rotulos == ["Caiu uma barrinha", "Carreguei 100%", "Desfazer a última barrinha", "Fechar"],
+    checar(rotulos == ["Caiu uma barrinha", "Esqueci de marcar uma", "Carreguei 100%",
+                       "Desfazer a última barrinha", "Fechar"],
            "janela com a carga contando: %s" % rotulos)
     Clock.schedule_once(lambda dt: Window.screenshot(name=os.path.join(FOTOS, "b1_contando.png")), 0.6)
     Clock.schedule_once(fechar, 0.9)

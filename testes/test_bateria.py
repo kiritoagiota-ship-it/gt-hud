@@ -74,6 +74,20 @@ class TesteBateria(unittest.TestCase):
         self.assertEqual(self.bat.barras, 0)                      # nunca passa de 5 quedas
         self.assertFalse(self.bat.caiu_barra())
 
+    def test_barrinha_esquecida_entra_pelos_km_que_durou(self):
+        self.bat.carregou()
+        t, lat = andar(self.bat, 14000)
+        self.assertTrue(self.bat.barra_esquecida(11000))          # a 1ª durou 11 km (ele já andou 14)
+        self.assertEqual(self.bat.barras, 4)
+        self.assertAlmostEqual(self.bat.km_por_barra()[0], 11000)
+        self.assertAlmostEqual(self.bat.metros, 14000, delta=60)  # a contagem não muda
+        self.assertTrue(self.bat.barra_esquecida(9000))           # a 2ª caiu aos 20 km: o app contou menos
+        self.assertAlmostEqual(self.bat.metros, 20000)            # (andou com ele fechado): vale o número dele
+        self.assertEqual([round(d) for d in self.bat.km_por_barra()], [11000, 9000])
+        self.assertFalse(self.bat.barra_esquecida(0))
+        self.assertFalse(self.bat.barra_esquecida(-5))
+        self.assertEqual(self.bat.barras, 3)
+
     def test_recarregar_guarda_a_carga_e_ensina_a_autonomia(self):
         self.assertIsNone(self.bat.autonomia_m())
         self.bat.carregou()

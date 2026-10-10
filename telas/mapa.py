@@ -1092,6 +1092,7 @@ class TelaMapa(Screen):
         opcoes = []
         if bat.ativa and bat.barras > 0:
             opcoes.append(("Caiu uma barrinha", self._caiu_barra))
+            opcoes.append(("Esqueci de marcar uma", self._barra_esquecida))
         opcoes.append(("Carreguei 100%", self._carreguei))
         if bat.ativa and bat.carga["quedas"]:
             opcoes.append(("Desfazer a última barrinha", self._desfazer_barra))
@@ -1109,6 +1110,22 @@ class TelaMapa(Screen):
         bat = App.get_running_app().bateria
         if bat.caiu_barra():
             self._atualizar_bateria("Anotado: %d de %d barrinhas" % (bat.barras, 5))
+
+    def _barra_esquecida(self):
+        """A barrinha caiu lá atrás e ele não marcou: pergunta quantos km ela durou."""
+        bat = App.get_running_app().bateria
+
+        def anotar(texto):
+            try:
+                km = float(texto.lower().replace("km", "").replace(",", ".").strip())
+            except ValueError:
+                km = 0.0
+            if bat.barra_esquecida(km * 1000.0):
+                self._atualizar_bateria("Anotado: %d de %d barrinhas" % (bat.barras, 5))
+            else:
+                self.mensagem("Não entendi os km. Ex.: 11 ou 11,5", tema.LARANJA, 5)
+        pedir_nome(anotar, titulo="Quantos km essa barrinha durou?", botao="Anotar",
+                   dica="Ex.: 11 ou 11,5", limite=8)
 
     def _desfazer_barra(self):
         bat = App.get_running_app().bateria
