@@ -138,9 +138,14 @@ class TesteSegundoPlano(unittest.TestCase):
         abre o app, minimiza e põe no bolso), só com a notificação."""
         class Bateria:
             ativa, metros, barras = True, 12400.0, 4
+
+            def autonomia_m(self):
+                return 41000.0
         app, android = AppFalso(), AndroidFalso()
         app.nav, app.bateria = None, Bateria()
-        self.assertEqual(textos(app)[0], "Contando os km da carga  ·  12,4 km")
+        self.assertEqual(textos(app)[:2], ("Bateria 4/5  ·  12,4 km nesta carga",
+                                           "Carga inteira pelo seu uso: uns 41 km"))
+        self.assertEqual(segundo_plano.feito(app), 80)           # a barra da notificação = as barrinhas
         fundo = SegundoPlano(app, android)
         fundo.ao_pausar()                                        # serviço ainda desligado: o Android não
         self.assertFalse(fundo.minimizado)                       # deixa ligar com o app saindo da tela
@@ -153,6 +158,14 @@ class TesteSegundoPlano(unittest.TestCase):
         self.assertNotIn("mostrar_painel", android.nomes())
         app.gps.leituras.append({"lat": -16.68, "lon": -49.25, "speed": 10.0})
         self.assertTrue(esperar(lambda: app.processadas))        # a leitura chegou com o app minimizado
+        self.assertIn(("botao_encerrar", True), android.chamadas)   # sem rota: botão "Encerrar"
+        # o dono tocou em "Encerrar" (ou tirou o app dos recentes): guarda e encerra de vez
+        guardou = []
+        app.guardar_tudo_ao_fechar = lambda: guardou.append(True)
+        android.fechou = lambda: True
+        self.assertTrue(esperar(lambda: "encerrar_processo" in android.nomes()))
+        self.assertEqual(guardou, [True])
+        self.assertIn("parar", android.nomes())
         fundo.ao_voltar()
         Bateria.ativa = False                                    # nunca marcou carga: como antes, nada
         android2 = AndroidFalso()

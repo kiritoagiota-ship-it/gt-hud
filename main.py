@@ -390,6 +390,13 @@ class GTHudApp(App):
         self.sm.get_screen("mapa").mapa.ao_voltar()
         self.atualizar_transito_do_mapa()
 
+    def guardar_tudo_ao_fechar(self):
+        """O que não pode se perder quando o app é encerrado por fora (recentes, botão
+        "Encerrar" da notificação): pode rodar na thread de segundo plano."""
+        self.bateria.guardar()
+        self._guardar_posicao()
+        self.gps.parar()
+
     def on_stop(self):
         self._guardar_posicao()
         self.bateria.guardar()
@@ -626,6 +633,7 @@ class GTHudApp(App):
         vel = self.processar_leitura(d)
         self._avisar(vel)
         self.fundo.atualizar()  # (só faz algo com rota ativa ou viagem gravando)
+        self.fundo.conferir_fechar()   # tocou em "Encerrar" na notificação com o app aberto
 
     def processar_leitura(self, d):
         """Tudo da leitura que NÃO é tela (filtro, viagem, alerta, navegação).

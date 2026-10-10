@@ -45,8 +45,10 @@ def textos(app):
             bat = getattr(app, "bateria", None)
             if bat is not None and bat.ativa:   # só contando os km da carga da moto (sem rota)
                 km = fmt_dist_nav(bat.metros)
-                return ("Contando os km da carga  ·  %s" % km,
-                        "%d de 5 barrinhas. Para parar, feche o GT-HUD." % bat.barras, km, "")
+                total = bat.autonomia_m()
+                return ("Bateria %d/5  ·  %s nesta carga" % (bat.barras, km),
+                        "Carga inteira pelo seu uso: uns %d km" % round(total / 1000.0) if total
+                        else "Aprendendo sua autonomia: avise quando cair uma barrinha.", km, "")
             return "GT-HUD", "", "", ""
         # só gravando a viagem (sem rota): distância e tempo
         dist, tempo = fmt_dist(v.distancia_m), fmt_tempo(v.tempo_total_s)
@@ -135,8 +137,12 @@ def dados_do_painel(app, ancora=None):
 
 
 def feito(app):
-    """Quanto da rota já foi, de 0 a 100 (-1 sem rota)."""
+    """Quanto da rota já foi, de 0 a 100 (-1 sem rota). Sem rota e contando a carga da
+    moto: as barrinhas que restam (a barra da notificação vira a bateria)."""
     nav = app.nav
+    bat = getattr(app, "bateria", None)
+    if nav is None and bat is not None and bat.ativa:
+        return int(bat.barras * 20)
     rota = getattr(nav, "rota", None)
     if rota is None or not getattr(rota, "total_m", 0):
         return -1
@@ -187,6 +193,26 @@ class _Android:
             # (antes do estilo: é ele que repinta a bolha, já com as cores do Monarca)
             self._chamar(self.servico.temaMonarca, tema.monarca())
             self._chamar(self.servico.estilo, bool(claro), int(feito))
+
+    def botao_encerrar(self, ligado):
+        """O botão "Encerrar" na notificação (só contando a bateria, sem rota)."""
+        if self.servico is not None:
+            self._chamar(self.servico.botaoEncerrar, bool(ligado))
+
+    def fechou(self):
+        """O dono tirou o app dos recentes ou tocou em "Encerrar" na notificação?"""
+        if self.servico is None:
+            return False
+        return bool(self._chamar(self.servico.fechou))
+
+    def encerrar_processo(self):
+        """Fecha o app de vez (o processo): o que fazer depois de fechou()."""
+        try:
+            from jnius import autoclass
+            processo = autoclass("android.os.Process")
+            processo.killProcess(processo.myPid())
+        except Exception as e:
+            print("[fundo] encerrar o processo:", e)
 
     def notificar(self, titulo, texto):
         if self.servico is not None:
@@ -325,6 +351,24 @@ class SegundoPlano:
     def comecou(self):
         self.sincronizar()
 
+    def conferir_fechar(self):
+        """O dono fechou o app pelos recentes, ou tocou em "Encerrar" na notificação: guarda
+        o que falta e encerra o app DE VEZ. (Antes o serviço parava, mas o app seguia vivo
+        por trás, com o GPS ligado, pondo a notificação de volta.) True se encerrou."""
+        if not self._ligado or not self.android.fechou():
+            return False
+        print("[fundo] o dono fechou o app: encerrando")
+        self._ligado = False
+        self._parar.set()
+        for passo in ("guardar_tudo_ao_fechar",):
+            try:
+                getattr(self.app, passo)()
+            except Exception as e:
+                print("[fundo] ao fechar:", e)
+        self.android.parar()
+        self.android.encerrar_processo()
+        return True
+
     def terminou(self):
         """Desliga de vez (app fechando)."""
         self._ligado = False
@@ -338,6 +382,7 @@ class SegundoPlano:
         self._t_aviso = agora
         titulo, texto, l1, l2 = textos(self.app)
         self.android.estilo(tema.claro(), feito(self.app))
+        self.android.botao_encerrar(self._so_bateria())
         self.android.notificar(titulo, texto)
         if self.minimizado and not self._painel_a_vista:
             self.android.atualizar_bolha(l1, l2)
@@ -498,6 +543,8 @@ class SegundoPlano:
                 # um erro numa volta não pode acabar com a navegação em segundo
                 # plano (antes a thread morria e a rota parava até reabrir o app)
                 try:
+                    if self.conferir_fechar():
+                        return
                     with self._trava:
                         prontas, self._fila = self._fila, []
                     for fn, valor in prontas:

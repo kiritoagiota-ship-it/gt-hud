@@ -29,10 +29,20 @@ public class ServicoNavegacao extends Service {
     private static volatile String texto = "";
     private static volatile int progresso = -1;       // 0..100 da rota; -1 = sem barra
     private static volatile boolean claro = false;    // tema do app
+    private static final String ACAO_ENCERRAR = "org.kirito.gthud.ENCERRAR";
+    // o Python ligou o serviço e ainda não desligou: só assim a notificação pode ser (re)posta.
+    // (Até a 1.0.70, fechar o app pelos recentes parava o serviço, mas o Python seguia vivo e
+    // punha a notificação de volta a cada 2 s: ela "não sumia".)
+    private static volatile boolean vivo = false;
+    // o dono fechou: tirou o app dos recentes ou tocou em "Encerrar" na notificação
+    private static volatile boolean pediuFechar = false;
+    private static volatile boolean comBotao = false;  // mostra o botão "Encerrar"
     private PowerManager.WakeLock acordado;
 
     // --- chamados pelo Python ---------------------------------------------------
     public static void iniciar(Context c) {
+        vivo = true;
+        pediuFechar = false;
         Intent i = new Intent(c, ServicoNavegacao.class);
         if (Build.VERSION.SDK_INT >= 26) {
             c.startForegroundService(i);
@@ -42,7 +52,28 @@ public class ServicoNavegacao extends Service {
     }
 
     public static void parar(Context c) {
+        vivo = false;
         c.stopService(new Intent(c, ServicoNavegacao.class));
+        tirarNotificacao(c);
+    }
+
+    /** O dono fechou (recentes ou botão "Encerrar")? O Python pergunta e encerra o app. */
+    public static boolean fechou() {
+        return pediuFechar;
+    }
+
+    /** Liga/desliga o botão "Encerrar" da notificação (vale na próxima atualização). */
+    public static void botaoEncerrar(boolean ligado) {
+        comBotao = ligado;
+    }
+
+    private static void tirarNotificacao(Context c) {
+        try {
+            NotificationManager nm = (NotificationManager) c.getSystemService(Context.NOTIFICATION_SERVICE);
+            nm.cancel(ID);
+        } catch (Exception e) {
+            // nada: sem a notificação não há o que tirar
+        }
     }
 
     // tema Monarca do app (preto, roxo e azul): vale quando o tema não é o claro
@@ -64,6 +95,9 @@ public class ServicoNavegacao extends Service {
     public static void atualizar(Context c, String novoTitulo, String novoTexto) {
         titulo = novoTitulo;
         texto = novoTexto;
+        if (!vivo) {
+            return;   // serviço parado: nada de pôr a notificação de volta
+        }
         try {
             NotificationManager nm = (NotificationManager) c.getSystemService(Context.NOTIFICATION_SERVICE);
             nm.notify(ID, montar(c));
@@ -88,6 +122,14 @@ public class ServicoNavegacao extends Service {
 
     @Override
     public int onStartCommand(Intent intent, int flags, int startId) {
+        if (intent != null && ACAO_ENCERRAR.equals(intent.getAction())) {
+            // botão "Encerrar" da notificação: para tudo; o Python vê fechou() e fecha o app
+            pediuFechar = true;
+            vivo = false;
+            stopSelf();
+            tirarNotificacao(this);
+            return START_NOT_STICKY;
+        }
         try {
             Notification n = montar(this);
             if (Build.VERSION.SDK_INT >= 29) {
@@ -104,13 +146,17 @@ public class ServicoNavegacao extends Service {
 
     @Override
     public void onTaskRemoved(Intent rootIntent) {
-        // fechou o app pela lista de recentes: some com a notificação
+        // fechou o app pela lista de recentes: some com a notificação (e o Python encerra o app)
+        pediuFechar = true;
+        vivo = false;
         stopSelf();
+        tirarNotificacao(this);
         super.onTaskRemoved(rootIntent);
     }
 
     @Override
     public void onDestroy() {
+        vivo = false;
         if (acordado != null && acordado.isHeld()) {
             acordado.release();
         }
@@ -161,6 +207,12 @@ public class ServicoNavegacao extends Service {
                 .setCategory(Notification.CATEGORY_NAVIGATION)
                 .setContentIntent(abrirApp(c));
         b.setColor(claro ? 0xFF00788F : (monarca ? 0xFF5AA0FF : 0xFF00E5FF));
+        if (comBotao) {
+            Intent encerrar = new Intent(c, ServicoNavegacao.class);
+            encerrar.setAction(ACAO_ENCERRAR);
+            b.addAction(0, "Encerrar", PendingIntent.getService(c, 1, encerrar,
+                    PendingIntent.FLAG_UPDATE_CURRENT | PendingIntent.FLAG_IMMUTABLE));
+        }
         if (progresso >= 0) {
             b.setProgress(100, Math.min(100, progresso), false);   // barra: quanto da rota já foi
         }
