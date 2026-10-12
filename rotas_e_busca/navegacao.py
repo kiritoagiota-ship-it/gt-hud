@@ -13,6 +13,7 @@ import math
 
 import falas
 import sinais
+from rota import distancia_m
 
 FORA_DA_ROTA_M = 35
 FORA_DA_ROTA_S = 4.0
@@ -47,12 +48,41 @@ def _projecao(p, a, b):
     return math.hypot(ax + t * dx, ay + t * dy), t
 
 
+LADO_MIN_M = 8.0    # destino a menos que isso da linha da rota: está "na rua", não tem lado
+
+
+def lado_do_destino(rota, alvo=None):
+    """"direita", "esquerda" ou None: de que lado da rua o destino fica para quem chega.
+    Primeiro o que o servidor de rotas disse (a última manobra); sem isso, a conta: o
+    ponto do lugar (`alvo`) em relação ao último trecho da rota."""
+    if rota.manobras:
+        acao = rota.manobras[-1].get("acao", "")
+        if acao in ("chegada_direita", "chegada_esquerda"):
+            return acao.split("_")[1]
+    if alvo is None or len(rota.pontos) < 2:
+        return None
+    fim = rota.pontos[-1]
+    antes = next((p for p in reversed(rota.pontos[:-1]) if distancia_m(p, fim) >= 10.0), rota.pontos[0])
+    k = math.cos(math.radians(fim[0]))
+    dx, dy = (fim[1] - antes[1]) * k, fim[0] - antes[0]            # para onde a rota vai
+    ax, ay = (alvo[1] - fim[1]) * k, alvo[0] - fim[0]              # do fim da rota até o lugar
+    comp = math.hypot(dx, dy)
+    if comp == 0:
+        return None
+    lateral_m = (dx * ay - dy * ax) / comp * _M_POR_GRAU              # > 0: à esquerda
+    if abs(lateral_m) < LADO_MIN_M:
+        return None
+    return "esquerda" if lateral_m > 0 else "direita"
+
+
 class Navegacao:
     def __init__(self, rota, falar, avisar_subidas=True, avisar_semaforos=True):
         self.falar = falar  # falar(pedaços, prioridade[, texto pronto])
         self.avisar_subidas = avisar_subidas
         self.avisar_semaforos = avisar_semaforos
         self.chegou = False
+        self.alvo = None            # (lat, lon) do LUGAR de destino (a rota acaba na rua ao lado dele)
+        self.lado_chegada = None    # "direita"/"esquerda": de que lado o destino ficou ao chegar
         self._vel_ms = 0.0
         self._iniciar_rota(rota)
         primeira = self._proxima_manobra()
@@ -180,7 +210,10 @@ class Navegacao:
 
         if not self.chegou and restante < CHEGADA_M and d < FORA_DA_ROTA_M * 2:
             self.chegou = True
-            self.falar(["senhor", "chegou"], P_CHEGADA)
+            # ... e de que lado da rua ele fica (pedido do dono, 12/10/2026)
+            self.lado_chegada = lado_do_destino(rota, self.alvo)
+            self.falar(["senhor", "chegou"] + (["destino_" + self.lado_chegada] if self.lado_chegada else []),
+                       P_CHEGADA)
             return self._estado(None)
 
         if d > FORA_DA_ROTA_M:

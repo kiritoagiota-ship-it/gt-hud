@@ -89,6 +89,10 @@ ADIANTAR_POR_VEZ = 14      # pedaços vizinhos/de outros zooms pedidos "para dep
 # animações da prévia da rota (pedido do dono, 07/10/2026: escolher um destino
 # dava uma travada e o caminho aparecia seco)
 RADAR_VOLTA_S = 1.7        # cada onda do "procurando caminho" leva isso
+PONTILHADO_MIN_M = 12.0    # o lugar a menos que isso do fim da rota: é ali mesmo, sem pontilhado
+PONTILHADO_MAX_M = 600.0
+PONTILHADO_TRACO_M = 5.0   # cada traço (e cada vão) do pontilhado
+ZOOM_MANUAL_S = 15.0       # navegando: depois de mexer no zoom, o automático espera isso
 ZOOM_TOQUE_S = 0.28        # o zoom do toque duplo desliza por esse tempo
 FESTA_S = 3.2              # ondas verdes no destino ao chegar
 RADAR_MAX_S = 40.0         # sem resposta nesse tempo, o radar se apaga sozinho
@@ -233,6 +237,7 @@ class MapaHUD(CamadasDoMapa, Widget):
         self._salto = None                  # ícone tocado dando um pulo: (hora, (lat, lon))
         self._onda_toque = None             # ... e a onda que sai dele: (hora, (x, y) locais[, cor])
         self._zoom_toque = None             # toque duplo: o zoom deslizando até o nível seguinte
+        self._zoom_manual_ate = 0.0         # até quando o zoom automático da rota fica quieto
         self._dest_pousou = True            # o pino que está caindo já tocou o chão?
         self._curva = []                    # a seta da próxima curva, desenhada no chão: [(lat, lon)]
         self._rastro = collections.deque(maxlen=RASTRO_PONTOS)   # por onde a seta acabou de passar (locais)
@@ -321,7 +326,10 @@ class MapaHUD(CamadasDoMapa, Widget):
         if (self._navegando and not self.seguindo and not self._toques
                 and time.time() - self._t_mexeu > VOLTA_A_SEGUIR_S):
             self.seguindo = True  # olhou o mapa e largou: volta para a seta
-        if self.seguindo and self._navegando and vel_kmh is not None:
+        # (mexeu no zoom agora há pouco: o zoom automático espera; antes ele desfazia o toque
+        # duplo e os botões + e - em menos de 1 s, durante a rota)
+        if (self.seguindo and self._navegando and vel_kmh is not None
+                and time.monotonic() >= self._zoom_manual_ate):
             # zoom automático: mais longe quando anda rápido
             f = max(0.0, min(1.0, (vel_kmh - 12.0) / 23.0))
             self._alvo_zoom = ZOOM_NAV_PERTO - f * (ZOOM_NAV_PERTO - ZOOM_NAV_LONGE)
@@ -464,8 +472,11 @@ class MapaHUD(CamadasDoMapa, Widget):
 
     def definir_destino(self, lat_lon, cair=False):
         """cair=True: o pino desce e \"quica\" no lugar (destino recém-escolhido)."""
+        mudou = lat_lon != self._destino
         self._destino = lat_lon
         self._dest_t0 = time.monotonic() if (cair and lat_lon) else None
+        if mudou and len(self._rota) >= 2 and self._revelar is None:
+            self._refazer_linhas()
         self._dest_pousou = self._dest_t0 is None
         if self._dest_t0 is not None:
             self._ligar_animacao()
@@ -580,6 +591,7 @@ class MapaHUD(CamadasDoMapa, Widget):
 
     def mudar_zoom(self, delta, animado=True):
         self._zoom_toque = None
+        self._zoom_manual_ate = time.monotonic() + ZOOM_MANUAL_S
         alvo = max(ZOOM_MIN, min(ZOOM_MAX, (self._alvo_zoom or self.zoom) + delta))
         if animado:
             self._alvo_zoom = alvo
@@ -1057,8 +1069,30 @@ class MapaHUD(CamadasDoMapa, Widget):
             if tipo == "rota" and len(self._rota) >= 2:
                 for pontos, nivel in self._trechos:
                     self._linha(grupo, pontos, "pesado" if nivel >= 3 else "movimentado")
+                self._pontilhar_ate_o_destino(grupo)
         self._larg_usada = None
         self._ajustar_larguras(self._escala_tela())
+
+    def _pontilhar_ate_o_destino(self, grupo):
+        """O lugar fica fora da rua (dentro da quadra, num estacionamento): uma linha
+        pontilhada liga o fim da rota ao pino, para ver onde é de verdade."""
+        if not self._destino:
+            return
+        fim = self._rota[-1]
+        k = math.cos(math.radians(fim[0]))
+        falta_m = math.hypot((self._destino[1] - fim[1]) * k, self._destino[0] - fim[0]) * 111320.0
+        if not PONTILHADO_MIN_M <= falta_m <= PONTILHADO_MAX_M:
+            return
+        (ax, ay), (bx, by) = self._local(*fim), self._local(*self._destino)
+        tracos = max(2, int(round(falta_m / (2.0 * PONTILHADO_TRACO_M))))
+        grupo.add(Color(*tema.com_alfa(tema.LARANJA, 0.95)))
+        for n in range(tracos):   # traço, vão, traço, vão...
+            f0, f1 = (n + 0.25) / tracos, (n + 0.75) / tracos
+            traco = Line(points=[ax + (bx - ax) * f0, ay + (by - ay) * f0,
+                                 ax + (bx - ax) * f1, ay + (by - ay) * f1],
+                         width=1, cap="round", **LINHA_LEVE)
+            grupo.add(traco)
+            self._larg_rota.append((traco, dp(2.2)))
 
     def _pintar_revelado(self):
         """A linha da rota até onde a animação já chegou (f de 0 a 1 pelo tempo)."""
@@ -1534,6 +1568,7 @@ class MapaHUD(CamadasDoMapa, Widget):
             # dois toques: aproxima um nível NAQUELE ponto, deslizando (antes pulava de uma
             # vez só), e uma onda marca onde foi (pedido do dono, 09/10/2026)
             self._alvo_zoom = None
+            self._zoom_manual_ate = time.monotonic() + ZOOM_MANUAL_S
             de = self._zoom_toque["z1"] if self._zoom_toque else self.zoom   # (toques seguidos somam)
             self._zoom_toque = {"t0": time.monotonic(), "z0": self.zoom,
                                 "z1": max(ZOOM_MIN, min(ZOOM_MAX, de + 1.0)), "onde": tuple(touch.pos)}
@@ -1575,6 +1610,7 @@ class MapaHUD(CamadasDoMapa, Widget):
             agora = math.hypot(touch.x - outro.x, touch.y - outro.y)
             if antes > dp(10) and agora > dp(10):
                 self._alvo_zoom = self._zoom_toque = None
+                self._zoom_manual_ate = time.monotonic() + ZOOM_MANUAL_S
                 meio = ((touch.x + outro.x) / 2.0, (touch.y + outro.y) / 2.0)
                 self._zoom_no_ponto(self.zoom + math.log2(agora / antes), *meio)
                 self._aplicar()

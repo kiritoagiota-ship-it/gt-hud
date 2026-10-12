@@ -13,3 +13,10 @@
     <category android:name="android.intent.category.BROWSABLE" />
     <data android:scheme="google.navigation" />
 </intent-filter>
+<!-- "Compartilhar" de outro app (Google Maps, WhatsApp...): o texto com o link do lugar
+     ou o endereço chega em EXTRA_TEXT (pedido do dono, 12/10/2026). -->
+<intent-filter>
+    <action android:name="android.intent.action.SEND" />
+    <category android:name="android.intent.category.DEFAULT" />
+    <data android:mimeType="text/plain" />
+</intent-filter>

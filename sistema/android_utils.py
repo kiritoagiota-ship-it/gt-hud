@@ -76,6 +76,11 @@ def _dado_do_intent(intent):
         dado = intent.getDataString()
         if dado:
             intent.setData(None)   # já foi usado
+        elif intent.getAction() == "android.intent.action.SEND":
+            # "Compartilhar" > GT-HUD: o texto ("Nome do lugar\nhttps://maps.app.goo.gl/...")
+            dado = intent.getStringExtra("android.intent.extra.TEXT")
+            if dado:
+                intent.removeExtra("android.intent.extra.TEXT")   # já foi usado
         return dado or None
     except Exception as e:
         print("[android] intent:", e)

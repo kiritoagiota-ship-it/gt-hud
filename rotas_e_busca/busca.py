@@ -108,7 +108,71 @@ def _geocodificar_rua(consulta):
     return None
 
 
-def lugar_colado(texto, resolver=None, geocodificar=None):
+def _nomes_parecidos(a, b):
+    """Os dois nomes são do mesmo lugar? (pelo menos metade das palavras de `a` em `b`)"""
+    ta, tb = set(_termos(a)), set(_termos(b))
+    return bool(ta) and len(ta & tb) * 2 >= len(ta)
+
+
+def _do_titulo(titulo, perto=None, chave_tomtom=None, resolver_end=None, comercios=None):
+    """O lugar de um link do Google que veio SEM coordenada, pelo título dele ("NOME -
+    Rua, quadra - Setor, Goiânia - GO, CEP"), o mais preciso que dá (pedido do dono,
+    12/10/2026; antes era só a rua num mapa aberto, sem número nem CEP):
+      1. o endereço pelo CEP + busca de endereços (resolver_endereco);
+      2. o COMÉRCIO pelo nome na TomTom: vale se o nome bate e fica perto do endereço.
+    Devolve o lugar (com "aproximado" quando não é o ponto exato) ou None."""
+    partes = [p.strip() for p in titulo.split(" - ")]
+    nome, resto = partes[0][:60], " - ".join(partes[1:])
+    if not resto and _PARECE_ENDERECO.search(normalizar(nome)):
+        nome, resto = "", titulo      # o título é só o endereço
+    chave_tomtom = chave_tomtom or chaves.chave("tomtom")
+    pelo_endereco = None
+    if resto:
+        try:
+            pelo_endereco = (resolver_end or resolver_endereco)(resto.replace(" - ", ", "), perto, chave_tomtom)
+        except Exception as e:
+            print("[busca] endereco do link:", type(e).__name__)
+    if nome and chave_tomtom:
+        try:
+            achados = (comercios or _tomtom)(nome, perto, chave_tomtom)
+        except Exception as e:   # (sem o texto do erro: a consulta leva a chave)
+            print("[busca] comercio do link:", type(e).__name__, getattr(e, "code", ""))
+            achados = []
+        for c in achados[:4]:
+            if not _nomes_parecidos(nome, c["nome"]):
+                continue
+            perto_do_endereco = pelo_endereco is None or distancia_m(
+                (c["lat"], c["lon"]), (pelo_endereco["lugar"]["lat"], pelo_endereco["lugar"]["lon"])) < 600
+            if perto_do_endereco and (pelo_endereco is not None or len(achados) == 1):
+                print("[endereco] link sem ponto: comercio achado pelo nome")
+                return {"nome": nome, "endereco": c.get("endereco") or resto[:80], "lat": c["lat"], "lon": c["lon"]}
+    if pelo_endereco is None:
+        return None
+    lugar = dict(pelo_endereco["lugar"])
+    lugar["nome"] = nome or lugar["nome"]
+    if not pelo_endereco["certo"]:
+        lugar["endereco"] = "Aproximado (pela rua): " + resto[:70]
+        lugar["aproximado"] = True
+    else:
+        lugar["endereco"] = resto[:80]
+    return lugar
+
+
+def texto_compartilhado(texto):
+    """O que chegou pelo "Compartilhar" de outro app: {"link": texto inteiro} (tem link do
+    Google: lugar_colado resolve), {"texto": endereço} (texto puro) ou None."""
+    texto = (texto or "").strip()
+    if not texto or len(texto) > 2000:
+        return None
+    link = next((p for p in texto.split() if p.startswith("http")), None)
+    if link is not None:
+        return {"link": texto} if ("goo.gl" in link or "google." in link) else None
+    if ":" in texto.split()[0] and "/" not in texto.split()[0] and not texto[0].isdigit():
+        return None   # outro tipo de pedido (tel:, mailto:...)
+    return {"texto": " ".join(texto.split())[:160]}
+
+
+def lugar_colado(texto, resolver=None, geocodificar=None, perto=None, chave_tomtom=None):
     """Plus Code, "lat, lon" ou link do Google Maps -> lugar, ou None se o
     texto não é nada disso. resolver(url) -> url final (segue o link curto);
     geocodificar(endereço) -> (lat, lon) da rua. Os dois vão à internet."""
@@ -147,6 +211,10 @@ def lugar_colado(texto, resolver=None, geocodificar=None):
         return lugar
     if not titulo:
         return None
+    if geocodificar is None:   # (com `geocodificar`, o caminho antigo: é o dos testes)
+        preciso = _do_titulo(titulo, perto, chave_tomtom)
+        if preciso is not None:
+            return preciso
     nome, endereco, ponto = _do_endereco(titulo, geocodificar)
     if ponto is None:
         return None
@@ -560,7 +628,7 @@ def endereco_de(lat, lon, chave=None, baixar=None):
 def buscar(texto, perto=None, salvos=(), chave_tomtom=None, endereco=False):
     """Chamada que espera a resposta (use rede.em_segundo_plano).
     Devolve [{nome, endereco, lat, lon, dist_m, fonte}], o melhor primeiro."""
-    colado = lugar_colado(texto)
+    colado = lugar_colado(texto, perto=perto, chave_tomtom=chave_tomtom)
     if colado is not None:
         if colado.get("sem_nome"):
             # código/coordenada não traz nome: sugere o lugar conhecido ali

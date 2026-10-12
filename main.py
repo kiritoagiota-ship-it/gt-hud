@@ -423,10 +423,11 @@ class GTHudApp(App):
         endereços) e MOSTRA o pino para a pessoa conferir e tocar em "Ir para
         cá" (ou corrigir segurando o dedo no lugar certo). Não achou: abre a
         busca. Navegando, não troca o destino sozinho."""
-        recebido = busca.de_geo(uri)
+        # geo:/google.navigation: (toque num endereço) ou o texto do "Compartilhar" (link do Google)
+        recebido = busca.de_geo(uri) or busca.texto_compartilhado(uri)
         print("[endereco] o outro app mandou:", repr(str(uri)[:300]))   # (para o diagnóstico)
         print("[app] endereco recebido:", "ponto" if recebido and "lat" in recebido else
-              "texto" if recebido else "nao entendi")
+              "link" if recebido and "link" in recebido else "texto" if recebido else "nao entendi")
         if recebido is None:
             return
         if self.posicao is None or self.sm.current == "boot":
@@ -442,6 +443,9 @@ class GTHudApp(App):
                 tela.mensagem("O endereço recebido fica fora de Goiânia", tema.LARANJA, 8)
                 return
             self._mostrar_recebido(recebido["lat"], recebido["lon"], recebido["nome"], True)
+            return
+        if "link" in recebido:
+            self._abrir_link_compartilhado(recebido["link"])
             return
         bruto = recebido["texto"]
         texto = busca.texto_de_endereco(bruto)
@@ -467,6 +471,37 @@ class GTHudApp(App):
             lugar = achado["lugar"]
             self._mostrar_recebido(lugar["lat"], lugar["lon"], lugar["nome"], achado["certo"])
         rede.em_segundo_plano(procurar, achou, lambda e: self._buscar_na_tela(texto))
+
+    def _abrir_link_compartilhado(self, texto):
+        """"Compartilhar" > GT-HUD com um link do Google Maps: segue o link, pega o ponto do
+        lugar (ou acha pelo nome e endereço) e mostra o pino para conferir."""
+        tela = self.sm.get_screen("mapa")
+        self.sm.current = "mapa"
+        tela.mensagem("Abrindo o link do Google...", tema.CIANO, 12)
+        chave_tomtom = transito.chave_em_uso(self.ajustes) or None
+        posicao = self.posicao
+        # o nome que vem antes do link ("Barbearia Imagem\nhttps://..."): para a busca, se o link falhar
+        antes = texto.split("http")[0].strip().splitlines()
+        nome_antes = antes[-1].strip()[:60] if antes else ""
+
+        def achou(lugar):
+            if self.nav is not None:
+                return
+            if lugar is None:
+                print("[endereco] link: nao deu para tirar o lugar")
+                if nome_antes:
+                    self._buscar_na_tela(nome_antes)
+                else:
+                    tela.mensagem("Não consegui ler esse link. Cole o nome ou o endereço na busca.", tema.LARANJA, 8)
+                return
+            print("[endereco] link: %s em %.5f,%.5f%s" % (lugar["nome"][:40], lugar["lat"], lugar["lon"],
+                                                       " (aproximado)" if lugar.get("aproximado") else ""))
+            if not goiania.dentro(lugar["lat"], lugar["lon"], 0.01):
+                tela.mensagem("O lugar do link fica fora de Goiânia", tema.LARANJA, 8)
+                return
+            self._mostrar_recebido(lugar["lat"], lugar["lon"], lugar["nome"], not lugar.get("aproximado"))
+        rede.em_segundo_plano(lambda: busca.lugar_colado(texto, perto=posicao, chave_tomtom=chave_tomtom),
+                              achou, lambda e: achou(None))
 
     def _mostrar_recebido(self, lat, lon, nome, certo):
         """O pino no ponto achado, para conferir antes da rota."""
@@ -1008,6 +1043,8 @@ class GTHudApp(App):
             return
         self.nav = Navegacao(rota, self.voz.falar, self.ajustes["avisar_subidas"],
                              self.ajustes["avisar_semaforos"])
+        if self.destino is not None:   # o ponto DO LUGAR (a rota acaba na rua mais próxima dele)
+            self.nav.alvo = (self.destino["lat"], self.destino["lon"])
         self.estado_nav = None
         self._fim_agendado = False
         self._fim_em = None
@@ -1058,6 +1095,7 @@ class GTHudApp(App):
             return
         self._fim_em = None
         destino_nome = (self.destino or {}).get("nome", "")
+        lado = self.nav.lado_chegada if chegou else None
         self.nav = None
         self.estado_nav = None
         self.rota_previa = None
@@ -1075,7 +1113,9 @@ class GTHudApp(App):
             tela = self.sm.get_screen("mapa")
             if resumo is not None:   # fechamento da rota: cartão com os números
                 tela.modo_livre()
-                tela.mostrar_resumo(texto, destino_nome, resumo)
+                # (de que lado da rua o destino ficou: "Barbearia  ·  à direita")
+                onde = "  ·  ".join(x for x in (destino_nome, "à " + lado if lado else "") if x)
+                tela.mostrar_resumo(texto, onde, resumo)
             else:
                 tela.modo_livre(texto + ". Trecho curto demais para salvar.", tema.VERDE)
         self.na_tela(na_tela)

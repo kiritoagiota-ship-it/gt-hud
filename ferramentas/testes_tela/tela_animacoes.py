@@ -216,6 +216,23 @@ def telas(dt):
     depois(0.6, voltar)
 
 
+def pontilhado(dt):
+    m = tela().mapa
+    lat, lon = m.centro
+    m.definir_rota([(lat - 0.0012 + k * 0.0002, lon) for k in range(7)])
+    m.definir_destino((lat + 0.0004, lon + 0.0005))        # o lugar fica ~70 m para dentro da quadra
+    tracos = [l for l, larg in m._larg_rota if abs(larg - dp(2.2)) < 0.01]
+    checar(len(tracos) >= 4, "linha pontilhada do fim da rota ate o pino: %d tracos" % len(tracos))
+    depois(0.3, lambda: tirar("a4_pontilhado"))
+
+    def limpar():
+        m.definir_destino((lat + 0.00003, lon))             # o lugar na beira da rua: sem pontilhado
+        checar(not [l for l, larg in m._larg_rota if abs(larg - dp(2.2)) < 0.01], "lugar na rua: sem pontilhado")
+        m.definir_rota([])
+        m.definir_destino(None)
+    depois(0.7, limpar)
+
+
 T = {}
 
 
@@ -230,6 +247,7 @@ Clock.schedule_once(toque_duplo, 10.2)
 Clock.schedule_once(pino, 11.4)
 Clock.schedule_once(chegada, 13.2)
 Clock.schedule_once(curva, 15)
-Clock.schedule_once(telas, 16.4)
-Clock.schedule_once(fim, 18.6)
+Clock.schedule_once(pontilhado, 16.4)
+Clock.schedule_once(telas, 17.8)
+Clock.schedule_once(fim, 20)
 runpy.run_path("main.py", run_name="__main__")

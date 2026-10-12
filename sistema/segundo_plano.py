@@ -33,6 +33,7 @@ DESENHO_ATRAS_M = 70
 DESENHO_PASSO_M = 10
 INTERVALO_S = 0.2          # a thread confere o GPS 5x/s (o GPS manda 1x/s)
 AVISO_A_CADA_S = 2.0       # notificação/bolha: no máximo 1 atualização a cada isso
+RENOVA_TRAVA_S = 1800.0    # a cada meia hora minimizado, renova a trava de 6 h do serviço
 VIGIA_A_CADA_S = 2.0       # "perdi o sinal do GPS" (no app aberto é o Clock)
 
 
@@ -213,6 +214,11 @@ class _Android:
             processo.killProcess(processo.myPid())
         except Exception as e:
             print("[fundo] encerrar o processo:", e)
+
+    def manter_acordado(self):
+        """Renova a trava que mantém o celular acordado com o app minimizado (ela vence em 6 h)."""
+        if self.servico is not None:
+            self._chamar(self.servico.renovar)
 
     def notificar(self, titulo, texto):
         if self.servico is not None:
@@ -541,7 +547,7 @@ class SegundoPlano:
         Clock.schedule_once(lambda dt: fn(valor))
 
     def _laco(self):
-        t_vigia = time.monotonic()
+        t_vigia = t_acordado = time.monotonic()
         t_erro = 0.0
         try:
             while not self._parar.wait(INTERVALO_S):
@@ -562,6 +568,9 @@ class SegundoPlano:
                     self.atualizar_painel()   # (a velocidade prevista anda entre as leituras)
                     self.app.voz.bombear()
                     self.app.conferir_fim()   # chegou com o app minimizado: encerra a rota daqui
+                    if time.monotonic() - t_acordado >= RENOVA_TRAVA_S:
+                        t_acordado = time.monotonic()
+                        self.android.manter_acordado()
                     if time.monotonic() - t_vigia >= VIGIA_A_CADA_S:
                         t_vigia = time.monotonic()
                         self.app.vigiar_gps()

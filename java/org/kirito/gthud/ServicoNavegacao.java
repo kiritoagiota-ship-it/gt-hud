@@ -38,6 +38,7 @@ public class ServicoNavegacao extends Service {
     private static volatile boolean pediuFechar = false;
     private static volatile boolean comBotao = false;  // mostra o botão "Encerrar"
     private PowerManager.WakeLock acordado;
+    private static volatile ServicoNavegacao instancia;   // o serviço no ar (para renovar a trava)
 
     // --- chamados pelo Python ---------------------------------------------------
     public static void iniciar(Context c) {
@@ -114,9 +115,24 @@ public class ServicoNavegacao extends Service {
         try {
             PowerManager pm = (PowerManager) getSystemService(Context.POWER_SERVICE);
             acordado = pm.newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "gthud:navegacao");
+            acordado.setReferenceCounted(false);    // (renovar() pede de novo: vale o último prazo)
             acordado.acquire(6 * 60 * 60 * 1000L);  // no máximo 6 h, por segurança
         } catch (Exception e) {
             acordado = null;
+        }
+        instancia = this;
+    }
+
+    /** O Python chama de tempos em tempos: a trava de 6 h não pode vencer com o app
+     *  minimizado contando os km (o celular dormia e a contagem parava). */
+    public static void renovar() {
+        try {
+            ServicoNavegacao s = instancia;
+            if (s != null && s.acordado != null) {
+                s.acordado.acquire(6 * 60 * 60 * 1000L);
+            }
+        } catch (Exception e) {
+            // nada: fica o prazo que já havia
         }
     }
 
@@ -157,6 +173,7 @@ public class ServicoNavegacao extends Service {
     @Override
     public void onDestroy() {
         vivo = false;
+        instancia = null;
         if (acordado != null && acordado.isHeld()) {
             acordado.release();
         }

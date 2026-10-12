@@ -651,7 +651,7 @@ class TelaMapa(Screen):
         self.mapa.definir_trechos(rota.trechos)   # avenidas em laranja/vermelho por cima da rota
         self.mapa.definir_transito(rota.trechos_transito)
         self.lbl_avisos.text = "  ·  ".join(app.avisos_da_rota(rota))
-        self.mapa.definir_destino(rota.pontos[-1])
+        self.mapa.definir_destino(self._ponto_do_destino(rota))
         self._montar()
         if enquadrar:
             todos = [p for r in rotas for p in r.pontos]
@@ -665,6 +665,15 @@ class TelaMapa(Screen):
         self.lbl_resumo.text = texto
         self.lbl_resumo.color = tema.VERMELHO
         self.btn_iniciar.disabled = True
+
+    def _ponto_do_destino(self, rota):
+        """Onde o pino fica: no LUGAR escolhido, não no fim da rota (que acaba na rua mais
+        próxima dele). Até a 1.0.73 o pino ia para o fim da rota e escondia a diferença; o
+        mapa liga os dois com uma linha pontilhada (pedido do dono, 12/10/2026)."""
+        d = App.get_running_app().destino
+        if d and "lat" in d and busca.distancia_m((d["lat"], d["lon"]), rota.pontos[-1]) < 600:
+            return (d["lat"], d["lon"])
+        return rota.pontos[-1]
 
     def modo_navegando(self, rota):
         self.estado = NAVEGANDO
@@ -682,7 +691,7 @@ class TelaMapa(Screen):
         self.mapa.definir_rota(rota.pontos)
         self.mapa.definir_trechos(rota.trechos)
         self.mapa.definir_transito(rota.trechos_transito)
-        self.mapa.definir_destino(rota.pontos[-1])
+        self.mapa.definir_destino(self._ponto_do_destino(rota))
         self.mapa.modo_navegacao(True)
         self.mapa.prever = App.get_running_app().nav.prever  # seta anda em cima da rota
         self._sinais_da_rota()
