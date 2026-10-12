@@ -85,6 +85,16 @@ class TesteBateria(unittest.TestCase):
         self.assertAlmostEqual(self.bat.metros, 20000)            # (andou com ele fechado): vale o número dele
         self.assertEqual([round(d) for d in self.bat.km_por_barra()], [11000, 9000])
         self.assertAlmostEqual(self.bat.vel_media_kmh, 40, delta=1)   # a média segue a do GPS (era 57: 20 km no tempo de 14)
+        # digitou errado (110 em vez de 11) e desfez: a contagem volta, não fica em 130 km
+        self.assertTrue(self.bat.barra_esquecida(110000))
+        self.assertAlmostEqual(self.bat.metros, 130000)
+        self.assertTrue(self.bat.desfazer_barra())
+        self.assertAlmostEqual(self.bat.metros, 20000)
+        outra = Bateria(self.aj)                                  # (e isso sobrevive a fechar o app)
+        self.assertTrue(outra.desfazer_barra())                   # a 2ª, que tinha subido de 14 para 20 km
+        self.assertAlmostEqual(outra.metros, 14000, delta=60)
+        self.assertTrue(outra.barra_esquecida(9000))
+        self.bat = outra
         self.assertFalse(self.bat.barra_esquecida(0))
         self.assertFalse(self.bat.barra_esquecida(-5))
         self.assertEqual(self.bat.barras, 3)

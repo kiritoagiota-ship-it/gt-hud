@@ -41,6 +41,13 @@ class Bateria:
             self.carga["quedas"] = list(self.carga.get("quedas") or [])
             self._gravado_m = self.carga.get("m", 0.0)
             self.carga.setdefault("m_gps", self.carga.get("m", 0.0))
+            self._acertar_somas()
+
+    def _acertar_somas(self):
+        """carga["somas"]: para cada barrinha, quantos metros ela SOMOU à contagem ao ser
+        lançada à mão (0 nas marcadas na hora). Desfazer a barrinha devolve esses metros."""
+        somas = list(self.carga.get("somas") or [])[:len(self.carga["quedas"])]
+        self.carga["somas"] = somas + [0.0] * (len(self.carga["quedas"]) - len(somas))
 
     # --- leitura --------------------------------------------------------
     @property
@@ -161,7 +168,8 @@ class Bateria:
                            "quedas": [round(q, 1) for q in self.carga["quedas"]],
                            "media": round(self.vel_media_kmh, 1)})
             self.ajustes["bateria_cargas"] = cargas[-HISTORICO_MAX:]
-        self.carga = {"desde": self._relogio(), "m": 0.0, "m_gps": 0.0, "mov_s": 0.0, "quedas": []}
+        self.carga = {"desde": self._relogio(), "m": 0.0, "m_gps": 0.0, "mov_s": 0.0, "quedas": [],
+                      "somas": []}
         self._ultimo = None
         self._gravar()
 
@@ -170,6 +178,7 @@ class Bateria:
         if not self.carga or self.barras <= 0:
             return False
         self.carga["quedas"].append(self.carga["m"])
+        self.carga["somas"].append(0.0)
         self._gravar()
         return True
 
@@ -182,6 +191,7 @@ class Bateria:
             return False
         caiu_em = (self.carga["quedas"][-1] if self.carga["quedas"] else 0.0) + durou_m
         self.carga["quedas"].append(caiu_em)
+        self.carga["somas"].append(max(0.0, caiu_em - self.carga["m"]))
         self.carga["m"] = max(self.carga["m"], caiu_em)
         self._gravar()
         return True
@@ -190,6 +200,9 @@ class Bateria:
         if not self.carga or not self.carga["quedas"]:
             return False
         self.carga["quedas"].pop()
+        # (se ela tinha sido lançada à mão e subiu a contagem, a contagem volta: até a 1.0.75
+        # um número digitado errado, ex.: 110 em vez de 11, ficava na carga mesmo desfazendo)
+        self.carga["m"] = max(0.0, self.carga["m"] - self.carga["somas"].pop())
         self._gravar()
         return True
 
@@ -223,4 +236,5 @@ class Bateria:
 
     def _gravar(self):
         self._gravado_m = self.carga["m"]
-        self.ajustes["bateria"] = dict(self.carga, quedas=list(self.carga["quedas"]))
+        self.ajustes["bateria"] = dict(self.carga, quedas=list(self.carga["quedas"]),
+                                       somas=list(self.carga["somas"]))

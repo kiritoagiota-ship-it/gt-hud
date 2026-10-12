@@ -153,6 +153,9 @@ public class ServicoNavegacao extends Service {
             } else {
                 startForeground(ID, n);
             }
+            // (de novo aqui: se o serviço foi parado e religado em seguida, o onDestroy do
+            // antigo roda DEPOIS do iniciar() e desligava o "vivo": a notificação congelava)
+            vivo = true;
         } catch (Exception e) {
             // o Android recusou (ex.: o app já tinha saído da tela): desiste em vez de derrubar o app
             stopSelf();

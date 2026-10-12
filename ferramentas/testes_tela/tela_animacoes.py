@@ -225,6 +225,19 @@ def pontilhado(dt):
     checar(len(tracos) >= 4, "linha pontilhada do fim da rota ate o pino: %d tracos" % len(tracos))
     depois(0.3, lambda: tirar("a4_pontilhado"))
 
+    # navegando: mexeu no zoom, o zoom automático da rota espera (antes desfazia em menos de 1 s)
+    m.modo_navegacao(True)
+    m.seguindo = True
+    m.mudar_zoom(1)
+    pedido = m._alvo_zoom
+    m.mostrar_eu(lat, lon, 0.0, 5.0, 40.0)
+    checar(m._alvo_zoom == pedido, "navegando, o zoom manual vale: %s" % m._alvo_zoom)
+    m._zoom_manual_ate = 0.0
+    m.mostrar_eu(lat, lon, 0.0, 5.0, 40.0)
+    checar(m._alvo_zoom != pedido, "... e depois do prazo o automático volta: %s" % m._alvo_zoom)
+    m.modo_navegacao(False)
+    m.seguindo = False
+
     def limpar():
         m.definir_destino((lat + 0.00003, lon))             # o lugar na beira da rua: sem pontilhado
         checar(not [l for l, larg in m._larg_rota if abs(larg - dp(2.2)) < 0.01], "lugar na rua: sem pontilhado")
