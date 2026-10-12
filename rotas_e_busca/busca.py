@@ -169,7 +169,13 @@ def texto_compartilhado(texto):
         return {"link": texto} if ("goo.gl" in link or "google." in link) else None
     if ":" in texto.split()[0] and "/" not in texto.split()[0] and not texto[0].isdigit():
         return None   # outro tipo de pedido (tel:, mailto:...)
-    return {"texto": " ".join(texto.split())[:160]}
+    limpo = " ".join(texto.split())
+    # só o que tem cara de endereço (rua/avenida..., ou número, ou CEP) e é curto: um recado
+    # ou um texto qualquer compartilhado por engano não vira busca
+    if len(limpo) > 160 or not (_CEP.search(limpo) or re.search(r"\d", limpo)
+                                or _PARECE_ENDERECO.search(normalizar(limpo))):
+        return None
+    return {"texto": limpo}
 
 
 def lugar_colado(texto, resolver=None, geocodificar=None, perto=None, chave_tomtom=None):

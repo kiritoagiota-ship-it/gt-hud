@@ -104,8 +104,26 @@ class TesteBateria(unittest.TestCase):
         self.assertAlmostEqual(self.bat.autonomia_m(), 40000, delta=300)
         self.assertIn("uns 40 km", self.bat.texto())
         self.assertIn("sobraram 2 de 5", self.bat.texto_historico())
+        self.assertTrue(self.bat.corrigir_sobra_da_ultima(3))     # salvou com a sobra errada: corrige
+        self.assertEqual(self.aj["bateria_cargas"][-1]["sobra"], 3)
+        self.assertAlmostEqual(self.bat.autonomia_m(), 60000, delta=400)   # 24 km em 2 barrinhas
+        self.bat.corrigir_sobra_da_ultima(2)
         self.bat.carregou(sobra=5)                               # toque repetido: carga de 0 km não entra
         self.assertEqual(len(self.aj["bateria_cargas"]), 1)
+
+    def test_apagar_a_ultima_carga_do_historico(self):
+        self.assertFalse(self.bat.apagar_ultima_carga())
+        self.bat.carregou()
+        t, lat = andar(self.bat, 9000)
+        self.bat.caiu_barra()
+        andar(self.bat, 7000, t0=t + 1, lat0=lat)
+        self.bat.caiu_barra()
+        self.assertIn("9,0 / 7,0 km", self.bat.texto())            # (antes: "9,0, 7,0 km")
+        self.bat.carregou(sobra=3)
+        self.assertEqual(len(self.aj["bateria_cargas"]), 1)
+        self.assertTrue(self.bat.apagar_ultima_carga())
+        self.assertEqual(self.aj["bateria_cargas"], [])
+        self.assertIsNone(self.bat.autonomia_m())
 
     def test_grava_aos_poucos_e_continua_depois_de_fechar(self):
         self.bat.carregou()

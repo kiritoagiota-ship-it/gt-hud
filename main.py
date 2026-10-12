@@ -429,6 +429,10 @@ class GTHudApp(App):
         print("[app] endereco recebido:", "ponto" if recebido and "lat" in recebido else
               "link" if recebido and "link" in recebido else "texto" if recebido else "nao entendi")
         if recebido is None:
+            # veio pelo "Compartilhar" e não é link de mapa nem endereço: avisa em vez de ficar mudo
+            if uri and ":" not in str(uri).split()[0] and self.sm.current == "mapa":
+                self.sm.get_screen("mapa").mensagem("Isso não parece um endereço nem um link de mapa",
+                                                    tema.LARANJA, 6)
             return
         if self.posicao is None or self.sm.current == "boot":
             self._endereco_pendente = uri    # ainda abrindo/sem GPS: trata na 1ª posição

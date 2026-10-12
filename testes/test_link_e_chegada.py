@@ -51,6 +51,9 @@ class TesteCompartilhado(unittest.TestCase):
                          {"texto": "Av. T-9, 4724 - Jardim América, Goiânia"})
         self.assertIsNone(busca.texto_compartilhado("olha isso https://youtu.be/xyz"))   # link que não é de mapa
         self.assertIsNone(busca.texto_compartilhado("tel:123"))
+        self.assertIsNone(busca.texto_compartilhado("me liga quando chegar em casa"))   # recado: não é endereço
+        self.assertEqual(busca.texto_compartilhado("Rua do Sereno, Morada do Sol"),
+                         {"texto": "Rua do Sereno, Morada do Sol"})
         self.assertIsNone(busca.texto_compartilhado(""))
         self.assertIsNone(busca.texto_compartilhado(None))
 

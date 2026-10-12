@@ -107,7 +107,8 @@ class Bateria:
         duracoes = self.km_por_barra()
         if duracoes:
             linhas.append("Barrinhas: %d de %d  ·  cada uma durou %s" % (
-                self.barras, BARRAS, ", ".join(_km(d).replace(" km", "") for d in duracoes) + " km"))
+                # (" / " entre elas: com vírgula, "9,8, 8,1 km" parecia um número só)
+                self.barras, BARRAS, " / ".join(_km(d).replace(" km", "") for d in duracoes) + " km"))
         else:
             linhas.append("Barrinhas: %d de %d (avise quando cair uma)" % (self.barras, BARRAS))
         total = self.autonomia_m()
@@ -129,6 +130,24 @@ class Bateria:
                 linha += ", média %d km/h" % round(c["media"])
             linhas.append(linha)
         return "\n".join(linhas)
+
+    def apagar_ultima_carga(self):
+        """Tira do histórico a última carga terminada (foi salva com dado errado)."""
+        cargas = list(self.ajustes["bateria_cargas"])
+        if not cargas:
+            return False
+        cargas.pop()
+        self.ajustes["bateria_cargas"] = cargas
+        return True
+
+    def corrigir_sobra_da_ultima(self, sobra):
+        """Troca quantas barrinhas sobravam na última carga terminada."""
+        cargas = [dict(c) for c in self.ajustes["bateria_cargas"]]
+        if not cargas:
+            return False
+        cargas[-1]["sobra"] = max(0, min(BARRAS, int(sobra)))
+        self.ajustes["bateria_cargas"] = cargas
+        return True
 
     # --- o que o dono marca ----------------------------------------------
     def carregou(self, sobra=None):

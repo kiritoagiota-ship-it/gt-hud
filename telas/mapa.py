@@ -1162,7 +1162,32 @@ class TelaMapa(Screen):
 
     def _ver_cargas(self):
         bat = App.get_running_app().bateria
-        escolher("Cargas anteriores", [("Fechar", None)], texto=bat.texto_historico(), altura_texto=dp(150))
+        # (a de cima da lista é a última: dá para corrigir as barrinhas dela ou apagar, se foi
+        # salva com dado errado)
+        escolher("Cargas anteriores", [("Corrigir as barrinhas da última", self._corrigir_ultima_carga),
+                                       ("Apagar a última", self._apagar_ultima_carga), ("Fechar", None)],
+                 texto=bat.texto_historico(), altura_texto=dp(150))
+
+    def _corrigir_ultima_carga(self):
+        bat = App.get_running_app().bateria
+
+        def trocar(n):
+            if bat.corrigir_sobra_da_ultima(n):
+                self.mensagem("Corrigido: sobraram %d de 5" % n)
+        nomes = {5: "5 (ainda cheia)", 0: "0 (acabou)"}
+        escolher("Quantas barrinhas sobravam?",
+                 [(nomes.get(n, str(n)), lambda n=n: trocar(n)) for n in (5, 4, 3, 2, 1, 0)] + [("Cancelar", None)],
+                 texto="Na última carga da lista, antes de pôr na tomada.", altura_texto=dp(36))
+
+    def _apagar_ultima_carga(self):
+        bat = App.get_running_app().bateria
+
+        def apagar():
+            if bat.apagar_ultima_carga():
+                self.mensagem("Carga apagada do histórico")
+        escolher("Apagar a última carga?", [("Apagar", apagar), ("Cancelar", None)],
+                 texto="Ela sai do histórico e da conta da sua autonomia. Não dá para desfazer.",
+                 altura_texto=dp(52))
 
     def _abrir_menu(self):
         app = App.get_running_app()

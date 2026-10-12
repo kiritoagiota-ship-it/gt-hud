@@ -185,8 +185,17 @@ def ver_fora(dt):
 def navegando(dt):
     a = app()
     a.escolher_destino({"nome": "Bosque dos Buritis", "endereco": "", "lat": -16.6853, "lon": -49.2662})
-    Clock.schedule_once(lambda dt: a.iniciar_navegacao(), 6)
-    Clock.schedule_once(lambda dt: a.abrir_endereco("geo:-16.70,-49.27"), 8)
+    t0 = time.time()
+
+    def esperar_a_rota(dt):
+        if a.rota_previa is None and time.time() - t0 < 40:
+            return True                       # o servidor de rotas ainda não respondeu
+        a.iniciar_navegacao()
+        Clock.schedule_once(lambda dt: a.abrir_endereco("geo:-16.70,-49.27"), 2)
+        Clock.schedule_once(ver_navegando, 4)
+        Clock.schedule_once(fim, 5)
+        return False
+    Clock.schedule_interval(esperar_a_rota, 0.5)
 
 
 def ver_navegando(dt):
@@ -213,7 +222,5 @@ Clock.schedule_once(nada, 24)
 Clock.schedule_once(ver_nada, 27)
 Clock.schedule_once(fora, 28)
 Clock.schedule_once(ver_fora, 29)
-Clock.schedule_once(navegando, 30)
-Clock.schedule_once(ver_navegando, 40)
-Clock.schedule_once(fim, 41)
+Clock.schedule_once(navegando, 30)   # (ver_navegando e fim: quando a rota ficar pronta)
 runpy.run_path("main.py", run_name="__main__")
