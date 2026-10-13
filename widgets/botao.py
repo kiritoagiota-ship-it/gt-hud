@@ -118,6 +118,7 @@ class BotaoHUD(Button):
     brilho = NumericProperty(0.0)   # 1 = recém-tocado; cai a 0 depois de soltar
     aperto = NumericProperty(0.0)   # 1 = apertado (o botão encolhe um pouco); negativo = estufado
     icone = StringProperty("")      # desenho de widgets/icones.py (o texto, se houver, vai embaixo)
+    plano = BooleanProperty(False)  # sem corpo nem borda: está dentro de uma coluna que já tem os dela
 
     def __init__(self, **kw):
         kw.setdefault("font_size", tema.T_BOTAO)
@@ -129,11 +130,13 @@ class BotaoHUD(Button):
         self.background_disabled_down = ""
         self.background_color = (0, 0, 0, 0)
         self._cor_toque = self._cor_halo = None
+        self._aura = False
+        self._halo_base = 0.0
         self._anim = None
         self.bind(pos=self._desenhar, size=self._desenhar, destaque=self._desenhar, cor=self._desenhar,
                   opaco=self._desenhar, disabled=self._desenhar, state=self._ao_tocar,
                   brilho=self._pintar_brilho, icone=self._desenhar, text=self._desenhar,
-                  aperto=self._apertar)
+                  aperto=self._apertar, plano=self._desenhar)
         self._desenhar()
 
     def _ao_tocar(self, *a):
@@ -183,38 +186,67 @@ class BotaoHUD(Button):
         apagado = 0.35 if self.disabled else 1.0
         self._halo_base = (0.20 if self.destaque else 0.12) * apagado
         self.canvas.before.clear()
+        self._aura = False
         with self.canvas.before:
-            # halo
-            self._cor_halo = Color(*tema.com_alfa(self.cor, self._halo_base))
-            Line(points=plano, close=True, width=dp(3.4), joint="round")
-            # corpo
-            # (Monarca: o botão cheio da cor do tema vira um degradê do azul ao roxo, texto branco)
-            aura = self.destaque and tema.monarca() and list(self.cor[:3]) == list(tema.CIANO[:3])
-            if aura:
-                Color(1, 1, 1, apagado)
-                vert = []
-                for px, py in pts:
-                    vert += [px, py, (px - x) / w if w else 0.0, 0.5]
-                Mesh(vertices=vert, indices=list(range(len(pts))), mode="triangle_fan", texture=faixa_monarca())
-                Color(1, 1, 1, 0.22 * apagado)          # um fio de luz na beira de cima
-                Line(points=[x + c, y + h - dp(1.5), x + w - dp(2), y + h - dp(1.5)], width=dp(1))
-            elif self.destaque:
-                Color(*tema.com_alfa(self.cor, apagado))
-                malha_degrade(pts, y, h, 0.86)   # cheio: degradê leve, a cor não pode perder força
+            if self.plano:
+                # dentro de uma coluna (telas/mapa.Doca): só o clarão do toque; o resto é da coluna
+                self._cor_halo = Color(0, 0, 0, 0)
+                self._cor_toque = Color(0, 0, 0, 0)
+                Mesh(vertices=[v for px, py in ((x + dp(3), y + dp(2)), (x + w - dp(3), y + dp(2)),
+                                               (x + w - dp(3), y + h - dp(2)), (x + dp(3), y + h - dp(2)))
+                               for v in (px, py, 0, 0)],
+                     indices=[0, 1, 2, 3], mode="triangle_fan")
             else:
-                Color(*tema.com_alfa(tema.PAINEL_CLARO, (0.96 if self.opaco else 0.55) * apagado))
-                malha_degrade(pts, y, h)
-            # toque (acende e apaga)
-            self._cor_toque = Color(0, 0, 0, 0)
+                self._corpo(pts, plano, c, x, y, w, h, apagado)
+        self._texto_e_icone(x, y, w, h, apagado, self._aura)
+
+    def _corpo(self, pts, plano, c, x, y, w, h, apagado):
+        """Sombra, halo, corpo, clarão do toque, borda e cantos (dentro de `with canvas.before`)."""
+        if self.opaco or self.destaque:
+            # relevo: uma sombra por baixo, para o botão se destacar do mapa
+            Color(0, 0, 0, 0.36 * apagado)
+            sombra = []
+            for px, py in _poligono(x - dp(1), y - dp(3.5), w + dp(2), h + dp(1.5), c):
+                sombra += [px, py, 0, 0]
+            Mesh(vertices=sombra, indices=list(range(len(pts))), mode="triangle_fan")
+        # halo
+        self._cor_halo = Color(*tema.com_alfa(self.cor, self._halo_base))
+        Line(points=plano, close=True, width=dp(3.4), joint="round")
+        # corpo
+        # (Monarca: o botão cheio da cor do tema vira um degradê do azul ao roxo, texto branco)
+        do_tema = list(self.cor[:3]) == list(tema.CIANO[:3])
+        aura = self._aura = self.destaque and tema.monarca() and do_tema
+        if aura:
+            Color(1, 1, 1, apagado)
             vert = []
             for px, py in pts:
-                vert += [px, py, 0, 0]
-            Mesh(vertices=vert, indices=list(range(len(pts))), mode="triangle_fan")
-            # borda e cantos
+                vert += [px, py, (px - x) / w if w else 0.0, 0.5]
+            Mesh(vertices=vert, indices=list(range(len(pts))), mode="triangle_fan", texture=faixa_monarca())
+            Color(1, 1, 1, 0.22 * apagado)          # um fio de luz na beira de cima
+            Line(points=[x + c, y + h - dp(1.5), x + w - dp(2), y + h - dp(1.5)], width=dp(1))
+        elif self.destaque:
             Color(*tema.com_alfa(self.cor, apagado))
-            Line(points=plano, close=True, width=dp(1.2))
-            for traco in cantos(pts, c):
-                Line(points=traco, width=dp(2.1), cap="square", joint="miter")
+            malha_degrade(pts, y, h, 0.86)   # cheio: degradê leve, a cor não pode perder força
+        else:
+            Color(*tema.com_alfa(tema.PAINEL_CLARO, (0.96 if self.opaco else 0.55) * apagado))
+            malha_degrade(pts, y, h)
+            Color(1, 1, 1, 0.10 * apagado)           # um fio de luz na beira de cima
+            Line(points=[x + c, y + h - dp(1.6), x + w - dp(2), y + h - dp(1.6)], width=dp(1))
+        # toque (acende e apaga)
+        self._cor_toque = Color(0, 0, 0, 0)
+        vert = []
+        for px, py in pts:
+            vert += [px, py, 0, 0]
+        Mesh(vertices=vert, indices=list(range(len(pts))), mode="triangle_fan")
+        # borda e cantos
+        Color(*tema.com_alfa(self.cor, apagado))
+        Line(points=plano, close=True, width=dp(1.2))
+        if tema.monarca() and do_tema and not self.destaque:
+            Color(*tema.com_alfa(tema.ROXO, apagado))   # os dois cantos cortados no roxo da aura
+        for traco in cantos(pts, c):
+            Line(points=traco, width=dp(2.1), cap="square", joint="miter")
+
+    def _texto_e_icone(self, x, y, w, h, apagado, aura):
         texto = tema.BRANCO if aura else (tema.FUNDO if self.destaque else self.cor)
         self.canvas.after.clear()
         if self.icone:
@@ -223,6 +255,8 @@ class BotaoHUD(Button):
             tam = min(w, h) * (0.40 if com_texto else 0.50)
             cy = y + h * (0.62 if com_texto else 0.5)
             with self.canvas.after:
+                # (o mesmo desenho maior e fraco por baixo: um brilho em volta do ícone)
+                icones.desenhar(self.icone, x + w / 2.0, cy, tam * 1.16, tema.com_alfa(texto, 0.20 * apagado))
                 icones.desenhar(self.icone, x + w / 2.0, cy, tam, tema.com_alfa(texto, apagado))
             self.text_size = (w, h)
             self.halign, self.valign = "center", "bottom"

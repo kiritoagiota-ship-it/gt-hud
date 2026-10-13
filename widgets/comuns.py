@@ -59,6 +59,8 @@ class PainelHUD(BoxLayout):
                 Line(points=dentro, close=True, width=dp(1))
             Color(*tema.com_alfa(self.cor_borda, 0.9))
             Line(points=plano, close=True, width=dp(1.2))
+            if tema.monarca() and list(self.cor_borda[:3]) == list(tema.CIANO[:3]):
+                Color(*tema.ROXO)                                  # (no Monarca, no roxo da aura)
             for traco in cantos(pts, c):                           # cantos marcados
                 Line(points=traco, width=dp(2.2), cap="square", joint="miter")
 
@@ -285,6 +287,8 @@ def abrir_janela(janela):
             borda.add(Line(points=dentro, close=True, width=dp(1)))
         borda.add(Color(*tema.com_alfa(tema.CIANO, 0.9)))
         borda.add(Line(points=plano, close=True, width=dp(1.3)))
+        if tema.monarca():
+            borda.add(Color(*tema.ROXO))
         for traco in cantos(pts, c):
             borda.add(Line(points=traco, width=dp(2.4), cap="square", joint="miter"))
     janela.bind(pos=desenhar, size=desenhar)

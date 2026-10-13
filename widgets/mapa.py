@@ -52,7 +52,7 @@ SEGURAR_S = 0.6                  # dedo parado esse tempo = marcar o ponto
 TAM = 256.0
 MAX_ROTULOS_RUA = 30
 MAX_ROTULOS_LUGAR = 8
-MAX_ROTULOS_POI = 14
+MAX_ROTULOS_POI = 16
 # nome de avenida (secundária para cima) dentro de uma plaquinha azul com letra branca, como
 # placa de rua (pedido do dono, 08/10/2026): escuro, claro
 PLACA_ESCURO, PLACA_CLARO = (0.085, 0.270, 0.540, 0.93), (0.130, 0.370, 0.680, 0.95)
@@ -69,6 +69,12 @@ CORES_POI = {
 REPOSICIONAR_S = 0.45      # refaz a escolha dos nomes no máximo a cada isso
 INERCIA = 3.5              # quanto maior, mais rápido o deslize para
 BONUS_JA_NA_TELA = 1.5     # nome já mostrado tem preferência: não fica trocando
+# O dono (13/10/2026): "qualquer coisinha o lugar some do mapa, tenho que ficar tirando e pondo
+# zoom para tocar nele". Lugar (mercado, farmácia...) que JÁ está na tela agora fica: passa na
+# frente de nome de rua novo (só as avenidas com placa e as ruas já mostradas ganham dele) e
+# não some ao afastar um pouco o zoom (só FOLGA_ZOOM_LUGARES abaixo de onde os lugares entram).
+BONUS_LUGAR_NA_TELA = 4.2
+FOLGA_ZOOM_LUGARES = 1.2
 MAX_TEXTURAS = 400
 VOLTA_A_SEGUIR_S = 10.0    # navegando: depois de mexer no mapa, volta a seguir sozinho
 MAX_PREVER_S = 1.5         # sem leitura nova do GPS, a seta para de andar sozinha depois disso
@@ -903,7 +909,9 @@ class MapaHUD(CamadasDoMapa, Widget):
                         dx, dy = (r["x"] - cx) * s, (r["y"] - cy) * s
                         sx, sy = ax + dx * c0 - dy * s0, ay + dx * s0 + dy * c0
                         if x0 < sx < x1 and y0 < sy < y1:
-                            peso = r["peso"] + (BONUS_JA_NA_TELA if id(r) in antigos else 0.0)
+                            peso = r["peso"]
+                            if id(r) in antigos:
+                                peso += BONUS_LUGAR_NA_TELA if r["tipo"] == "poi" else BONUS_JA_NA_TELA
                             candidatos.append((peso, sx, sy, r))
         if self.zoom >= ZOOM_LUGARES:
             conf_min = next(c for z, c in CONF_POR_ZOOM if self.zoom >= z)
@@ -913,8 +921,20 @@ class MapaHUD(CamadasDoMapa, Widget):
                 dx, dy = (r["x"] - cx) * s, (r["y"] - cy) * s
                 sx, sy = ax + dx * c0 - dy * s0, ay + dx * s0 + dy * c0
                 if x0 < sx < x1 and y0 < sy < y1:
-                    peso = r["peso"] + (BONUS_JA_NA_TELA if id(r) in antigos else 0.0)
+                    peso = r["peso"] + (BONUS_LUGAR_NA_TELA if id(r) in antigos else 0.0)
                     candidatos.append((peso, sx, sy, r))
+        if self.zoom >= ZOOM_LUGARES - FOLGA_ZOOM_LUGARES:
+            # os lugares que já estão na tela e não entraram acima (o zoom saiu da faixa deles,
+            # ou a lista do quadrado ainda não chegou): continuam enquanto estiverem à vista
+            postos = {id(c[3]) for c in candidatos}
+            for rot in self._rotulos:
+                r = rot.info
+                if r["tipo"] != "poi" or id(r) in postos:
+                    continue
+                dx, dy = (r["x"] - cx) * s, (r["y"] - cy) * s
+                sx, sy = ax + dx * c0 - dy * s0, ay + dx * s0 + dy * c0
+                if x0 < sx < x1 and y0 < sy < y1:
+                    candidatos.append((r["peso"] + BONUS_LUGAR_NA_TELA, sx, sy, r))
         candidatos.sort(key=lambda t: -t[0])
         return candidatos, s
 
@@ -926,7 +946,8 @@ class MapaHUD(CamadasDoMapa, Widget):
         faltou_textura = False
         antigos = {id(rot.info): rot for rot in self._rotulos}
         cr = self.credito
-        ocupados = list(self.areas_cobertas) + [(cr.x, cr.y, cr.right, cr.top)]
+        cobertas = list(self.areas_cobertas) + [(cr.x, cr.y, cr.right, cr.top)]   # botões, painéis, o crédito
+        ocupados = []                                                           # os nomes já postos
         usados_texto, novos = {}, []
         conta = {"rua": 0, "lugar": 0, "poi": 0}
         limite = {"rua": MAX_ROTULOS_RUA, "lugar": MAX_ROTULOS_LUGAR, "poi": MAX_ROTULOS_POI}
@@ -973,6 +994,12 @@ class MapaHUD(CamadasDoMapa, Widget):
             bw, bh = w * c + h * sn + folga, w * sn + h * c + folga
             cx_ = sx + (w / 2.0 + dp(DIST_NOME_DP) if ponto else 0)
             caixa = (cx_ - bw / 2, sy - bh / 2, cx_ + bw / 2, sy + bh / 2)
+            # Debaixo de um botão ou painel não entra nome. Do LUGAR, o que conta é o emblema: se
+            # ele está à vista, o lugar fica, mesmo com o nome passando por baixo de um botão
+            # (antes o lugar inteiro sumia ao chegar perto de qualquer botão, e voltava depois).
+            alvo = (sx - dp(13), sy - dp(13), sx + dp(13), sy + dp(13)) if ponto else caixa
+            if any(alvo[0] < o[2] and o[0] < alvo[2] and alvo[1] < o[3] and o[1] < alvo[3] for o in cobertas):
+                continue
             if any(caixa[0] < o[2] and o[0] < caixa[2] and caixa[1] < o[3] and o[1] < caixa[3]
                    for o in ocupados):
                 continue

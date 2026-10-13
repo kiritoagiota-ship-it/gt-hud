@@ -69,7 +69,7 @@ public class CartaoNotificacao {
 
     public static Bitmap desenhar(Context c, boolean grande, boolean claro, boolean monarca,
                                   String rotulo, String valor, String lado, String sub,
-                                  int segmentos, int acesos) {
+                                  int segmentos, int acesos, String seta) {
         DisplayMetrics dm = c.getResources().getDisplayMetrics();
         float u = Math.min(dm.density, 2.5f);     // pixels por "dp" do desenho (teto: a imagem não pode pesar)
         float larguraDp = Math.max(240f, Math.min(dm.widthPixels / dm.density - 32f, 420f));
@@ -96,6 +96,17 @@ public class CartaoNotificacao {
         tinta.setShader(new LinearGradient(0, m, 0, h - m, fundoCima, fundoBaixo, Shader.TileMode.CLAMP));
         tela.drawPath(contorno, tinta);
         tinta.setShader(null);
+
+        // linhas finas de painel no fundo (só dentro da moldura)
+        tela.save();
+        tela.clipPath(contorno);
+        tinta.setStyle(Paint.Style.STROKE);
+        tinta.setStrokeWidth(Math.max(1f, 0.5f * u));
+        tinta.setColor(comAlfa(borda, claro ? 0x10 : 0x17));
+        for (float yy = m + 5f * u; yy < h - m; yy += 5f * u) {
+            tela.drawLine(m, yy, w - m, yy, tinta);
+        }
+        tela.restore();
 
         // a aura por trás da borda, a borda e os dois cantos cortados marcados
         tinta.setStyle(Paint.Style.STROKE);
@@ -124,11 +135,19 @@ public class CartaoNotificacao {
         TextPaint texto = new TextPaint(Paint.ANTI_ALIAS_FLAG);
         texto.setTypeface(Typeface.create(Typeface.DEFAULT, Typeface.BOLD));
         float margem = 15f * u;
+        boolean comSeta = seta != null && seta.length() > 0;
+        if (grande) {
+            fase++;      // a barrinha da vez alterna o brilho a cada atualização
+        }
 
         if (!grande) {
             // ---- a faixa: [barrinhas]  VALOR  rótulo ................ LADO
             float x = margem;
-            if (segmentos > 0) {
+            if (comSeta) {
+                float tam = h - 2f * m - 12f * u;
+                desenharSeta(tela, tinta, x, (h - tam) / 2f, tam, seta, borda, aura, u);
+                x += tam + 8f * u;
+            } else if (segmentos > 0) {
                 float alto = h - 2f * m - 16f * u;
                 float vao = 3.5f * u;
                 float cada = Math.min(12f * u, (w * 0.34f) / segmentos - vao);
@@ -193,10 +212,18 @@ public class CartaoNotificacao {
         }
         texto.setLetterSpacing(0f);
 
+        float xValor = margem;
+        if (comSeta) {
+            float tam = 40f * u;
+            desenharSeta(tela, tinta, margem, 28f * u, tam, seta, borda, aura, u);
+            xValor += tam + 10f * u;
+        }
         texto.setColor(forte);
         texto.setTextSize(33f * u);
         if (valor != null) {
-            tela.drawText(valor, margem, 63f * u, texto);
+            texto.setShadowLayer(9f * u, 0f, 0f, comAlfa(aura, claro ? 0x55 : 0xC8));   // o brilho atrás do número
+            tela.drawText(valor, xValor, 63f * u, texto);
+            texto.clearShadowLayer();
         }
 
         if (segmentos > 0) {
@@ -217,6 +244,96 @@ public class CartaoNotificacao {
         return imagem;
     }
 
+    private static int fase = 0;
+
+    /** A seta da próxima manobra (as mesmas ações do app: "direita", "levemente_esquerda",
+     *  "retorno", "rotatoria", "chegada"...), num quadrado de lado `tam` a partir de (x0, y0). */
+    private static void desenharSeta(Canvas tela, Paint tinta, float x0, float y0, float tam, String acao,
+                                     int corSeta, int aura, float u) {
+        boolean espelho = acao.endsWith("esquerda");
+        float[] pts;          // o caminho, em frações do quadrado (x para a direita, y para baixo)
+        float dx, dy;         // para onde a ponta aponta
+        if (acao.startsWith("chegada")) {
+            tinta.setStyle(Paint.Style.STROKE);
+            tinta.setStrokeWidth(tam * 0.10f);
+            tinta.setColor(corSeta);
+            tela.drawCircle(x0 + tam * 0.5f, y0 + tam * 0.5f, tam * 0.38f, tinta);
+            tela.drawCircle(x0 + tam * 0.5f, y0 + tam * 0.5f, tam * 0.20f, tinta);
+            tinta.setStyle(Paint.Style.FILL);
+            tela.drawCircle(x0 + tam * 0.5f, y0 + tam * 0.5f, tam * 0.07f, tinta);
+            return;
+        }
+        if (acao.startsWith("rotatoria") || acao.startsWith("sair_rotatoria")) {
+            tinta.setStyle(Paint.Style.STROKE);
+            tinta.setStrokeWidth(tam * 0.11f);
+            tinta.setStrokeCap(Paint.Cap.ROUND);
+            tinta.setColor(corSeta);
+            tela.drawCircle(x0 + tam * 0.46f, y0 + tam * 0.56f, tam * 0.21f, tinta);
+            tela.drawLine(x0 + tam * 0.46f, y0 + tam * 0.96f, x0 + tam * 0.46f, y0 + tam * 0.78f, tinta);
+            tinta.setStrokeCap(Paint.Cap.BUTT);
+            pts = new float[] {0.61f, 0.41f, 0.80f, 0.22f};
+            dx = 0.707f;
+            dy = -0.707f;
+            espelho = false;
+        } else if (acao.equals("retorno")) {
+            pts = new float[] {0.68f, 0.92f, 0.68f, 0.30f, 0.32f, 0.30f, 0.32f, 0.60f};
+            dx = 0f;
+            dy = 1f;
+        } else if (acao.startsWith("levemente") || acao.startsWith("mantenha") || acao.startsWith("saida")) {
+            pts = new float[] {0.36f, 0.92f, 0.36f, 0.52f, 0.68f, 0.20f};
+            dx = 0.707f;
+            dy = -0.707f;
+        } else if (acao.startsWith("acentuada")) {
+            pts = new float[] {0.30f, 0.92f, 0.30f, 0.28f, 0.66f, 0.64f};
+            dx = 0.707f;
+            dy = 0.707f;
+        } else if (acao.equals("direita") || acao.equals("esquerda")) {
+            pts = new float[] {0.28f, 0.92f, 0.28f, 0.36f, 0.76f, 0.36f};
+            dx = 1f;
+            dy = 0f;
+        } else {             // em frente (e o que não conhecer)
+            pts = new float[] {0.5f, 0.92f, 0.5f, 0.24f};
+            dx = 0f;
+            dy = -1f;
+        }
+        Path caminho = new Path();
+        for (int k = 0; k < pts.length; k += 2) {
+            float px = x0 + (espelho ? 1f - pts[k] : pts[k]) * tam;
+            float py = y0 + pts[k + 1] * tam;
+            if (k == 0) {
+                caminho.moveTo(px, py);
+            } else {
+                caminho.lineTo(px, py);
+            }
+        }
+        if (espelho) {
+            dx = -dx;
+        }
+        float tx = x0 + (espelho ? 1f - pts[pts.length - 2] : pts[pts.length - 2]) * tam;
+        float ty = y0 + pts[pts.length - 1] * tam;
+        Path ponta = new Path();     // triângulo na ponta, apontando para (dx, dy)
+        float comp = tam * 0.20f;
+        float meia = tam * 0.15f;
+        ponta.moveTo(tx + dx * comp, ty + dy * comp);
+        ponta.lineTo(tx - dy * meia, ty + dx * meia);
+        ponta.lineTo(tx + dy * meia, ty - dx * meia);
+        ponta.close();
+        tinta.setStrokeJoin(Paint.Join.ROUND);
+        tinta.setStrokeCap(Paint.Cap.ROUND);
+        tinta.setStyle(Paint.Style.STROKE);
+        tinta.setStrokeWidth(tam * 0.22f);                 // o brilho em volta
+        tinta.setColor(comAlfa(aura, 0x50));
+        tela.drawPath(caminho, tinta);
+        tinta.setStrokeWidth(tam * 0.12f);
+        tinta.setColor(corSeta);
+        tela.drawPath(caminho, tinta);
+        tinta.setStyle(Paint.Style.FILL_AND_STROKE);
+        tinta.setStrokeWidth(tam * 0.04f);
+        tela.drawPath(ponta, tinta);
+        tinta.setStrokeCap(Paint.Cap.BUTT);
+        tinta.setStyle(Paint.Style.FILL);
+    }
+
     private static void desenharBarrinhas(Canvas tela, Paint tinta, float x, float y, float cada, float alto,
                                           float vao, float inclina, int segmentos, int acesos,
                                           int borda, int aura, int apagado, float u) {
@@ -225,9 +342,13 @@ public class CartaoNotificacao {
             if (n < acesos) {
                 // acesas: do azul da borda (a primeira) ao roxo da aura (a última), com brilho em volta
                 int corDela = misturar(borda, aura, segmentos > 1 ? n / (float) (segmentos - 1) : 0f);
+                boolean daVez = n == acesos - 1 && acesos < segmentos + 1;
+                if (daVez) {       // a barrinha da vez: mais clara, com o brilho maior
+                    corDela = misturar(corDela, Color.WHITE, fase % 2 == 0 ? 0.30f : 0.52f);
+                }
                 tinta.setStyle(Paint.Style.STROKE);
-                tinta.setStrokeWidth(3.2f * u);
-                tinta.setColor(comAlfa(corDela, 0x55));
+                tinta.setStrokeWidth((daVez ? 5.5f : 3.2f) * u);
+                tinta.setColor(comAlfa(corDela, daVez ? 0x80 : 0x55));
                 tela.drawPath(b, tinta);
                 tinta.setStyle(Paint.Style.FILL);
                 tinta.setColor(corDela);

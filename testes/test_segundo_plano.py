@@ -93,6 +93,10 @@ class TesteSegundoPlano(unittest.TestCase):
         self.assertTrue(titulo.startswith("8 min  ·  2,3 km  ·  chega às "))
         self.assertEqual(texto, "Vire à direita em 200 m (Rua 5)")
         self.assertEqual((l1, l2), ("8 min", "2,3 km"))
+        # o cartão desenhado, na rota: a seta da curva, a distância até ela e os minutos do lado
+        c = segundo_plano.cartao(AppFalso())
+        self.assertEqual((c[0], c[1], c[2], c[4], c[6]), ("ROTA", "200 m", "8 min", 12, "direita"))
+        self.assertTrue(c[3].startswith("Vire à direita (Rua 5)  ·  faltam 2,3 km  ·  chega às "))
 
     def test_minimizado_continua_navegando_e_para_ao_voltar(self):
         app, android = AppFalso(), AndroidFalso()
@@ -148,7 +152,7 @@ class TesteSegundoPlano(unittest.TestCase):
         self.assertEqual(segundo_plano.feito(app), 80)           # a barra da notificação = as barrinhas
         # o cartão desenhado: km grande, "4/5" do lado e 4 das 5 barrinhas acesas
         self.assertEqual(segundo_plano.cartao(app), ("BATERIA DA MOTO", "12,4 km", "4/5",
-                                                      "Carga inteira pelo seu uso: uns 41 km", 5, 4))
+                                                      "Carga inteira pelo seu uso: uns 41 km", 5, 4, ""))
         fundo = SegundoPlano(app, android)
         fundo.ao_pausar()                                        # serviço ainda desligado: o Android não
         self.assertFalse(fundo.minimizado)                       # deixa ligar com o app saindo da tela

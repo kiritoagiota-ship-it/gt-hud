@@ -48,6 +48,7 @@ public class ServicoNavegacao extends Service {
     private static volatile String cSub = "";
     private static volatile int cSegmentos = 0;
     private static volatile int cAcesos = 0;
+    private static volatile String cSeta = "";       // a manobra, para a seta ("" = sem seta)
     private PowerManager.WakeLock acordado;
     private static volatile ServicoNavegacao instancia;   // o serviço no ar (para renovar a trava)
 
@@ -75,7 +76,9 @@ public class ServicoNavegacao extends Service {
     }
 
     /** O que o cartão desenhado mostra (vale na próxima atualização). Valor vazio = sem cartão. */
-    public static void cartao(String rotulo, String valor, String lado, String sub, int segmentos, int acesos) {
+    public static void cartao(String rotulo, String valor, String lado, String sub, int segmentos, int acesos,
+                              String seta) {
+        cSeta = seta == null ? "" : seta;
         cRotulo = rotulo == null ? "" : rotulo;
         cValor = valor == null ? "" : valor;
         cLado = lado == null ? "" : lado;
@@ -257,10 +260,10 @@ public class ServicoNavegacao extends Service {
             }
             RemoteViews faixa = new RemoteViews(pacote, layout);
             faixa.setImageViewBitmap(imagem, CartaoNotificacao.desenhar(c, false, claro, monarca,
-                    cRotulo, cValor, cLado, cSub, cSegmentos, cAcesos));
+                    cRotulo, cValor, cLado, cSub, cSegmentos, cAcesos, cSeta));
             RemoteViews aberto = new RemoteViews(pacote, layout);
             aberto.setImageViewBitmap(imagem, CartaoNotificacao.desenhar(c, true, claro, monarca,
-                    cRotulo, cValor, cLado, cSub, cSegmentos, cAcesos));
+                    cRotulo, cValor, cLado, cSub, cSegmentos, cAcesos, cSeta));
             b.setCustomContentView(faixa);
             b.setCustomBigContentView(aberto);
             b.setStyle(new Notification.DecoratedCustomViewStyle());

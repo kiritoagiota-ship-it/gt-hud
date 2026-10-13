@@ -17,7 +17,7 @@ from kivy.app import App
 from kivy.clock import Clock
 from kivy.graphics import Color, Ellipse, Line, RoundedRectangle
 from kivy.metrics import dp, sp
-from kivy.properties import NumericProperty
+from kivy.properties import ListProperty, NumericProperty
 from kivy.uix.behaviors import ButtonBehavior
 from kivy.uix.boxlayout import BoxLayout
 from kivy.uix.scrollview import ScrollView
@@ -179,6 +179,26 @@ class EscolhaRotas(BoxLayout):
             self.add_widget(b)
 
 
+class Doca(PainelHUD):
+    """A coluna dos botões do mapa durante a rota (Ao vivo, Rotas, + e -): um painel só, com
+    um risco entre um botão e outro, em vez de quatro caixas soltas (pedido do dono,
+    13/10/2026). Os botões ficam por cima, "planos" (BotaoHUD.plano)."""
+    divisorias = ListProperty([])    # alturas (y) dos riscos entre os botões
+
+    def __init__(self, **kw):
+        kw.setdefault("padding", 0)
+        super().__init__(**kw)
+        self.bind(divisorias=self._d)
+
+    def _d(self, *a):
+        super()._d(*a)
+        self.canvas.after.clear()
+        with self.canvas.after:
+            Color(*tema.com_alfa(tema.CIANO, 0.32))
+            for y in self.divisorias:
+                Line(points=[self.x + dp(9), y, self.right - dp(9), y], width=dp(1))
+
+
 class Coluna(BoxLayout):
     """Número grande com rótulo pequeno embaixo (barras de baixo)."""
 
@@ -308,6 +328,7 @@ class TelaMapa(Screen):
                                  on_release=lambda *a: self.mapa.mudar_zoom(1))
         self.btn_menos = BotaoHUD(text="", icone="menos", size_hint=(None, None), opaco=True,
                                   on_release=lambda *a: self.mapa.mudar_zoom(-1))
+        self.doca = Doca(size_hint=(None, None))
         self.lbl_msg = Aviso(text="", font_size=tema.T_ROTULO + 1, bold=True, size_hint=(None, None))
 
         # --- folha de baixo: livre (busca + atalhos) ---
@@ -321,7 +342,7 @@ class TelaMapa(Screen):
         self.col_falta = Coluna("faltam")
         self.col_sobe = Coluna("de subida")
         # botões grandes: dá para acertar com a bike tremendo
-        self.btn_encerrar = BotaoHUD(text="Encerrar", cor=tema.VERMELHO, font_size=tema.T_ROTULO + 2,
+        self.btn_encerrar = BotaoHUD(text="Encerrar", icone="parar", cor=tema.VERMELHO, font_size=sp(12),
                                      size_hint_x=0.95, on_release=lambda *a: self._encerrar())
         self.btn_rotas = BotaoHUD(text="Rotas", icone="rotas", size_hint=(None, None), opaco=True,
                                   font_size=sp(11), on_release=lambda *a: app.calcular_rotas_navegando())
@@ -682,6 +703,7 @@ class TelaMapa(Screen):
         self._tem_depois = self._tem_subida = self._tem_alerta = False
         self._confirmando_fim = False
         self.btn_encerrar.text = "Encerrar"
+        self.btn_encerrar.destaque = False
         self._escolha_nav = None
         self._rota_na_tela = None
         self._parar_contagem()
@@ -780,6 +802,7 @@ class TelaMapa(Screen):
             if self._limite_via and self._escolha_nav is None:
                 visiveis.append(self.placa_limite)
             if self._escolha_nav is None:
+                visiveis.insert(1, self.doca)      # (logo acima do mapa: os botões ficam por cima dela)
                 visiveis += [self.btn_rotas, self.btn_vivo]
                 self._pintar_vivo()
             if self._escolha_nav is not None:
@@ -794,6 +817,11 @@ class TelaMapa(Screen):
         # (com o cartão de chegada na tela, o botão da bateria sai: os dois se encavalavam)
         if self.disco in visiveis and not self._resumo and (self.estado == LIVRE or self.width <= self.height):
             visiveis.append(self.btn_bateria)   # (deitada e navegando, o lugar é dos avisos)
+        na_doca = self.doca in visiveis
+        for b in (self.btn_menos, self.btn_mais, self.btn_rotas, self.btn_vivo):
+            b.plano = na_doca
+            if na_doca and self.doca.parent is None and b.parent is not None:
+                self.raiz.remove_widget(b)     # volta a entrar DEPOIS da doca (por cima dela)
         for w in list(self.raiz.children):
             if w not in visiveis:
                 self.raiz.remove_widget(w)
@@ -888,15 +916,21 @@ class TelaMapa(Screen):
             base = m
         lb, ab, gap = dp(58), dp(54), dp(8)   # botões do mapa: grandes para o guidão
         x_btn = W - m - lb if not (deitada and self.estado == PREVIA) else W - larg_card - 2 * m - lb
-        self.btn_menos.pos, self.btn_menos.size = (x_btn, base), (lb, ab)
-        self.btn_mais.pos, self.btn_mais.size = (x_btn, base + ab + gap), (lb, ab)
-        y_extra = base + 2 * (ab + gap)
         if self.estado == NAVEGANDO and self._escolha_nav is None:
+            # navegando: os quatro numa coluna só (a doca), colados, com um risco entre eles
             alto = ab + dp(8)   # ícone + nome embaixo
-            self.btn_rotas.pos, self.btn_rotas.size = (x_btn, y_extra), (lb, alto)
-            y_extra += alto + gap
-            self.btn_vivo.pos, self.btn_vivo.size = (x_btn, y_extra), (lb, alto)
-            y_extra += alto + gap
+            self.btn_menos.pos, self.btn_menos.size = (x_btn, base), (lb, ab)
+            self.btn_mais.pos, self.btn_mais.size = (x_btn, base + ab), (lb, ab)
+            self.btn_rotas.pos, self.btn_rotas.size = (x_btn, base + 2 * ab), (lb, alto)
+            self.btn_vivo.pos, self.btn_vivo.size = (x_btn, base + 2 * ab + alto), (lb, alto)
+            total = 2 * ab + 2 * alto
+            self.doca.pos, self.doca.size = (x_btn, base), (lb, total)
+            self.doca.divisorias = [base + ab, base + 2 * ab, base + 2 * ab + alto]
+            y_extra = base + total + gap
+        else:
+            self.btn_menos.pos, self.btn_menos.size = (x_btn, base), (lb, ab)
+            self.btn_mais.pos, self.btn_mais.size = (x_btn, base + ab + gap), (lb, ab)
+            y_extra = base + 2 * (ab + gap)
         self.btn_centro.pos = (x_btn, y_extra)
         self.btn_centro.size = (lb, ab)
 
@@ -1203,7 +1237,8 @@ class TelaMapa(Screen):
     def _encerrar(self):
         if not self._confirmando_fim:
             self._confirmando_fim = True
-            self.btn_encerrar.text = "Toque de novo"
+            self.btn_encerrar.text = "De novo"
+            self.btn_encerrar.destaque = True     # cheio só agora: "é isso mesmo?"
             Clock.schedule_once(lambda dt: self._cancelar_fim(), 3)
             return
         App.get_running_app().encerrar_navegacao()
@@ -1211,6 +1246,7 @@ class TelaMapa(Screen):
     def _cancelar_fim(self):
         self._confirmando_fim = False
         self.btn_encerrar.text = "Encerrar"
+        self.btn_encerrar.destaque = False
 
     # --- a cada leitura do GPS e a cada segundo -----------------------------------------
     def _ao_ler(self, vel):

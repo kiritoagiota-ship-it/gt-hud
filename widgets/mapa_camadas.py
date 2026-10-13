@@ -34,6 +34,7 @@ LARGURA_FLUXO_DP = {0: 2.2, 1: 3.4, 2: 3.8, 3: 4.2, 4: 4.2}   # o livre é só u
 ZOOM_FLUXO = 12.5          # de mais longe as cores virariam um borrão
 ZOOM_OCORRENCIAS = 12.0    # acidente, obra, via interditada (trânsito ao vivo): desde bem longe
 ZOOM_LENTOS = 13.5         # o ícone de trânsito lento, um pouco mais de perto (o trecho pintado, sempre)
+TOQUE_LUGAR_DP = 32        # tocou até isso do emblema de um lugar: abre o cartão dele
 TOQUE_OCORRENCIA_DP = 30   # tocou até isso do ícone: abre o que é
 SALTO_S = 0.32             # o "pulo" do ícone tocado
 ZOOM_RADARES = 14.5        # radares aparecem bem antes
@@ -108,8 +109,9 @@ class CamadasDoMapa:
             x, y = self._local_para_tela(r["x"], r["y"])
             x0, y0, x1, y1 = rot.caixa_nome
             d = math.hypot(sx - x, sy - y)
-            no_nome = x + x0 - dp(4) <= sx <= x + x1 + dp(4) and y + y0 - dp(8) <= sy <= y + y1 + dp(8)
-            if d <= dp(22) or no_nome:
+            # (alvo maior, 13/10/2026: com o dedo no guidão era difícil acertar o emblema)
+            no_nome = x + x0 - dp(8) <= sx <= x + x1 + dp(8) and y + y0 - dp(12) <= sy <= y + y1 + dp(12)
+            if d <= dp(TOQUE_LUGAR_DP) or no_nome:
                 if achado is None or d < achado[0]:
                     achado = (d, rot)
         if achado is None:

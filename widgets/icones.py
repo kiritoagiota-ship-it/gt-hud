@@ -46,6 +46,10 @@ def desenhar(nome, cx, cy, tam, cor):
             Line(circle=(cx, cy, raio, 230, 310), width=grosso, cap="round")    # esquerda
 
 
+    elif nome == "parar":
+        # um quadrado de cantos redondos, como o "stop" de um tocador
+        lado = r * 1.15
+        Line(rounded_rectangle=(cx - lado / 2, cy - lado / 2, lado, lado, lado * 0.22), width=grosso)
     elif nome == "menu":
         for k in (-1, 0, 1):
             Line(points=[cx - r * 0.8, cy + k * r * 0.55, cx + r * 0.8, cy + k * r * 0.55],
@@ -55,4 +59,4 @@ def desenhar(nome, cx, cy, tam, cor):
         Line(points=[cx + r * 0.3, cy - r * 0.3, cx + r * 0.9, cy - r * 0.9], width=grosso, cap="round")
 
 
-NOMES = ("mais", "menos", "centralizar", "rotas", "vivo", "menu", "lupa")
+NOMES = ("mais", "menos", "centralizar", "rotas", "vivo", "menu", "lupa", "parar")

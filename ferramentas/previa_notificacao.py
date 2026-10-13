@@ -36,7 +36,34 @@ def _misturar(a, b, f):
     return tuple(int(round(x + (y - x) * f)) for x, y in zip(a, b))
 
 
-def cartao(tema, grande, rotulo, valor, lado, sub, segmentos, acesos):
+SETAS = {   # (pontos do caminho em frações do quadrado, para onde a ponta aponta): como no Java
+    "direita": ([(0.28, 0.92), (0.28, 0.36), (0.76, 0.36)], (1, 0)),
+    "levemente_direita": ([(0.36, 0.92), (0.36, 0.52), (0.68, 0.20)], (0.707, -0.707)),
+    "em_frente": ([(0.5, 0.92), (0.5, 0.24)], (0, -1)),
+}
+
+
+def seta(img, x0, y0, tam, acao, cor, aura):
+    espelho = acao.endswith("esquerda")
+    pts, (dx, dy) = SETAS.get(acao.replace("esquerda", "direita"), SETAS["em_frente"])
+    if espelho:
+        pts, dx = [(1 - x, y) for x, y in pts], -dx
+    caminho = [(x0 + x * tam, y0 + y * tam) for x, y in pts]
+    halo = Image.new("RGBA", img.size, (0, 0, 0, 0))
+    ImageDraw.Draw(halo).line(caminho, fill=aura + (0x50,), width=int(tam * 0.22), joint="curve")
+    img.alpha_composite(halo)
+    d = ImageDraw.Draw(img)
+    d.line(caminho, fill=cor + (255,), width=int(tam * 0.12), joint="curve")
+    for px, py in caminho[:1]:
+        r = tam * 0.06
+        d.ellipse([px - r, py - r, px + r, py + r], fill=cor + (255,))
+    tx, ty = caminho[-1]
+    comp, meia = tam * 0.22, tam * 0.17
+    d.polygon([(tx + dx * comp, ty + dy * comp), (tx - dy * meia, ty + dx * meia), (tx + dy * meia, ty - dx * meia)],
+              fill=cor + (255,))
+
+
+def cartao(tema, grande, rotulo, valor, lado, sub, segmentos, acesos, acao=""):
     cor = {nome: _rgb(v[TEMAS.index(tema)]) for nome, v in CORES.items()}
     u = U
     w, h = int(round(LARGURA_DP * u)), int(round((124 if grande else 46) * u))
@@ -52,6 +79,14 @@ def cartao(tema, grande, rotulo, valor, lado, sub, segmentos, acesos):
     mascara = Image.new("L", (w, h), 0)
     ImageDraw.Draw(mascara).polygon(contorno, fill=255)
     img.paste(degrade, (0, 0), mascara)
+    linhas = Image.new("RGBA", (w, h), (0, 0, 0, 0))     # linhas finas de painel no fundo
+    dl_ = ImageDraw.Draw(linhas)
+    yy = m + 5 * u
+    while yy < h - m:
+        dl_.line([(m, yy), (w - m, yy)], fill=cor["borda"] + (0x10 if tema == "claro" else 0x17,), width=1)
+        yy += 5 * u
+    linhas.putalpha(Image.composite(linhas.getchannel("A"), Image.new("L", (w, h), 0), mascara))
+    img = Image.alpha_composite(img, linhas)
     brilho = Image.new("RGBA", (w, h), (0, 0, 0, 0))
     ImageDraw.Draw(brilho).line(contorno + contorno[:1], fill=cor["aura"] + (0x22 if tema == "claro" else 0x48,),
                                 width=int(5 * u), joint="curve")
@@ -70,6 +105,8 @@ def cartao(tema, grande, rotulo, valor, lado, sub, segmentos, acesos):
             forma = [(x0 + inclina, y), (x0 + cada + inclina, y), (x0 + cada, y + alto), (x0, y + alto)]
             if n < acesos:
                 dela = _misturar(cor["borda"], cor["aura"], n / (segmentos - 1.0) if segmentos > 1 else 0.0)
+                if n == acesos - 1:      # a barrinha da vez: mais clara
+                    dela = _misturar(dela, (255, 255, 255), 0.42)
                 halo = Image.new("RGBA", (w, h), (0, 0, 0, 0))
                 ImageDraw.Draw(halo).line(forma + forma[:1], fill=dela + (0x55,), width=int(3.2 * u), joint="curve")
                 img.alpha_composite(halo)
@@ -79,7 +116,12 @@ def cartao(tema, grande, rotulo, valor, lado, sub, segmentos, acesos):
 
     if not grande:
         x = margem
-        if segmentos > 0:
+        if acao:
+            tam = h - 2 * m - 12 * u
+            seta(img, x, (h - tam) / 2.0, tam, acao, cor["borda"], cor["aura"])
+            d = ImageDraw.Draw(img)
+            x += tam + 8 * u
+        elif segmentos > 0:
             alto, vao = h - 2 * m - 16 * u, 3.5 * u
             cada = min(12 * u, (w * 0.34) / segmentos - vao)
             barrinhas(x, (h - alto) / 2.0, cada, alto, vao, 4 * u)
@@ -106,7 +148,17 @@ def cartao(tema, grande, rotulo, valor, lado, sub, segmentos, acesos):
         d.text((w - margem - d.textlength(lado, font=f_lado), cy + 5.2 * u), lado, font=f_lado, fill=cor["borda"], anchor="ls")
     d.text((margem + 2 * dl + 7 * u, cy + 3.7 * u), rotulo,
            font=_fonte(10.5 * u), fill=cor["suave"], anchor="ls")
-    d.text((margem, 63 * u), valor, font=_fonte(33 * u), fill=cor["forte"], anchor="ls")
+    x_valor = margem
+    if acao:
+        seta(img, margem, 28 * u, 40 * u, acao, cor["borda"], cor["aura"])
+        d = ImageDraw.Draw(img)
+        x_valor += 50 * u
+    from PIL import ImageFilter
+    brilho_n = Image.new("RGBA", (w, h), (0, 0, 0, 0))      # o brilho atrás do número
+    ImageDraw.Draw(brilho_n).text((x_valor, 63 * u), valor, font=_fonte(33 * u), fill=cor["aura"] + (200,), anchor="ls")
+    img.alpha_composite(brilho_n.filter(ImageFilter.GaussianBlur(4 * u)))
+    d = ImageDraw.Draw(img)
+    d.text((x_valor, 63 * u), valor, font=_fonte(33 * u), fill=cor["forte"], anchor="ls")
     if segmentos > 0:
         vao, inclina = 4 * u, 5 * u
         barrinhas(margem, 75 * u, (w - 2 * margem - inclina - (segmentos - 1) * vao) / segmentos, 15 * u, vao, inclina)
@@ -118,9 +170,10 @@ def cartao(tema, grande, rotulo, valor, lado, sub, segmentos, acesos):
 def folha():
     """Os dois tamanhos, na bateria e na rota, nos três temas, numa imagem só."""
     exemplos = [("SISTEMA  ·  BATERIA DA MOTO", "12,4 km", "4/5", "Carga inteira pelo seu uso: uns 41 km", 5, 4),
-                ("SISTEMA  ·  MISSÃO  ·  BARBEARIA IMAGEM", "14 min", "2,3 km", "Vire à direita em 200 m (Rua 9)", 12, 5)]
+                ("SISTEMA  ·  MISSÃO  ·  BARBEARIA IMAGEM", "200 m", "14 min",
+                 "Vire à direita (Rua 9)  ·  faltam 2,3 km  ·  chega às 13:14", 12, 5, "direita")]
     pecas = []
-    for tema in ("monarca", "escuro", "claro"):
+    for tema in ("monarca", "escuro"):
         for ex in exemplos:
             ex = (ex[0] if tema == "monarca" else ex[0].replace("SISTEMA  ·  ", "").replace("MISSÃO", "ROTA"),) + ex[1:]
             pecas.append((tema, cartao(tema, False, *ex)))

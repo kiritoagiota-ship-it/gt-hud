@@ -280,6 +280,63 @@ def viagens(dt):
     depois(1.6, completa)
 
 
+def lugares(dt):
+    """Os lugares (mercado, farmacia...) que ja estao na tela FICAM enquanto o mapa anda ou o zoom
+    se afasta um pouco (o dono, 13/10/2026: "qualquer coisinha o lugar some do mapa")."""
+    m = tela().mapa
+    m.seguindo = False
+    m.centro = (-16.6865, -49.2648)     # Setor Oeste: cheio de comercio
+    m.zoom = 17.7
+    m._aplicar()
+
+    def base(r):
+        return r.info.get("tipo") == "poi" and "conf" in r.info
+
+    def na_tela(info):
+        x, y = m._local_para_tela(info["x"], info["y"])
+        if not (m.x + dp(40) < x < m.right - dp(40) and m.y + dp(40) < y < m.top - dp(40)):
+            return False
+        # (debaixo de um botao ou painel ele sai mesmo: nao conta como sumico)
+        return not any(o[0] - dp(20) < x < o[2] + dp(20) and o[1] - dp(20) < y < o[3] + dp(20)
+                       for o in m.areas_cobertas)
+
+    def medir():
+        m._escolher_rotulos()
+        antes = [r.info for r in m._rotulos if base(r)]
+        checar(len(antes) >= 5, "lugares da base na tela: %d" % len(antes))
+        sumiram = 0
+        for passo in range(8):           # o mapa anda aos poucos, como arrastando com o dedo
+            m._arrastar(-dp(22), dp(14))
+            m._aplicar()
+            m._escolher_rotulos()
+            agora = [r.info for r in m._rotulos if base(r)]
+            sumiram += sum(1 for i in antes if na_tela(i) and not any(i is j for j in agora))
+            antes = [i for i in antes if any(i is j for j in agora)] + [j for j in agora
+                                                                        if not any(j is i for i in antes)]
+        T["sumiram"] = sumiram
+        checar(sumiram <= 2, "arrastando o mapa, lugar que esta a vista nao some: %d sumicos em 8 passos" % sumiram)
+        m._escolher_rotulos()
+        antes = [r.info for r in m._rotulos if base(r)]
+        m.zoom = 16.2                    # abaixo de onde os lugares entram (16,5): antes sumiam todos
+        m._aplicar()
+        m._escolher_rotulos()
+        agora = [r.info for r in m._rotulos if base(r)]
+        ficaram = sum(1 for i in antes if any(i is j for j in agora))
+        T["ficaram"] = (ficaram, len(antes))
+        checar(ficaram >= 0.35 * len(antes) and ficaram >= 2,
+               "afastando o zoom, os lugares que estavam na tela ficam: %d de %d" % (ficaram, len(antes)))
+        if agora:   # o toque pega a ate ~30 dp do emblema
+            x, y = m._local_para_tela(agora[0]["x"], agora[0]["y"])
+            checar(m.lugar_em(x + dp(20), y + dp(20)) is not None, "tocar perto do emblema (28 dp) acha o lugar")
+        m.zoom = 15.0                    # bem longe: ai sim saem
+        m._aplicar()
+        m._escolher_rotulos()
+        checar(not [r for r in m._rotulos if base(r)], "com o zoom bem afastado, os lugares saem")
+        m.zoom = 16.8
+        m.seguindo = True
+    depois(1.6, medir)
+
+
 T = {}
 
 
@@ -297,5 +354,6 @@ Clock.schedule_once(curva, 15)
 Clock.schedule_once(pontilhado, 16.4)
 Clock.schedule_once(telas, 17.8)
 Clock.schedule_once(viagens, 19.6)
-Clock.schedule_once(fim, 22.5)
+Clock.schedule_once(lugares, 22.2)
+Clock.schedule_once(fim, 25)
 runpy.run_path("main.py", run_name="__main__")

@@ -76,8 +76,10 @@ def textos(app):
 
 def cartao(app):
     """O que o cartão DESENHADO da notificação mostra (java/.../CartaoNotificacao.java):
-    (rótulo, valor grande, o do lado, frase, quantas barrinhas, quantas acesas). Valor
-    vazio = sem cartão (fica a notificação comum)."""
+    (rótulo, valor grande, o do lado, frase, quantas barrinhas, quantas acesas, seta). Valor
+    vazio = sem cartão (fica a notificação comum). Na rota, o valor grande é a distância
+    até a próxima curva, com a SETA dela desenhada ao lado (pedido do dono, 13/10/2026:
+    dá para se guiar pela tela bloqueada)."""
     sistema = "SISTEMA  ·  " if tema.monarca() else ""
     titulo, texto, l1, l2 = textos(app)
     nav, e = app.nav, app.estado_nav
@@ -87,18 +89,28 @@ def cartao(app):
             bat = getattr(app, "bateria", None)
             if bat is not None and bat.ativa:
                 return (sistema + "BATERIA DA MOTO", fmt_dist_nav(bat.metros), "%d/5" % bat.barras,
-                        texto, 5, int(bat.barras))
-            return ("", "", "", "", 0, 0)
+                        texto, 5, int(bat.barras), "")
+            return ("", "", "", "", 0, 0, "")
         return (sistema + ("VIAGEM PAUSADA" if v.estado == v.PAUSADA else "GRAVANDO VIAGEM"), l1, l2,
-                texto, 0, 0)
+                texto, 0, 0, "")
     destino = (getattr(app, "destino", None) or {}).get("nome", "")
     rotulo = sistema + ("MISSÃO" if tema.monarca() else "ROTA") + ("  ·  " + destino.upper()[:26] if destino else "")
     passo = max(0, feito(app))
     if nav.chegou:
-        return (rotulo, "Chegou", "", texto, 12, 12)
+        return (rotulo, "Chegou", "", texto, 12, 12, "chegada")
     if not e:
-        return (rotulo, "...", "", texto, 12, 0)
-    return (rotulo, l1, l2, texto, 12, int(round(passo * 12 / 100.0)))
+        return (rotulo, "...", "", texto, 12, 0, "")
+    acesos = int(round(passo * 12 / 100.0))
+    m = e.get("manobra")
+    falta = "faltam %s  ·  chega às %s" % (l2, fmt_hora_chegada(e["restante_s"]))
+    if e.get("fora_da_rota"):
+        return (rotulo, "Fora da rota", l1, texto, 12, acesos, "")
+    if m is None:
+        return (rotulo, l2, l1, "Siga em frente  ·  chega às %s" % fmt_hora_chegada(e["restante_s"]), 12, acesos,
+                "em_frente")
+    # a curva: a seta e a distância até ela em destaque; os minutos do lado; a instrução e o resto embaixo
+    instrucao = texto_manobra(m["acao"], m.get("saida")) + (" (%s)" % m["ruas"] if m.get("ruas") else "")
+    return (rotulo, fmt_dist_nav(e["dist_manobra"]), l1, instrucao + "  ·  " + falta, 12, acesos, m["acao"])
 
 
 def desenho_da_rota(nav, ancora=None):
@@ -225,8 +237,8 @@ class _Android:
     def cartao(self, dados):
         """O cartão desenhado da notificação (ver cartao(app))."""
         if self.servico is not None:
-            rotulo, valor, lado, sub, segmentos, acesos = dados
-            self._chamar(self.servico.cartao, rotulo, valor, lado, sub, int(segmentos), int(acesos))
+            rotulo, valor, lado, sub, segmentos, acesos, seta = dados
+            self._chamar(self.servico.cartao, rotulo, valor, lado, sub, int(segmentos), int(acesos), seta)
 
     def botao_encerrar(self, ligado):
         """O botão "Encerrar" na notificação (só contando a bateria, sem rota)."""
