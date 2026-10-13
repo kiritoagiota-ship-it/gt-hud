@@ -74,6 +74,33 @@ def textos(app):
     return titulo, texto, minutos, km
 
 
+def cartao(app):
+    """O que o cartão DESENHADO da notificação mostra (java/.../CartaoNotificacao.java):
+    (rótulo, valor grande, o do lado, frase, quantas barrinhas, quantas acesas). Valor
+    vazio = sem cartão (fica a notificação comum)."""
+    sistema = "SISTEMA  ·  " if tema.monarca() else ""
+    titulo, texto, l1, l2 = textos(app)
+    nav, e = app.nav, app.estado_nav
+    if nav is None:
+        v = getattr(app, "viagem", None)
+        if v is None or v.estado == v.PARADA:
+            bat = getattr(app, "bateria", None)
+            if bat is not None and bat.ativa:
+                return (sistema + "BATERIA DA MOTO", fmt_dist_nav(bat.metros), "%d/5" % bat.barras,
+                        texto, 5, int(bat.barras))
+            return ("", "", "", "", 0, 0)
+        return (sistema + ("VIAGEM PAUSADA" if v.estado == v.PAUSADA else "GRAVANDO VIAGEM"), l1, l2,
+                texto, 0, 0)
+    destino = (getattr(app, "destino", None) or {}).get("nome", "")
+    rotulo = sistema + ("MISSÃO" if tema.monarca() else "ROTA") + ("  ·  " + destino.upper()[:26] if destino else "")
+    passo = max(0, feito(app))
+    if nav.chegou:
+        return (rotulo, "Chegou", "", texto, 12, 12)
+    if not e:
+        return (rotulo, "...", "", texto, 12, 0)
+    return (rotulo, l1, l2, texto, 12, int(round(passo * 12 / 100.0)))
+
+
 def desenho_da_rota(nav, ancora=None):
     """O trecho da rota em volta da pessoa, para o painel flutuante desenhar
     no lugar do mapa: ("x,y;x,y;...", início m, aqui m).
@@ -194,6 +221,12 @@ class _Android:
             # (antes do estilo: é ele que repinta a bolha, já com as cores do Monarca)
             self._chamar(self.servico.temaMonarca, tema.monarca())
             self._chamar(self.servico.estilo, bool(claro), int(feito))
+
+    def cartao(self, dados):
+        """O cartão desenhado da notificação (ver cartao(app))."""
+        if self.servico is not None:
+            rotulo, valor, lado, sub, segmentos, acesos = dados
+            self._chamar(self.servico.cartao, rotulo, valor, lado, sub, int(segmentos), int(acesos))
 
     def botao_encerrar(self, ligado):
         """O botão "Encerrar" na notificação (só contando a bateria, sem rota)."""
@@ -389,11 +422,12 @@ class SegundoPlano:
         self._t_aviso = agora
         titulo, texto, l1, l2 = textos(self.app)
         # (só reescreve quando MUDA: parado, eram os mesmos dizeres a cada 2 s, à toa)
-        agora_mostra = (titulo, texto, feito(self.app), self._so_bateria(), tema.modo)
+        agora_mostra = (titulo, texto, feito(self.app), self._so_bateria(), tema.modo, cartao(self.app))
         if forcar or agora_mostra != self._notificado:
             self._notificado = agora_mostra
             self.android.estilo(tema.claro(), agora_mostra[2])
             self.android.botao_encerrar(agora_mostra[3])
+            self.android.cartao(agora_mostra[5])
             self.android.notificar(titulo, texto)
         if self.minimizado and not self._painel_a_vista:
             self.android.atualizar_bolha(l1, l2)

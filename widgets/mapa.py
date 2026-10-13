@@ -238,6 +238,7 @@ class MapaHUD(CamadasDoMapa, Widget):
         self._onda_toque = None             # ... e a onda que sai dele: (hora, (x, y) locais[, cor])
         self._zoom_toque = None             # toque duplo: o zoom deslizando até o nível seguinte
         self._zoom_manual_ate = 0.0         # até quando o zoom automático da rota fica quieto
+        self._lugares_juntos = (None, [])   # (quais listas de lugares, elas juntas e ordenadas)
         self._dest_pousou = True            # o pino que está caindo já tocou o chão?
         self._curva = []                    # a seta da próxima curva, desenhada no chão: [(lat, lon)]
         self._rastro = collections.deque(maxlen=RASTRO_PONTOS)   # por onde a seta acabou de passar (locais)
@@ -859,17 +860,28 @@ class MapaHUD(CamadasDoMapa, Widget):
             return
         if self._ev_rotulos is None:
             espera = max(0.0, REPOSICIONAR_S - (time.time() - self._t_rotulos))
-            self._ev_rotulos = Clock.schedule_once(self._escolher_rotulos, espera)
+            self._ev_rotulos = Clock.schedule_once(self._escolher_em_duas, espera)
 
     @seguro
     def _escolher_rotulos(self, *a):
         """Escolhe quais nomes cabem na tela sem se encostar (mais importante
         primeiro; quem já está na tela tem preferência, para os nomes não
         ficarem piscando com o mapa andando/girando)."""
+        self._por_rotulos(self._juntar_rotulos())
+
+    @seguro
+    def _escolher_em_duas(self, *a):
+        """A mesma escolha, repartida em DOIS quadros seguidos: num junta os candidatos, no
+        outro decide quais cabem. Navegando, ela roda umas 3 vezes por segundo, e inteira num
+        quadro só era o maior "soluço" medido no app (12/10/2026): num celular, 2 a 3 quadros
+        perdidos a cada vez. Em duas metades, cada uma cabe no seu quadro."""
+        dados = self._juntar_rotulos()
+        Clock.schedule_once(lambda dt: self._por_rotulos(dados), 0)
+
+    def _juntar_rotulos(self):
+        """1ª metade: os nomes que estão à vista, do mais importante para o menos."""
         self._ev_rotulos = None
         self._t_rotulos = time.time()
-        self._novas_texturas = 0
-        faltou_textura = False
         cx, cy, s, ax, ay, c0, s0 = self._medir_quadro()
         x0, y0, x1, y1 = self.x + dp(8), self.y + dp(8), self.right - dp(8), self.top - dp(8)
         antigos = {id(rot.info): rot for rot in self._rotulos}
@@ -904,6 +916,15 @@ class MapaHUD(CamadasDoMapa, Widget):
                     peso = r["peso"] + (BONUS_JA_NA_TELA if id(r) in antigos else 0.0)
                     candidatos.append((peso, sx, sy, r))
         candidatos.sort(key=lambda t: -t[0])
+        return candidatos, s
+
+    @seguro
+    def _por_rotulos(self, dados):
+        """2ª metade: dos candidatos, quais cabem sem se encostar; e põe na tela."""
+        candidatos, s = dados
+        self._novas_texturas = 0
+        faltou_textura = False
+        antigos = {id(rot.info): rot for rot in self._rotulos}
         cr = self.credito
         ocupados = list(self.areas_cobertas) + [(cr.x, cr.y, cr.right, cr.top)]
         usados_texto, novos = {}, []
@@ -912,6 +933,8 @@ class MapaHUD(CamadasDoMapa, Widget):
         for _, sx, sy, r in candidatos:
             tipo = r["tipo"]
             if conta[tipo] >= limite[tipo]:
+                if conta == limite:
+                    break      # os três tipos já estão cheios: o resto da lista não entra
                 continue
             if tipo == "rua":
                 tamanho = sp(13.5) if r["peso"] < 4 else sp(14.5)
@@ -973,7 +996,7 @@ class MapaHUD(CamadasDoMapa, Widget):
         self._escolher_sinais()
         if faltou_textura and self._ev_rotulos is None:
             # ainda há nomes para desenhar: continua logo (não espera 0,45 s)
-            self._ev_rotulos = Clock.schedule_once(self._escolher_rotulos, 0.05)
+            self._ev_rotulos = Clock.schedule_once(self._escolher_em_duas, 0.05)
 
     # --- lugares da base da busca -----------------------------------------------------
     def _lugares_a_vista(self, lx0, ly0, lx1, ly1):
@@ -1000,7 +1023,11 @@ class MapaHUD(CamadasDoMapa, Widget):
                     listas.append(self._lugares[(cx, cy)])
         if len(listas) == 1:
             return listas[0]
-        return sorted((r for lista in listas for r in lista), key=lambda r: -r["conf"])
+        # (as mesmas listas de antes: a ordenação de ~2 mil lugares não precisa ser refeita)
+        quais = tuple(id(lista) for lista in listas)
+        if self._lugares_juntos[0] != quais:
+            self._lugares_juntos = (quais, sorted((r for lista in listas for r in lista), key=lambda r: -r["conf"]))
+        return self._lugares_juntos[1]
 
     def _lugares_chegaram(self, resposta):
         celula, linhas = resposta

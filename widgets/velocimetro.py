@@ -160,6 +160,13 @@ class Velocimetro(Widget):
             self._t_varredura = 0.0
             self._on_velocidade()
 
+    def _cor_monarca(self, i):
+        cores = getattr(self, "_cores_monarca", None)
+        if cores is None or len(cores) != self.segmentos:
+            cores = self._cores_monarca = [tema.misturar(tema.CIANO, tema.ROXO, k / max(1.0, self.segmentos - 1.0))
+                                           for k in range(self.segmentos)]
+        return cores[i]
+
     def _colorir(self):
         """Só as cores: segmentos acesos até a velocidade mostrada, número e pisca."""
         acesos = self._mostrada / float(self.maximo) * self.segmentos
@@ -168,7 +175,8 @@ class Velocimetro(Widget):
             v_seg = (i + 0.5) * self.maximo / float(self.segmentos)
             acima = v_seg > self.limite
             if i < acesos:
-                c = tema.LARANJA if acima else tema.CIANO
+                # (Monarca: os segmentos acesos vão do azul ao roxo, como a aura das janelas)
+                c = tema.LARANJA if acima else (self._cor_monarca(i) if tema.monarca() else tema.CIANO)
                 if apagado_pisca:
                     c = tema.com_alfa(c, 0.3)
                 brilho.rgba = tema.com_alfa(c, 0.16)

@@ -146,6 +146,9 @@ class TesteSegundoPlano(unittest.TestCase):
         self.assertEqual(textos(app)[:2], ("Bateria 4/5  ·  12,4 km nesta carga",
                                            "Carga inteira pelo seu uso: uns 41 km"))
         self.assertEqual(segundo_plano.feito(app), 80)           # a barra da notificação = as barrinhas
+        # o cartão desenhado: km grande, "4/5" do lado e 4 das 5 barrinhas acesas
+        self.assertEqual(segundo_plano.cartao(app), ("BATERIA DA MOTO", "12,4 km", "4/5",
+                                                      "Carga inteira pelo seu uso: uns 41 km", 5, 4))
         fundo = SegundoPlano(app, android)
         fundo.ao_pausar()                                        # serviço ainda desligado: o Android não
         self.assertFalse(fundo.minimizado)                       # deixa ligar com o app saindo da tela
@@ -159,6 +162,7 @@ class TesteSegundoPlano(unittest.TestCase):
         app.gps.leituras.append({"lat": -16.68, "lon": -49.25, "speed": 10.0})
         self.assertTrue(esperar(lambda: app.processadas))        # a leitura chegou com o app minimizado
         self.assertIn(("botao_encerrar", True), android.chamadas)   # sem rota: botão "Encerrar"
+        self.assertIn("cartao", android.nomes())
         # o dono tocou em "Encerrar" (ou tirou o app dos recentes): guarda e encerra de vez
         guardou = []
         app.guardar_tudo_ao_fechar = lambda: guardou.append(True)

@@ -48,6 +48,27 @@ def degrade(base=None):
     return tex
 
 
+_faixa_monarca = []
+
+
+def faixa_monarca():
+    """Textura 64x1 do azul ao roxo (escuros o bastante para o texto branco ler no sol):
+    o corpo dos botões cheios no tema Monarca (pedido do dono, 12/10/2026: caprichar na
+    estética do Monarca)."""
+    if not _faixa_monarca:
+        n = 64
+        de, para = (0.13, 0.36, 0.90), (0.50, 0.22, 0.93)
+        dados = bytearray()
+        for k in range(n):
+            f = k / (n - 1.0)
+            dados += bytes([int(255 * (a + (b - a) * f)) for a, b in zip(de, para)] + [255])
+        tex = Texture.create(size=(n, 1), colorfmt="rgba")
+        tex.blit_buffer(bytes(dados), colorfmt="rgba", bufferfmt="ubyte")
+        tex.wrap = "clamp_to_edge"
+        _faixa_monarca.append(tex)
+    return _faixa_monarca[0]
+
+
 def _poligono(x, y, w, h, c):
     # corta o canto superior esquerdo e o inferior direito
     return [(x + c, y + h), (x + w, y + h), (x + w, y + c),
@@ -167,7 +188,17 @@ class BotaoHUD(Button):
             self._cor_halo = Color(*tema.com_alfa(self.cor, self._halo_base))
             Line(points=plano, close=True, width=dp(3.4), joint="round")
             # corpo
-            if self.destaque:
+            # (Monarca: o botão cheio da cor do tema vira um degradê do azul ao roxo, texto branco)
+            aura = self.destaque and tema.monarca() and list(self.cor[:3]) == list(tema.CIANO[:3])
+            if aura:
+                Color(1, 1, 1, apagado)
+                vert = []
+                for px, py in pts:
+                    vert += [px, py, (px - x) / w if w else 0.0, 0.5]
+                Mesh(vertices=vert, indices=list(range(len(pts))), mode="triangle_fan", texture=faixa_monarca())
+                Color(1, 1, 1, 0.22 * apagado)          # um fio de luz na beira de cima
+                Line(points=[x + c, y + h - dp(1.5), x + w - dp(2), y + h - dp(1.5)], width=dp(1))
+            elif self.destaque:
                 Color(*tema.com_alfa(self.cor, apagado))
                 malha_degrade(pts, y, h, 0.86)   # cheio: degradê leve, a cor não pode perder força
             else:
@@ -184,7 +215,7 @@ class BotaoHUD(Button):
             Line(points=plano, close=True, width=dp(1.2))
             for traco in cantos(pts, c):
                 Line(points=traco, width=dp(2.1), cap="square", joint="miter")
-        texto = tema.FUNDO if self.destaque else self.cor
+        texto = tema.BRANCO if aura else (tema.FUNDO if self.destaque else self.cor)
         self.canvas.after.clear()
         if self.icone:
             # com texto: ícone em cima e o nome pequeno embaixo; sem texto: só o ícone, no meio

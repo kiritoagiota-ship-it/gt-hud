@@ -791,7 +791,8 @@ class TelaMapa(Screen):
                 visiveis.append(self.chip_subida)
             if self._tem_alerta:
                 visiveis.append(self.chip_alerta)
-        if self.disco in visiveis and (self.estado == LIVRE or self.width <= self.height):
+        # (com o cartão de chegada na tela, o botão da bateria sai: os dois se encavalavam)
+        if self.disco in visiveis and not self._resumo and (self.estado == LIVRE or self.width <= self.height):
             visiveis.append(self.btn_bateria)   # (deitada e navegando, o lugar é dos avisos)
         for w in list(self.raiz.children):
             if w not in visiveis:

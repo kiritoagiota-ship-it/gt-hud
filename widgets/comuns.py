@@ -51,6 +51,12 @@ class PainelHUD(BoxLayout):
             Line(points=plano, close=True, width=dp(3.6), joint="round")
             Color(*tema.com_alfa(tema.PAINEL_CLARO, 0.96))         # corpo em degradê
             malha_degrade(pts, self.y, self.height)
+            if tema.monarca() and self.height > dp(60):   # um 2º fio por dentro: a "janela do Sistema"
+                i = dp(4)
+                dentro = [v for p in _poligono(self.x + i, self.y + i, self.width - 2 * i, self.height - 2 * i,
+                                               max(dp(2), c - i * 0.6)) for v in p]
+                Color(*tema.com_alfa(tema.ROXO, 0.30))
+                Line(points=dentro, close=True, width=dp(1))
             Color(*tema.com_alfa(self.cor_borda, 0.9))
             Line(points=plano, close=True, width=dp(1.2))
             for traco in cantos(pts, c):                           # cantos marcados
@@ -272,6 +278,11 @@ def abrir_janela(janela):
         if tema.monarca():
             borda.add(Color(*tema.com_alfa(tema.ROXO, 0.16)))
             borda.add(Line(points=plano, close=True, width=dp(7), joint="round"))
+            i = dp(4)
+            dentro = [v for p in _poligono(janela.x + i, janela.y + i, janela.width - 2 * i,
+                                           janela.height - 2 * i, c - i * 0.6) for v in p]
+            borda.add(Color(*tema.com_alfa(tema.ROXO, 0.30)))
+            borda.add(Line(points=dentro, close=True, width=dp(1)))
         borda.add(Color(*tema.com_alfa(tema.CIANO, 0.9)))
         borda.add(Line(points=plano, close=True, width=dp(1.3)))
         for traco in cantos(pts, c):
@@ -316,7 +327,13 @@ def escolher(titulo, opcoes, texto="", altura_texto=None):
     caixa = BoxLayout(orientation="vertical", spacing=dp(8), padding=dp(4))
     altura = dp(64) + len(opcoes) * dp(56)
     if texto:
-        altura_texto = altura_texto or dp(96)
+        if altura_texto is None:
+            # a altura acompanha o texto (antes eram sempre 4 linhas: sobrava um buraco entre a
+            # frase curta e os botões). Conta as linhas com folga: melhor sobrar que cortar.
+            from kivy.core.window import Window
+            por_linha = max(18, int((Window.width * 0.92 - dp(44)) / ((tema.T_ROTULO + 2) * 0.58)))
+            linhas = sum(1 + len(l) // por_linha for l in texto.split("\n"))
+            altura_texto = max(dp(30), linhas * (tema.T_ROTULO + 2 + dp(6)) + dp(10))
         aviso = Texto(text=texto, font_size=tema.T_ROTULO + 2, size_hint_y=None, height=altura_texto,
                       halign="left", valign="top")
         aviso.bind(size=lambda w, s: setattr(w, "text_size", s))

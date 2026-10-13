@@ -11,6 +11,7 @@ import android.content.pm.ServiceInfo;
 import android.os.Build;
 import android.os.IBinder;
 import android.os.PowerManager;
+import android.widget.RemoteViews;
 
 /**
  * Serviço "de primeiro plano" (tipo localização) enquanto há rota ativa:
@@ -23,7 +24,10 @@ import android.os.PowerManager;
  * Declarado no AndroidManifest pelo build (ver .github/workflows/build.yml).
  */
 public class ServicoNavegacao extends Service {
-    private static final String CANAL = "navegacao";
+    // (canal novo na 1.0.77: o antigo, "navegacao", era de importância baixa, e o Android
+    // esconde esses da tela bloqueada; a importância de um canal já criado não muda)
+    private static final String CANAL = "gthud_painel";
+    private static final String CANAL_ANTIGO = "navegacao";
     private static final int ID = 7001;
     private static volatile String titulo = "GT-HUD navegando";
     private static volatile String texto = "";
@@ -37,6 +41,13 @@ public class ServicoNavegacao extends Service {
     // o dono fechou: tirou o app dos recentes ou tocou em "Encerrar" na notificação
     private static volatile boolean pediuFechar = false;
     private static volatile boolean comBotao = false;  // mostra o botão "Encerrar"
+    // o cartão desenhado (CartaoNotificacao): rótulo, valor grande, o do lado, a frase e as barrinhas
+    private static volatile String cRotulo = "";
+    private static volatile String cValor = "";
+    private static volatile String cLado = "";
+    private static volatile String cSub = "";
+    private static volatile int cSegmentos = 0;
+    private static volatile int cAcesos = 0;
     private PowerManager.WakeLock acordado;
     private static volatile ServicoNavegacao instancia;   // o serviço no ar (para renovar a trava)
 
@@ -61,6 +72,16 @@ public class ServicoNavegacao extends Service {
     /** O dono fechou (recentes ou botão "Encerrar")? O Python pergunta e encerra o app. */
     public static boolean fechou() {
         return pediuFechar;
+    }
+
+    /** O que o cartão desenhado mostra (vale na próxima atualização). Valor vazio = sem cartão. */
+    public static void cartao(String rotulo, String valor, String lado, String sub, int segmentos, int acesos) {
+        cRotulo = rotulo == null ? "" : rotulo;
+        cValor = valor == null ? "" : valor;
+        cLado = lado == null ? "" : lado;
+        cSub = sub == null ? "" : sub;
+        cSegmentos = segmentos;
+        cAcesos = acesos;
     }
 
     /** Liga/desliga o botão "Encerrar" da notificação (vale na próxima atualização). */
@@ -193,12 +214,20 @@ public class ServicoNavegacao extends Service {
     // --- notificação ---------------------------------------------------------------
     private static void criarCanal(Context c) {
         if (Build.VERSION.SDK_INT >= 26) {
-            NotificationChannel canal = new NotificationChannel(CANAL, "Navegação",
-                    NotificationManager.IMPORTANCE_LOW);  // sem som: quem fala é o assistente
-            canal.setDescription("Km e minutos até o destino durante a rota");
+            NotificationChannel canal = new NotificationChannel(CANAL, "Painel do GT-HUD",
+                    NotificationManager.IMPORTANCE_DEFAULT);
+            canal.setDescription("A rota e os km da carga, também na tela bloqueada");
             canal.setShowBadge(false);
+            canal.setSound(null, null);          // sem som: quem fala é o assistente
+            canal.enableVibration(false);
+            canal.setLockscreenVisibility(Notification.VISIBILITY_PUBLIC);
             NotificationManager nm = (NotificationManager) c.getSystemService(Context.NOTIFICATION_SERVICE);
             nm.createNotificationChannel(canal);
+            try {
+                nm.deleteNotificationChannel(CANAL_ANTIGO);
+            } catch (Exception e) {
+                // nada: o canal antigo só fica sobrando nas configurações
+            }
         }
     }
 
@@ -213,6 +242,34 @@ public class ServicoNavegacao extends Service {
                 PendingIntent.FLAG_UPDATE_CURRENT | PendingIntent.FLAG_IMMUTABLE);
     }
 
+    /** Troca o miolo da notificação pelo cartão desenhado. Qualquer problema (layout que não
+     *  entrou no APK, imagem recusada): fica a notificação comum, que já está montada. */
+    private static void porCartao(Context c, Notification.Builder b) {
+        try {
+            if (cValor.length() == 0) {
+                return;
+            }
+            String pacote = c.getPackageName();
+            int layout = c.getResources().getIdentifier("gthud_notificacao", "layout", pacote);
+            int imagem = c.getResources().getIdentifier("gthud_cartao", "id", pacote);
+            if (layout == 0 || imagem == 0) {
+                return;
+            }
+            RemoteViews faixa = new RemoteViews(pacote, layout);
+            faixa.setImageViewBitmap(imagem, CartaoNotificacao.desenhar(c, false, claro, monarca,
+                    cRotulo, cValor, cLado, cSub, cSegmentos, cAcesos));
+            RemoteViews aberto = new RemoteViews(pacote, layout);
+            aberto.setImageViewBitmap(imagem, CartaoNotificacao.desenhar(c, true, claro, monarca,
+                    cRotulo, cValor, cLado, cSub, cSegmentos, cAcesos));
+            b.setCustomContentView(faixa);
+            b.setCustomBigContentView(aberto);
+            b.setStyle(new Notification.DecoratedCustomViewStyle());
+            b.setProgress(0, 0, false);     // (as barrinhas do cartão já mostram)
+        } catch (Throwable e) {
+            // desenho é enfeite: nunca derruba a notificação
+        }
+    }
+
     private static Notification montar(Context c) {
         criarCanal(c);
         Notification.Builder b = Build.VERSION.SDK_INT >= 26
@@ -225,6 +282,7 @@ public class ServicoNavegacao extends Service {
                 .setOnlyAlertOnce(true)
                 .setShowWhen(false)
                 .setCategory(Notification.CATEGORY_NAVIGATION)
+                .setVisibility(Notification.VISIBILITY_PUBLIC)   // inteira também na tela bloqueada
                 .setContentIntent(abrirApp(c));
         b.setColor(claro ? 0xFF00788F : (monarca ? 0xFF5AA0FF : 0xFF00E5FF));
         if (comBotao) {
@@ -236,6 +294,7 @@ public class ServicoNavegacao extends Service {
         if (progresso >= 0) {
             b.setProgress(100, Math.min(100, progresso), false);   // barra: quanto da rota já foi
         }
+        porCartao(c, b);
         if (Build.VERSION.SDK_INT >= 31) {
             b.setForegroundServiceBehavior(Notification.FOREGROUND_SERVICE_IMMEDIATE);
         }
