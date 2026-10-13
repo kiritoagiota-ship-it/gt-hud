@@ -19,6 +19,9 @@ GRAVAR_A_CADA_M = 150.0     # de quanto em quanto grava no arquivo (não a cada 
 CARGA_MINIMA_M = 300.0      # carga com menos que isso não entra no histórico (toque sem querer)
 HISTORICO_MAX = 40
 MEDIA_ABSURDA_KMH = 70.0    # média acima disso não é da moto: é conta estragada, não mostra
+CARGAS_NO_PERFIL = 8       # quantas cargas ensinam quanto dura cada barrinha
+BARRA_MINIMA_M = 200.0     # barrinha "que durou" menos que isso foi toque repetido: não ensina
+AVISO_BAIXA_M = 5000.0     # avisa uma vez por carga quando o que resta cai abaixo disso
 CARGAS_NA_MEDIA = 5         # a autonomia estimada usa as últimas cargas
 
 
@@ -82,10 +85,67 @@ class Bateria:
             antes = m
         return duracoes
 
+    def perfil_barras(self):
+        """Quanto dura CADA barrinha, em metros: [1ª, 2ª, 3ª, 4ª, 5ª], pela média do que o
+        dono já marcou nas últimas cargas e nesta (None = essa nunca foi vista). As
+        barrinhas não são iguais (as últimas costumam durar menos): por isso uma a uma."""
+        vistas = [[] for _ in range(BARRAS)]
+        ciclos = [c.get("quedas") or [] for c in self.ajustes["bateria_cargas"][-CARGAS_NO_PERFIL:]]
+        if self.carga:
+            ciclos.append(self.carga["quedas"])
+        for quedas in ciclos:
+            antes = 0.0
+            for k, q in enumerate(quedas[:BARRAS]):
+                if q - antes >= BARRA_MINIMA_M:
+                    vistas[k].append(q - antes)
+                antes = q
+        return [sum(v) / len(v) if v else None for v in vistas]
+
+    def _perfil_cheio(self):
+        """O perfil sem buracos (barrinha nunca vista = a que MENOS durou: melhor errar
+        para menos), ou None se ainda não viu nenhuma."""
+        perfil = self.perfil_barras()
+        conhecidas = [p for p in perfil if p]
+        if not conhecidas:
+            return None
+        return [p or min(conhecidas) for p in perfil], len(conhecidas)
+
+    def restante_m(self):
+        """Quanto a moto ainda deve rodar nesta carga, em metros (None = ainda não dá para
+        saber): o que falta da barrinha de agora + as que ainda estão acesas depois dela."""
+        cheio = self._perfil_cheio() if self.carga else None
+        if cheio is None:
+            return None
+        cheio = cheio[0]
+        caidas = len(self.carga["quedas"])
+        if caidas >= BARRAS:
+            return 0.0
+        nesta = self.carga["m"] - (self.carga["quedas"][-1] if caidas else 0.0)
+        return max(0.0, cheio[caidas] - nesta) + sum(cheio[caidas + 1:])
+
+    def aviso_baixa(self):
+        """A frase do aviso de bateria baixa, UMA vez por carga (depois, None): quando o que
+        resta cai abaixo de AVISO_BAIXA_M, ou quando sobra só a última barrinha."""
+        if not self.carga or self.carga.get("avisou"):
+            return None
+        resta = self.restante_m()
+        ultima = self.barras <= 1
+        if not ultima and (resta is None or resta > AVISO_BAIXA_M):
+            return None
+        self.carga["avisou"] = True
+        self._gravar()
+        if resta is None or resta <= 0:
+            return "Bateria da moto: última barrinha" if self.barras == 1 else "Bateria da moto: acabaram as barrinhas"
+        return "Bateria da moto baixa: restam uns %d km" % max(1, round(resta / 1000.0))
+
     def autonomia_m(self):
-        """Estimativa da carga inteira, em metros (None = ainda não dá para saber).
-        Das cargas terminadas: km rodados / barrinhas gastas x 5. Sem nenhuma
-        ainda, usa as barrinhas que já caíram na carga de agora."""
+        """Estimativa da carga inteira, em metros (None = ainda não dá para saber). Com duas
+        barrinhas ou mais já vistas: a soma de quanto dura cada uma (perfil_barras). Antes
+        disso, das cargas terminadas: km rodados / barrinhas gastas x 5; e, sem nenhuma
+        ainda, as barrinhas que já caíram na carga de agora."""
+        cheio = self._perfil_cheio()
+        if cheio is not None and cheio[1] >= 2:
+            return sum(cheio[0])
         estimativas = []
         for c in self.ajustes["bateria_cargas"][-CARGAS_NA_MEDIA:]:
             gastas = BARRAS - c.get("sobra", BARRAS)
@@ -118,12 +178,19 @@ class Bateria:
                 self.barras, BARRAS, " / ".join(_km(d).replace(" km", "") for d in duracoes) + " km"))
         else:
             linhas.append("Barrinhas: %d de %d (avise quando cair uma)" % (self.barras, BARRAS))
-        total = self.autonomia_m()
-        if total:
-            linhas.append("Carga inteira, pelo seu uso: uns %d km" % round(total / 1000.0))
-        else:
-            linhas.append("Carga inteira: ainda aprendendo com o seu uso")
+        linhas.append(self.texto_previsao())
         return "\n".join(linhas)
+
+    def texto_previsao(self):
+        """"Restam uns 14 km  ·  carga inteira uns 41 km" (o que já der para dizer)."""
+        total, resta = self.autonomia_m(), self.restante_m()
+        partes = []
+        if resta is not None:
+            partes.append("Restam uns %d km" % round(resta / 1000.0) if resta >= 500 else "No fim da carga")
+        if total:
+            partes.append(("carga inteira uns %d km" if partes else "Carga inteira, pelo seu uso: uns %d km")
+                          % round(total / 1000.0))
+        return "  ·  ".join(partes) if partes else "Carga inteira: ainda aprendendo com o seu uso"
 
     def texto_historico(self, quantas=6):
         cargas = self.ajustes["bateria_cargas"][-quantas:]

@@ -1000,10 +1000,20 @@ class TelaMapa(Screen):
             self.mensagem("Fora de Goiânia", tema.LARANJA)
             return
         android_utils.vibrar([0, 35], [0, 160])  # "pegou": dá para sentir sem olhar
+        corrigindo = (self._marca is not None and App.get_running_app()._recebido_em is not None
+                      and bool(getattr(self, "_marca_endereco", "")))
         self._marca = (lat, lon)
+        self.mapa.definir_destino(self._marca, cair=True)
+        if corrigindo:
+            # está acertando o pino de um endereço recebido: o nome dele fica (e o app vai
+            # lembrar deste ponto quando o mesmo endereço chegar de novo)
+            self._montar()
+            self.mensagem("Pino no lugar novo. Vou lembrar da próxima vez.", tema.VERDE, 6)
+            return
+        app_ = App.get_running_app()
+        app_._recebido_em = app_._recebido_chave = None   # ponto novo, marcado à mão: não é correção de nada
         self._marca_endereco = ""
         self.lbl_marca.text = "Ponto marcado: salvar ou ir para cá?"
-        self.mapa.definir_destino(self._marca, cair=True)
         self._montar()
         # o endereço daquele ponto (TomTom), quando chegar: troca o título do cartão
         app = App.get_running_app()
@@ -1017,7 +1027,7 @@ class TelaMapa(Screen):
         import rede
         rede.em_segundo_plano(lambda: busca.endereco_de(lat, lon, chave), chegou, lambda e: None)
 
-    def mostrar_ponto_recebido(self, lat, lon, titulo, certo=True):
+    def mostrar_ponto_recebido(self, lat, lon, titulo, certo=True, aviso=None):
         """Endereço vindo de outro app: mostra o pino no lugar achado para a pessoa
         CONFERIR antes da rota (pedido do dono, 08/10/2026: às vezes caía a algumas
         quadras). Está errado? É só segurar o dedo no lugar certo: o pino muda."""
@@ -1030,12 +1040,14 @@ class TelaMapa(Screen):
         self.mapa.definir_destino(self._marca, cair=True)
         self._montar()
         self.mapa.enquadrar([self._marca], dp(60), (0, dp(130), 0, dp(60)), animado=True, duracao=1.0)
-        self.mensagem("Confira o ponto. Errado? Segure o dedo no lugar certo." if certo else
-                      "Achei a rua, não o número: segure o dedo no lugar certo.",
+        self.mensagem(aviso or ("Confira o ponto. Errado? Segure o dedo no lugar certo." if certo else
+                                "Achei a rua, não o número: segure o dedo no lugar certo."),
                       tema.VERDE if certo else tema.LARANJA, 10)
 
     def _fechar_marca(self):
         self._marca = None
+        app = App.get_running_app()
+        app._recebido_em = app._recebido_chave = None   # desistiu do ponto recebido: nada a lembrar
         self.mapa.definir_destino(None)
         self._montar()
 
@@ -1045,12 +1057,7 @@ class TelaMapa(Screen):
         lat, lon = self._marca
         self._marca = None
         endereco = getattr(self, "_marca_endereco", "")
-        achado = getattr(App.get_running_app(), "_recebido_em", None)
-        if achado is not None:   # endereço vindo de outro app: anota onde o app pôs e onde a pessoa confirmou
-            from rota import distancia_m
-            print("[endereco] app achou %.5f,%.5f; a pessoa confirmou %.5f,%.5f (%d m de diferenca)"
-                  % (achado[0], achado[1], lat, lon, distancia_m(achado, (lat, lon))))
-            App.get_running_app()._recebido_em = None
+        App.get_running_app().confirmar_recebido(lat, lon)   # (se ela corrigiu o pino, o app guarda)
         App.get_running_app().escolher_destino({"nome": endereco or "Ponto marcado", "endereco": "",
                                                 "lat": lat, "lon": lon})
 
@@ -1060,6 +1067,7 @@ class TelaMapa(Screen):
         lat, lon = self._marca
 
         def salvar(nome):
+            App.get_running_app().confirmar_recebido(lat, lon)
             App.get_running_app().salvar_lugar(nome, lat, lon)
             self._montar_atalhos()   # o lugar novo já vira ficha na folha de baixo
             self._fechar_marca()
@@ -1155,6 +1163,7 @@ class TelaMapa(Screen):
         bat = App.get_running_app().bateria
         if bat.caiu_barra():
             self._atualizar_bateria("Anotado: %d de %d barrinhas" % (bat.barras, 5))
+            Clock.schedule_once(lambda dt: App.get_running_app().conferir_bateria_baixa(), 4)
 
     def _barra_esquecida(self):
         """A barrinha caiu lá atrás e ele não marcou: pergunta quantos km ela durou."""

@@ -46,9 +46,9 @@ def textos(app):
             bat = getattr(app, "bateria", None)
             if bat is not None and bat.ativa:   # só contando os km da carga da moto (sem rota)
                 km = fmt_dist_nav(bat.metros)
-                total = bat.autonomia_m()
+                sabe = bat.autonomia_m() or bat.restante_m() is not None
                 return ("Bateria %d/5  ·  %s nesta carga" % (bat.barras, km),
-                        "Carga inteira pelo seu uso: uns %d km" % round(total / 1000.0) if total
+                        bat.texto_previsao() if sabe
                         else "Aprendendo sua autonomia: avise quando cair uma barrinha.", km, "")
             return "GT-HUD", "", "", ""
         # só gravando a viagem (sem rota): distância e tempo

@@ -264,11 +264,16 @@ def viagens(dt):
     checar(logo <= 10 < total, "ao abrir entram so as primeiras: %d de %d (%.0f ms)" % (logo, total, gasto))
 
     def completa():
-        checar(len(tv.lista.children) == total, "... e o resto entra aos poucos: %d de %d" % (len(tv.lista.children), total))
+        itens = [w for w in tv.lista.children if type(w).__name__ == "ItemViagem"]
+        dias = [w.text for w in tv.lista.children if type(w).__name__ == "Texto"]
+        checar(len(itens) == total, "... e o resto entra aos poucos: %d de %d" % (len(itens), total))
+        checar(len(dias) >= 1 and all(" em " in d for d in dias), "cada dia tem o titulo com o total dele: %s" % dias[-2:])
+        checar(tv.totais["total"].valor.text.endswith("km") and "viagens" in tv.totais["total"].legenda.text,
+               "resumo no topo: %s (%s)" % (tv.totais["total"].valor.text, tv.totais["total"].legenda.text))
         primeiro = tv.lista.children[-1]
         a.voltar()
         a.abrir("viagens")
-        checar(tv.lista.children[-1] is primeiro and len(tv.lista.children) == total,
+        checar(tv.lista.children[-1] is primeiro,
                "abrir de novo sem nada mudar nao refaz a lista")
         banco.apagar_viagem(criadas[-1])
         a.voltar()
@@ -277,7 +282,15 @@ def viagens(dt):
         a.voltar()
         for vid in criadas[:-1]:
             banco.apagar_viagem(vid)
-    depois(1.6, completa)
+    depois(0.35, lambda: tirar("a5_viagens"))
+    t_fim = time.time() + 6
+
+    def esperar(dt):       # (a lista entra aos poucos: espera acabar, com um teto)
+        if tv._ev_resto is not None and time.time() < t_fim:
+            return True
+        completa()
+        return False
+    Clock.schedule_interval(esperar, 0.2)
 
 
 def lugares(dt):
@@ -354,6 +367,6 @@ Clock.schedule_once(curva, 15)
 Clock.schedule_once(pontilhado, 16.4)
 Clock.schedule_once(telas, 17.8)
 Clock.schedule_once(viagens, 19.6)
-Clock.schedule_once(lugares, 22.2)
-Clock.schedule_once(fim, 25)
+Clock.schedule_once(lugares, 24)
+Clock.schedule_once(fim, 27)
 runpy.run_path("main.py", run_name="__main__")

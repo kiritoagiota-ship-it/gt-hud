@@ -65,7 +65,9 @@ class TesteBateria(unittest.TestCase):
         duracoes = self.bat.km_por_barra()
         self.assertAlmostEqual(duracoes[0], 9000, delta=60)
         self.assertAlmostEqual(duracoes[1], 7000, delta=60)
-        self.assertAlmostEqual(self.bat.autonomia_m(), 16000 / 2 * 5, delta=300)   # sem histórico: pelas barrinhas
+        # barrinha a barrinha: 9 + 7 km vistos; as três que faltam contam como a que MENOS durou (7)
+        self.assertAlmostEqual(self.bat.autonomia_m(), 9000 + 7000 * 4, delta=400)
+        self.assertAlmostEqual(self.bat.restante_m(), 7000 * 3, delta=300)   # acabou de cair a 2ª: restam 3 inteiras
         self.assertIn("3 de 5", self.bat.texto())
         self.assertTrue(self.bat.desfazer_barra())
         self.assertEqual(self.bat.barras, 4)
@@ -98,6 +100,28 @@ class TesteBateria(unittest.TestCase):
         self.assertFalse(self.bat.barra_esquecida(0))
         self.assertFalse(self.bat.barra_esquecida(-5))
         self.assertEqual(self.bat.barras, 3)
+
+    def test_quanto_resta_pelo_que_cada_barrinha_costuma_durar(self):
+        self.assertIsNone(self.bat.restante_m())                  # sem carga, sem palpite
+        self.aj["bateria_cargas"] = [   # duas cargas marcadas: a 1ª barrinha dura mais que as outras
+            {"m": 40000, "sobra": 0, "quedas": [11000, 20000, 28000, 35000, 40000]},
+            {"m": 37000, "sobra": 1, "quedas": [13000, 22000, 30000, 37000]}]
+        self.assertEqual([round(p) for p in self.bat.perfil_barras()], [12000, 9000, 8000, 7000, 5000])
+        self.bat.carregou()
+        self.assertAlmostEqual(self.bat.restante_m(), 41000, delta=1)
+        t, lat = andar(self.bat, 5000)
+        self.assertAlmostEqual(self.bat.restante_m(), 36000, delta=60)   # andou 5 dos 12 km da 1ª
+        self.assertIn("Restam uns 36 km", self.bat.texto())
+        self.assertIsNone(self.bat.aviso_baixa())
+        t, lat = andar(self.bat, 9000, t0=t + 1, lat0=lat)        # 14 km sem marcar: a 1ª já devia ter caído
+        self.assertAlmostEqual(self.bat.restante_m(), 29000, delta=60)   # ... então só as outras quatro contam
+        for _ in range(4):
+            self.bat.caiu_barra()                                 # (marcou as quatro de uma vez: sobra a última)
+        self.assertEqual(self.bat.aviso_baixa(), "Bateria da moto baixa: restam uns 5 km")
+        self.assertIsNone(self.bat.aviso_baixa())                 # uma vez por carga
+        self.assertTrue(Bateria(self.aj).carga["avisou"])         # (e isso fica gravado)
+        self.bat.carregou(sobra=1)
+        self.assertFalse(self.bat.carga.get("avisou"))            # carga nova: pode avisar de novo
 
     def test_recarregar_guarda_a_carga_e_ensina_a_autonomia(self):
         self.assertIsNone(self.bat.autonomia_m())

@@ -18,15 +18,36 @@ TESTES = ["tela_navegacao.py", "tela_busca_recalculo.py", "tela_volta_do_fundo.p
           "tela_apagar.py", "tela_zoom.py", "tela_colar.py", "tela_ao_vivo.py", "tela_tema.py", "tela_busca_nova.py", "tela_fim_renomear.py", "tela_polimento.py", "tela_rota_calma.py", "tela_informacoes.py", "tela_previa_animada.py", "tela_transito_mapa.py", "tela_mapa_pronto.py", "tela_icones.py", "tela_tomtom.py", "tela_noturna.py", "tela_abrir_com.py", "tela_aproximada.py", "tela_sinalizacao.py", "tela_polimento2.py", "tela_bateria.py", "tela_animacoes.py"]
 
 
+# erros que os próprios testes provocam de propósito (não contam como falha)
+ESPERADOS = ()
+
+
 def rodar(nome):
     tmp = os.path.join(PASTA, ".tmp")
     env = dict(os.environ, APPDATA=os.path.join(tmp, "appdata"), KIVY_HOME=os.path.join(tmp, "kivyhome"),
                PYTHONIOENCODING="utf-8")
     os.makedirs(env["APPDATA"], exist_ok=True)
+    # O app ENGOLE erros para não fechar na rua (anota no diagnóstico e segue). Num teste isso
+    # esconde defeito: um passo que quebra no meio some sem acusar falha (aconteceu em
+    # 13/10/2026). Por isso: o que o diagnóstico ganhar de erro durante o teste é falha.
+    diario = os.path.join(env["APPDATA"], "gthud", "diagnostico.txt")
+    antes = os.path.getsize(diario) if os.path.exists(diario) else 0
     saida = subprocess.run([sys.executable, os.path.join(PASTA, nome)], env=env, capture_output=True,
                            text=True, encoding="utf-8", errors="replace", timeout=600).stdout
     checas = [l for l in saida.splitlines() if l.startswith("[CHECA]")]
     falhas = [l for l in checas if "FALHOU" in l]
+    try:
+        with open(diario, encoding="utf-8", errors="replace") as f:
+            f.seek(antes if os.path.getsize(diario) >= antes else 0)
+            novo = f.read()
+    except OSError:
+        novo = ""
+    blocos = novo.split(" !! ")[1:] + novo.split(" !!! ")[1:]
+    for bloco in blocos:
+        linhas = [l for l in bloco.strip().splitlines() if l.strip()]
+        resumo = linhas[0][:70] + " | " + (linhas[-1][:110] if len(linhas) > 1 else "")
+        if not any(p in bloco for p in ESPERADOS):
+            falhas.append("[ERRO ENGOLIDO] " + resumo)
     print("%-28s %2d checagens, %d falhas" % (nome, len(checas), len(falhas)))
     for l in falhas:
         print("    " + l)

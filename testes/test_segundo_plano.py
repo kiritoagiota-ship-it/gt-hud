@@ -145,14 +145,20 @@ class TesteSegundoPlano(unittest.TestCase):
 
             def autonomia_m(self):
                 return 41000.0
+
+            def restante_m(self):
+                return 30000.0
+
+            def texto_previsao(self):
+                return "Restam uns 30 km  ·  carga inteira uns 41 km"
         app, android = AppFalso(), AndroidFalso()
         app.nav, app.bateria = None, Bateria()
         self.assertEqual(textos(app)[:2], ("Bateria 4/5  ·  12,4 km nesta carga",
-                                           "Carga inteira pelo seu uso: uns 41 km"))
+                                           "Restam uns 30 km  ·  carga inteira uns 41 km"))
         self.assertEqual(segundo_plano.feito(app), 80)           # a barra da notificação = as barrinhas
         # o cartão desenhado: km grande, "4/5" do lado e 4 das 5 barrinhas acesas
         self.assertEqual(segundo_plano.cartao(app), ("BATERIA DA MOTO", "12,4 km", "4/5",
-                                                      "Carga inteira pelo seu uso: uns 41 km", 5, 4, ""))
+                                                      "Restam uns 30 km  ·  carga inteira uns 41 km", 5, 4, ""))
         fundo = SegundoPlano(app, android)
         fundo.ao_pausar()                                        # serviço ainda desligado: o Android não
         self.assertFalse(fundo.minimizado)                       # deixa ligar com o app saindo da tela

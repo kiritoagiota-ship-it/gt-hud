@@ -56,6 +56,8 @@ DESARME_KMH = 2.0
 INTERVALO_VIBRA_S = 15.0
 
 SEM_SINAL_APOS_S = 5  # sem leitura boa por mais que isso = sem sinal
+CORRECAO_MIN_M = 15         # pino mudado menos que isso não é correção (foi só confirmar)
+CORRECOES_MAX = 150         # quantos endereços corrigidos o app lembra
 DISTANCIA_MINIMA_M = 20  # viagem mais curta que isso não é salva
 VIBRA_TEMPOS = [0, 250, 150, 250]  # dois pulsos fortes: dá para sentir no guidão
 VIBRA_FORCAS = [0, 255, 0, 255]
@@ -121,6 +123,7 @@ class GTHudApp(App):
         self._t_caminho = 0.0        # ... e da última vez que a TomTom refez o caminho
         self.rota_sugerida = None    # caminho mais rápido que a TomTom achou durante a navegação
         self._endereco_pendente = None   # endereço recebido de outro app, esperando o GPS/a tela
+        self._recebido_em = self._recebido_chave = None   # o ponto recebido que está na tela, para conferir
         self.posicao_aproximada = False  # True: self.posicao veio da rede/última conhecida, não do satélite
         self._t_chuva = 0.0
         self.corrida = None          # corrida ao vivo em andamento (ao_vivo.AoVivo)
@@ -446,13 +449,21 @@ class GTHudApp(App):
                 self.sm.current = "mapa"
                 tela.mensagem("O endereço recebido fica fora de Goiânia", tema.LARANJA, 8)
                 return
-            self._mostrar_recebido(recebido["lat"], recebido["lon"], recebido["nome"], True)
+            self._mostrar_recebido(recebido["lat"], recebido["lon"], recebido["nome"], True,
+                                   chave=self._chave_do_lugar(recebido["nome"]))
             return
         if "link" in recebido:
             self._abrir_link_compartilhado(recebido["link"])
             return
         bruto = recebido["texto"]
         texto = busca.texto_de_endereco(bruto)
+        chave = "end:" + busca.normalizar(bruto)
+        if chave in self.ajustes["enderecos_corrigidos"]:
+            # este endereço já chegou antes e o dono corrigiu o pino: vai direto para lá, sem
+            # nem perguntar aos serviços (funciona até sem internet)
+            ponto = self.ajustes["enderecos_corrigidos"][chave]
+            self._mostrar_recebido(ponto[0], ponto[1], texto.split(",")[0][:60], True, chave=chave)
+            return
         self.sm.current = "mapa"
         tela.mensagem("Procurando: " + texto[:40], tema.CIANO, 8)
         chave_tomtom = transito.chave_em_uso(self.ajustes) or None
@@ -473,7 +484,7 @@ class GTHudApp(App):
                 self._buscar_na_tela(texto)
                 return
             lugar = achado["lugar"]
-            self._mostrar_recebido(lugar["lat"], lugar["lon"], lugar["nome"], achado["certo"])
+            self._mostrar_recebido(lugar["lat"], lugar["lon"], lugar["nome"], achado["certo"], chave=chave)
         rede.em_segundo_plano(procurar, achou, lambda e: self._buscar_na_tela(texto))
 
     def _abrir_link_compartilhado(self, texto):
@@ -503,18 +514,57 @@ class GTHudApp(App):
             if not goiania.dentro(lugar["lat"], lugar["lon"], 0.01):
                 tela.mensagem("O lugar do link fica fora de Goiânia", tema.LARANJA, 8)
                 return
-            self._mostrar_recebido(lugar["lat"], lugar["lon"], lugar["nome"], not lugar.get("aproximado"))
+            self._mostrar_recebido(lugar["lat"], lugar["lon"], lugar["nome"], not lugar.get("aproximado"),
+                                   chave=None if lugar.get("sem_nome") else self._chave_do_lugar(lugar["nome"]))
         rede.em_segundo_plano(lambda: busca.lugar_colado(texto, perto=posicao, chave_tomtom=chave_tomtom),
                               achou, lambda e: achou(None))
 
-    def _mostrar_recebido(self, lat, lon, nome, certo):
-        """O pino no ponto achado, para conferir antes da rota."""
+    @staticmethod
+    def _chave_do_lugar(nome):
+        """A chave de um lugar recebido pelo NOME (link do Google, ponto com nome), ou None se
+        o nome não diz nada ("Local recebido", "Lugar do Google Maps"...)."""
+        nome = busca.normalizar(nome or "")
+        if len(nome) < 4 or nome in ("local recebido", "lugar do google maps", "local colado", "ponto marcado"):
+            return None
+        return "lugar:" + nome
+
+    def confirmar_recebido(self, lat, lon):
+        """A pessoa confirmou o ponto do endereço recebido ("Ir para cá" ou "Salvar"). Se ela
+        tinha MUDADO o pino de lugar, o app guarda: da próxima vez que o mesmo endereço ou
+        lugar chegar, já cai onde ela pôs (pedido do dono, 13/10/2026)."""
+        achado, chave = self._recebido_em, self._recebido_chave
+        self._recebido_em = self._recebido_chave = None
+        if achado is None:
+            return
+        mudou_m = rotas.distancia_m(achado, (lat, lon))
+        print("[endereco] app achou %.5f,%.5f; a pessoa confirmou %.5f,%.5f (%d m de diferenca)"
+              % (achado[0], achado[1], lat, lon, mudou_m))
+        if chave is None or mudou_m < CORRECAO_MIN_M:
+            return
+        guardados = dict(self.ajustes["enderecos_corrigidos"])
+        guardados.pop(chave, None)
+        guardados[chave] = [round(lat, 6), round(lon, 6)]
+        while len(guardados) > CORRECOES_MAX:      # (os mais antigos saem)
+            guardados.pop(next(iter(guardados)))
+        self.ajustes["enderecos_corrigidos"] = guardados
+        print("[endereco] correcao guardada")
+
+    def _mostrar_recebido(self, lat, lon, nome, certo, chave=None):
+        """O pino no ponto achado, para conferir antes da rota. `chave`: como este endereço
+        ou lugar é lembrado (ver confirmar_recebido); se já foi corrigido antes, vale a correção."""
+        aviso = None
+        corrigido = self.ajustes["enderecos_corrigidos"].get(chave) if chave else None
+        if corrigido:
+            lat, lon, certo = corrigido[0], corrigido[1], True
+            aviso = "No ponto que você corrigiu da outra vez."
+            print("[endereco] usando a correcao guardada")
         if self.destino is not None and self.nav is None:
             self.cancelar_previa()   # havia outra prévia aberta: o endereço novo passa na frente
         self._pilha_telas.clear()
         self.sm.current = "mapa"
-        self.sm.get_screen("mapa").mostrar_ponto_recebido(lat, lon, nome, certo)
+        self.sm.get_screen("mapa").mostrar_ponto_recebido(lat, lon, nome, certo, aviso)
         self._recebido_em = (lat, lon)   # (para anotar onde a pessoa corrigiu o pino)
+        self._recebido_chave = chave
 
     def _buscar_na_tela(self, texto):
         """Abre a tela de busca com o texto já digitado e procurando."""
@@ -720,6 +770,7 @@ class GTHudApp(App):
         self.viagem.registrar(d["lat"], d["lon"], vel)
         if not self.ajustes["simulador"]:   # (passeio de mentira não gasta a bateria da moto)
             self.bateria.registrar(d["lat"], d["lon"], vel, agora)
+            self.conferir_bateria_baixa()
         self._checar_limite(vel)
         if self.nav is not None:
             self._navegar(d["lat"], d["lon"], vel, agora)
@@ -942,10 +993,26 @@ class GTHudApp(App):
             except Exception as e:
                 print("[transito] avaliar:", e)
 
+    def conferir_bateria_baixa(self):
+        """Avisa UMA vez por carga quando a bateria da moto está no fim (som, vibração e a
+        frase na tela). Pode rodar na thread de segundo plano."""
+        frase = self.bateria.aviso_baixa()
+        if frase is None:
+            return
+        print("[bateria]", frase)
+        self.sons.tocar("aviso")
+        android_utils.vibrar_padrao("fora")
+        self.na_tela(lambda: self.sm.get_screen("mapa").mensagem(frase, tema.LARANJA, 12))
+
     def avisos_da_rota(self, rota):
-        """Frases curtas para a prévia: chuva, trânsito de agora e trechos que
-        costumam estar lentos."""
+        """Frases curtas para a prévia: se a carga da moto dá, chuva, trânsito de agora e
+        trechos que costumam estar lentos."""
         avisos = []
+        resta = self.bateria.restante_m()     # a moto chega? (só quando já dá para estimar)
+        if resta is not None and resta < 2 * rota.total_m:
+            km = max(0, round(resta / 1000.0))
+            avisos.append(("Carga da moto NÃO chega lá (restam uns %d km)" if resta < rota.total_m
+                           else "Carga dá a ida, não a volta (restam uns %d km)") % km)
         # À noite o cartão diz o que cada caminho É (o app não sabe de criminalidade: só
         # sabe se o caminho vai por rua de bairro, mais vazia, ou por rua principal).
         if getattr(self, "noite_na_previa", False):

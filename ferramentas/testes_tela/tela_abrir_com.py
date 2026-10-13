@@ -105,6 +105,7 @@ def tela():
 
 def endereco(dt):
     """O endereço do print do dono (Instagram), com quadra, lote e CEP."""
+    app().ajustes["enderecos_corrigidos"] = {}     # (o que sobrou de outra rodada do teste)
     app().abrir_endereco("geo:0,0?q=Av%20T9%2C%204724%2C%20quadra%2032%2C%20lote%2007%2C%20Goi%C3%A2nia%2C%20Brazil%2074333-010")
 
 
@@ -124,6 +125,7 @@ def corrigir(dt):
     t = tela()
     t._ao_segurar(-16.7120, -49.2990)
     checar(t._marca == (-16.7120, -49.2990), "segurar o dedo em outro lugar move o pino")
+    checar(t.lbl_marca.text == "Av T9, 4724", "... e o nome do endereço fica no cartão: " + t.lbl_marca.text)
 
 
 def ir(dt):
@@ -134,6 +136,9 @@ def ver_ir(dt):
     a = app()
     checar(a.destino is not None and abs(a.destino["lat"] + 16.7120) < 1e-6, "Ir para cá calcula a rota até o ponto corrigido")
     checar(tela().estado == "previa", "prévia da rota aberta")
+    guardados = a.ajustes["enderecos_corrigidos"]
+    checar(list(guardados.values()) == [[-16.712, -49.299]] and list(guardados)[0].startswith("end:av t9"),
+           "a correção do pino ficou guardada: %s" % guardados)
 
 
 def outro(dt):
@@ -182,6 +187,23 @@ def ver_fora(dt):
     checar(tela()._marca is None, "pedido que não é endereço é ignorado")
 
 
+def de_novo(dt):
+    """O MESMO endereço chega outra vez: cai direto no ponto que o dono corrigiu."""
+    T["pedidos"] = len(PEDIDOS)
+    app().abrir_endereco("geo:0,0?q=Av%20T9%2C%204724%2C%20quadra%2032%2C%20lote%2007%2C%20Goi%C3%A2nia%2C%20Brazil%2074333-010")
+    t = tela()
+    checar(t._marca == (-16.712, -49.299), "o mesmo endereço cai no ponto corrigido: %s" % (t._marca,))
+    checar(len(PEDIDOS) == T["pedidos"], "... sem perguntar de novo aos serviços")
+    checar("corrigiu" in t.lbl_msg.text, "... e avisa: " + t.lbl_msg.text)
+    t._ir_marca()            # só confirmou (não mexeu no pino): a correção guardada continua a mesma
+    checar(list(app().ajustes["enderecos_corrigidos"].values()) == [[-16.712, -49.299]], "confirmar não muda o que foi guardado")
+    app().cancelar_previa()
+    app().ajustes["enderecos_corrigidos"] = {}
+
+
+T = {}
+
+
 def navegando(dt):
     a = app()
     a.escolher_destino({"nome": "Bosque dos Buritis", "endereco": "", "lat": -16.6853, "lon": -49.2662})
@@ -222,5 +244,6 @@ Clock.schedule_once(nada, 24)
 Clock.schedule_once(ver_nada, 27)
 Clock.schedule_once(fora, 28)
 Clock.schedule_once(ver_fora, 29)
-Clock.schedule_once(navegando, 30)   # (ver_navegando e fim: quando a rota ficar pronta)
+Clock.schedule_once(de_novo, 29.6)
+Clock.schedule_once(navegando, 31)   # (ver_navegando e fim: quando a rota ficar pronta)
 runpy.run_path("main.py", run_name="__main__")
