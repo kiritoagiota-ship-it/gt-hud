@@ -1024,7 +1024,7 @@ class MapaHUD(CamadasDoMapa, Widget):
         if len(listas) == 1:
             return listas[0]
         # (as mesmas listas de antes: a ordenação de ~2 mil lugares não precisa ser refeita)
-        quais = tuple(id(lista) for lista in listas)
+        quais = (cx0, cx1, cy0, cy1, tuple(len(lista) for lista in listas))   # (os quadrados e o que há neles)
         if self._lugares_juntos[0] != quais:
             self._lugares_juntos = (quais, sorted((r for lista in listas for r in lista), key=lambda r: -r["conf"]))
         return self._lugares_juntos[1]

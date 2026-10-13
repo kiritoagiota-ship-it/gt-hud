@@ -246,6 +246,40 @@ def pontilhado(dt):
     depois(0.7, limpar)
 
 
+def viagens(dt):
+    """A lista de viagens entra aos poucos (não trava ao abrir) e não é refeita se nada mudou."""
+    a = app()
+    banco = a.banco
+    criadas = []
+    for k in range(30):       # 30 viagens de mentira (apagadas no fim)
+        criadas.append(banco.salvar_viagem({"inicio": 1000.0 + k, "fim": 1600.0 + k, "distancia_m": 1500.0 + k,
+                                            "duracao_s": 600.0, "tempo_mov_s": 500.0, "vel_max_kmh": 40.0,
+                                            "vel_media_kmh": 20.0, "destino": "Teste %d" % k}, []))
+    total = len(banco.listar_viagens())
+    t0 = time.perf_counter()
+    a.abrir("viagens")
+    gasto = (time.perf_counter() - t0) * 1000
+    tv = a.sm.get_screen("viagens")
+    logo = len(tv.lista.children)
+    checar(logo <= 10 < total, "ao abrir entram so as primeiras: %d de %d (%.0f ms)" % (logo, total, gasto))
+
+    def completa():
+        checar(len(tv.lista.children) == total, "... e o resto entra aos poucos: %d de %d" % (len(tv.lista.children), total))
+        primeiro = tv.lista.children[-1]
+        a.voltar()
+        a.abrir("viagens")
+        checar(tv.lista.children[-1] is primeiro and len(tv.lista.children) == total,
+               "abrir de novo sem nada mudar nao refaz a lista")
+        banco.apagar_viagem(criadas[-1])
+        a.voltar()
+        a.abrir("viagens")
+        checar(tv.lista.children[-1] is not primeiro, "apagou uma viagem: a lista e refeita")
+        a.voltar()
+        for vid in criadas[:-1]:
+            banco.apagar_viagem(vid)
+    depois(1.6, completa)
+
+
 T = {}
 
 
@@ -262,5 +296,6 @@ Clock.schedule_once(chegada, 13.2)
 Clock.schedule_once(curva, 15)
 Clock.schedule_once(pontilhado, 16.4)
 Clock.schedule_once(telas, 17.8)
-Clock.schedule_once(fim, 20)
+Clock.schedule_once(viagens, 19.6)
+Clock.schedule_once(fim, 22.5)
 runpy.run_path("main.py", run_name="__main__")

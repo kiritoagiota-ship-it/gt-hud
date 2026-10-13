@@ -1,5 +1,6 @@
 """Histórico de viagens."""
 from kivy.app import App
+from kivy.clock import Clock
 from kivy.metrics import dp
 from kivy.uix.boxlayout import BoxLayout
 from kivy.uix.gridlayout import GridLayout
@@ -11,9 +12,15 @@ from util import fmt_data, fmt_dist, fmt_tempo
 from widgets.comuns import Cabecalho, ItemViagem, Texto
 
 
+PRIMEIRAS = 10      # as viagens que entram na hora (enchem a tela)
+POR_QUADRO = 6      # ... e as outras vão entrando aos poucos, estas por quadro
+
+
 class TelaViagens(Screen):
     def __init__(self, **kw):
         super().__init__(**kw)
+        self._montada = None     # a lista que está montada (para não refazer igual)
+        self._ev_resto = None
         raiz = BoxLayout(orientation="vertical", padding=tema.MARGEM, spacing=dp(12))
         raiz.add_widget(Cabecalho("Viagens", self._voltar))
         self.lbl_total = Texto(text="", font_size=tema.T_ROTULO + 1, color=tema.CIANO_FRACO,
@@ -28,6 +35,15 @@ class TelaViagens(Screen):
 
     def on_pre_enter(self, *a):
         viagens = App.get_running_app().banco.listar_viagens()
+        # Montar a lista INTEIRA de uma vez travava a tela ao abrir (medido em 12/10/2026: 110
+        # viagens = 240 ms no PC, mais de 1 s num celular, e piorando a cada viagem nova).
+        # Agora: nada mudou desde a última vez? Fica como está. Mudou: as primeiras entram na
+        # hora e o resto vai entrando aos poucos, sem ninguém perceber.
+        assinatura = [(v["id"], v.get("destino"), v["distancia_m"]) for v in viagens]
+        if assinatura == self._montada:
+            return
+        self._montada = assinatura
+        self._parar_resto()
         self.lista.clear_widgets()
         if not viagens:
             self.lbl_total.text = ""
@@ -41,15 +57,33 @@ class TelaViagens(Screen):
         n = len(viagens)
         self.lbl_total.text = "%d %s   %s no total" % (n, "viagem" if n == 1 else "viagens",
                                                       fmt_dist(total_m))
-        for v in viagens:
-            numeros = "%s    %s    max %.0f km/h" % (
-                fmt_dist(v["distancia_m"]), fmt_tempo(v["duracao_s"]), v["vel_max_kmh"] or 0)
-            if v.get("destino"):   # a viagem é uma rota: o destino é o título
-                item = ItemViagem("Para " + v["destino"], "%s    %s" % (fmt_data(v["inicio"]), numeros))
-            else:
-                item = ItemViagem(fmt_data(v["inicio"]), numeros)
-            item.bind(on_release=lambda w, vid=v["id"]: self._abrir(vid))
-            self.lista.add_widget(item)
+        for v in viagens[:PRIMEIRAS]:
+            self._por_item(v)
+        resto = viagens[PRIMEIRAS:]
+        if resto:
+            def mais(dt):
+                for v in resto[:POR_QUADRO]:
+                    self._por_item(v)
+                del resto[:POR_QUADRO]
+                if not resto:
+                    self._ev_resto = None
+                    return False
+            self._ev_resto = Clock.schedule_interval(mais, 0)
+
+    def _parar_resto(self):
+        if self._ev_resto is not None:
+            self._ev_resto.cancel()
+            self._ev_resto = None
+
+    def _por_item(self, v):
+        numeros = "%s    %s    max %.0f km/h" % (
+            fmt_dist(v["distancia_m"]), fmt_tempo(v["duracao_s"]), v["vel_max_kmh"] or 0)
+        if v.get("destino"):   # a viagem é uma rota: o destino é o título
+            item = ItemViagem("Para " + v["destino"], "%s    %s" % (fmt_data(v["inicio"]), numeros))
+        else:
+            item = ItemViagem(fmt_data(v["inicio"]), numeros)
+        item.bind(on_release=lambda w, vid=v["id"]: self._abrir(vid))
+        self.lista.add_widget(item)
 
     def _abrir(self, vid):
         self.manager.get_screen("detalhe").viagem_id = vid

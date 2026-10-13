@@ -84,7 +84,7 @@ def cronometrar(classe, nome):
     setattr(classe, nome, embrulho)
 
 
-for n in ("_desenhar_tile", "_escolher_rotulos", "_refazer_linhas", "_ajustar_larguras",
+for n in ("_desenhar_tile", "_juntar_rotulos", "_por_rotulos", "_refazer_linhas", "_ajustar_larguras",
           "_apagar_tile", "_atualizar_tiles", "_mover_rotulos", "_desenhar_tela"):
     cronometrar(wm.MapaHUD, n)
 cronometrar(wm.MapaHUD, "_textura")
