@@ -17,6 +17,7 @@ PADRAO = {
     # endereços/lugares recebidos de outro app em que o dono CORRIGIU o pino: {chave: [lat, lon]}
     # (da próxima vez que o mesmo chegar, já cai no ponto certo; main.GTHudApp.confirmar_recebido)
     "enderecos_corrigidos": {},
+    "ajustes_abertas": ["Voz"],   # as seções da tela de Ajustes que estão abertas
     "ultima_posicao": None,      # [lat, lon] de onde a pessoa estava ao sair: o mapa já abre (pronto) ali
     "aprendeu_v1": False,         # já aprendeu com as viagens antigas guardadas (aprendizado.py)
     "rota_preferida": "rapida",   # "rapida" ou "tranquila": a que já vem escolhida na prévia

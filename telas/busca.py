@@ -63,6 +63,18 @@ class TelaBusca(Screen):
             atalhos.add_widget(b)
         raiz.add_widget(atalhos)
 
+        # categorias: um toque acha os mais perto (pedido do dono, 13/10/2026)
+        faixa = ScrollView(do_scroll_y=False, bar_width=0, size_hint_y=None, height=dp(42))
+        fichas = BoxLayout(size_hint=(None, None), height=dp(42), spacing=dp(8))
+        fichas.bind(minimum_width=fichas.setter("width"))
+        for nome, categorias in busca.CATEGORIAS_PERTO:
+            b = BotaoHUD(text=nome, font_size=tema.T_ROTULO + 1, size_hint=(None, 1),
+                         width=dp(30) + len(nome) * tema.T_ROTULO * 0.66,
+                         on_release=lambda w, n=nome, c=categorias: self._perto(n, c))
+            fichas.add_widget(b)
+        faixa.add_widget(fichas)
+        raiz.add_widget(faixa)
+
         self.lbl_status = Texto(text="", font_size=tema.T_ROTULO + 1, color=tema.CIANO_FRACO,
                                 size_hint_y=None, height=dp(22))
         raiz.add_widget(self.lbl_status)
@@ -264,6 +276,27 @@ class TelaBusca(Screen):
         rede.em_segundo_plano(lambda: busca.buscar(texto, app.posicao, salvos, chave_tomtom),
                               lambda lugares: self._resultados(lugares, pedido),
                               lambda erro: self._falhou(erro, pedido))
+
+    def _perto(self, nome, categorias):
+        """Uma categoria (Farmácia, Mercado...): os lugares mais perto de onde ele está."""
+        app = App.get_running_app()
+        self.campo.focus = False
+        if app.posicao is None:
+            self.lbl_status.text = "Ainda sem a sua posição: espere o GPS para achar o mais perto."
+            return
+        self._pedido += 1          # (uma busca digitada que ainda não respondeu não passa por cima)
+        pedido, posicao = self._pedido, app.posicao
+
+        def achou(lugares):
+            if pedido != self._pedido:
+                return
+            self._buscando = False
+            self.lbl_status.text = ("%s: os mais perto de você" % nome) if lugares else \
+                "Nenhum lugar de \"%s\" na base. Tente digitar o nome." % nome
+            self._listar(lugares)
+        self.lbl_status.text = "Procurando %s perto de você..." % nome.lower()
+        rede.em_segundo_plano(lambda: busca.perto_por_categoria(categorias, posicao), achou,
+                              lambda erro: achou([]))
 
     def _resultados(self, lugares, pedido=None):
         if pedido is not None and pedido != self._pedido:

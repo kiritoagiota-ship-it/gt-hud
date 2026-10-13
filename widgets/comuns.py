@@ -123,11 +123,18 @@ class Bloco(BoxLayout):
 
     def _desenhar(self, *a):
         self.canvas.before.clear()
+        c = min(dp(11), self.height * 0.22)
+        pts = _poligono(self.x, self.y, self.width, self.height, c)
         with self.canvas.before:
+            # (cantos cortados e borda fina, como os painéis do mapa; antes era um retângulo liso)
             Color(*tema.PAINEL_CLARO)
-            Rectangle(pos=self.pos, size=self.size, texture=degrade())
-            Color(*tema.com_alfa(self.cor_acento, 0.35))            # risco fino em cima
-            Line(points=[self.x, self.top, self.right, self.top], width=dp(1))
+            malha_degrade(pts, self.y, self.height)
+            Color(*tema.com_alfa(self.cor_acento, 0.40))
+            Line(points=[v for p in pts for v in p], close=True, width=dp(1))
+            do_tema = list(self.cor_acento[:3]) == list(tema.CIANO[:3])
+            Color(*(tema.ROXO if tema.monarca() and do_tema else self.cor_acento))
+            for traco in cantos(pts, c):
+                Line(points=traco, width=dp(1.9), cap="square", joint="miter")
             barra = [self.x + dp(2), self.y + dp(10), self.x + dp(2), self.y + self.height - dp(10)]
             Color(*tema.com_alfa(self.cor_acento, 0.22))            # acento com brilho
             Line(points=barra, width=dp(4))
@@ -330,6 +337,7 @@ def escolher(titulo, opcoes, texto="", altura_texto=None):
 
     caixa = BoxLayout(orientation="vertical", spacing=dp(8), padding=dp(4))
     altura = dp(64) + len(opcoes) * dp(56)
+    aviso = None
     if texto:
         if altura_texto is None:
             # a altura acompanha o texto (antes eram sempre 4 linhas: sobrava um buraco entre a
@@ -353,6 +361,7 @@ def escolher(titulo, opcoes, texto="", altura_texto=None):
             return
         janela.fechar_ja()
         funcao()
+    janela.aviso = aviso       # (o texto de cima: quem abriu pode trocar depois; None se não há)
     janela.botoes = []
     for k, (rotulo, funcao) in enumerate(opcoes):
         b = BotaoHUD(text=rotulo, destaque=(k == 0 and funcao is not None), font_size=tema.T_ROTULO + 2,

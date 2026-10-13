@@ -300,6 +300,48 @@ def lugares_da_celula(cx, cy):
         con.close()
 
 
+# os atalhos de categoria da tela de busca: (nome no botão, categorias da base)
+CATEGORIAS_PERTO = (("Farmácia", ("farmácia",)), ("Mercado", ("mercado", "supermercado")),
+                    ("Padaria", ("padaria",)), ("Lanche", ("lanchonete", "restaurante", "pizzaria", "hamburgueria")),
+                    ("Borracharia", ("borracharia", "bicicletaria")), ("Banco", ("banco",)),
+                    ("Hospital", ("hospital",)))
+
+
+def perto_por_categoria(categorias, perto, quantos=MAX_RESULTADOS):
+    """Os lugares dessas categorias MAIS PERTO de `perto` (lat, lon), do mais perto para o
+    mais longe: [{nome, endereco, lat, lon, dist_m, fonte}]. Só a base do celular (sem
+    internet). Procura num quadrado em volta e vai abrindo até achar o bastante."""
+    if not perto or not categorias or not os.path.exists(BASE):
+        return []
+    con = sqlite3.connect(BASE)
+    try:
+        linhas = []
+        for raio in (0.02, 0.05, 0.12, 0.4):          # ~2 km, 5 km, 13 km, a cidade toda
+            linhas = con.execute(
+                "SELECT nome, categoria, endereco, lat, lon FROM lugares WHERE categoria IN (%s) "
+                "AND conf >= ? AND lat BETWEEN ? AND ? AND lon BETWEEN ? AND ?" % ",".join("?" * len(categorias)),
+                list(categorias) + [CONF_MAPA_MIN, perto[0] - raio, perto[0] + raio,
+                                    perto[1] - raio, perto[1] + raio]).fetchall()
+            if len(linhas) >= quantos:
+                break
+    finally:
+        con.close()
+    lugares = []
+    for nome, categoria, endereco, lat, lon in linhas:
+        detalhe = ", ".join(x for x in (categoria.capitalize() if categoria else "", endereco) if x)
+        lugares.append({"nome": nome, "endereco": detalhe[:90], "lat": lat, "lon": lon, "fonte": "Goiânia",
+                        "nota": 0, "dist_m": distancia_m(perto, (lat, lon))})
+    lugares.sort(key=lambda l: l["dist_m"])
+    unicos = []
+    for l in lugares:      # a mesma loja cadastrada duas vezes
+        if not any(normalizar(u["nome"]) == normalizar(l["nome"]) and abs(u["dist_m"] - l["dist_m"]) < 150
+                   for u in unicos[-6:]):
+            unicos.append(l)
+        if len(unicos) >= quantos:
+            break
+    return unicos
+
+
 def _offline(texto):
     termos = _termos(texto)
     if not termos or not os.path.exists(BASE):

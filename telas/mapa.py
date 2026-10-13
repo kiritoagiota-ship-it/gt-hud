@@ -42,6 +42,7 @@ from widgets.perfil import PerfilAltimetria
 from widgets.velocimetro import Velocimetro
 
 VELO_A_CADA_S = 0.2    # o velocímetro pega a velocidade prevista 5x por segundo
+VOLTA_A_FRENTE_M = 80.0  # fora da rota: aponta para a rota este tanto à frente de onde ele saiu
 PULSA_ACIMA_KMH = 4.0  # ... e só andando
 PULSA_A_M = 70.0       # a faixa da curva pulsa nos últimos metros antes de virar
 SOBE_FOLHA_S = 0.45    # abertura: a folha de baixo e o velocímetro sobem nesse tempo...
@@ -498,6 +499,7 @@ class TelaMapa(Screen):
         self.mapa.modo_navegacao(False)
         self.mapa.sinais_rota = None
         self._rota_na_tela = None
+        self.mapa.definir_volta(None)
         self._pulsar_curva(False)
         self._parar_contagem()
         self._limite_via = None
@@ -815,7 +817,7 @@ class TelaMapa(Screen):
             if self._tem_alerta:
                 visiveis.append(self.chip_alerta)
         # (com o cartão de chegada na tela, o botão da bateria sai: os dois se encavalavam)
-        if self.disco in visiveis and not self._resumo and (self.estado == LIVRE or self.width <= self.height):
+        if self.disco in visiveis and not self._resumo:
             visiveis.append(self.btn_bateria)   # (deitada e navegando, o lugar é dos avisos)
         na_doca = self.doca in visiveis
         for b in (self.btn_menos, self.btn_mais, self.btn_rotas, self.btn_vivo):
@@ -867,6 +869,10 @@ class TelaMapa(Screen):
         # a bateria: logo acima do velocímetro (navegando, um pouco mais alto: a placa do limite passa ali)
         self.btn_bateria.size = (dp(124), dp(40))
         self.btn_bateria.pos = (self.disco.x, self.disco.y + tam_velo + (dp(22) if self.estado == NAVEGANDO else dp(8)))
+        if deitada and self.estado == NAVEGANDO:
+            # deitada e navegando, acima do velocímetro ficam os avisos: a bateria vai para o
+            # canto de cima, à esquerda da coluna de botões (até a 1.0.80 ela sumia aqui)
+            self.btn_bateria.pos = (W - m - dp(58) - dp(8) - dp(124), H - m - dp(40))
         self.barra_livre.pos, self.barra_livre.size = (bx, m), (bw, dp(132))
         self.barra_nav.pos, self.barra_nav.size = (bx, m), (bw, dp(76))
 
@@ -964,15 +970,27 @@ class TelaMapa(Screen):
         linhas = [lugar["legenda"].capitalize() if lugar["legenda"] else icones_mapa.NOMES.get(lugar["icone"], "Lugar")]
         if app.posicao is not None:
             from rota import distancia_m
-            linhas.append("A %s daqui, em linha reta." % fmt_dist_nav(distancia_m(app.posicao, (lugar["lat"], lugar["lon"]))))
+            reto = distancia_m(app.posicao, (lugar["lat"], lugar["lon"]))
+            # (pelas ruas dá uns 35% a mais que em linha reta; a ~25 km/h de média na cidade)
+            minutos = max(1, int(round(reto * 1.35 / (25.0 / 3.6) / 60.0)))
+            linhas.append("A %s daqui (uns %d min de moto)." % (fmt_dist_nav(reto), minutos))
+        chave_end = (app.ajustes["tomtom"] or "").strip() or None
+        linhas.append("Buscando o endereço...")
         destino = {"nome": lugar["nome"], "endereco": "", "lat": lugar["lat"], "lon": lugar["lon"]}
 
         def salvar():
             app.salvar_lugar(lugar["nome"], lugar["lat"], lugar["lon"])
             self._montar_atalhos()
             self.mensagem("Salvo! Ache em \"Para onde?\"", tema.VERDE)
-        escolher(lugar["nome"], [("Ir para cá", lambda: app.escolher_destino(destino)),
-                                 ("Salvar", salvar), ("Fechar", None)], "\n".join(linhas))
+        janela = escolher(lugar["nome"], [("Ir para cá", lambda: app.escolher_destino(destino)),
+                                          ("Salvar", salvar), ("Fechar", None)], "\n".join(linhas))
+
+        def chegou(endereco):       # o endereço do lugar (ou nada): troca a linha de espera
+            if janela.aviso is not None:
+                janela.aviso.text = "\n".join(linhas[:-1] + ([endereco] if endereco else []))
+        import rede
+        rede.em_segundo_plano(lambda: busca.endereco_de(lugar["lat"], lugar["lon"], chave_end), chegou,
+                              lambda e: chegou(""))
 
     # --- trânsito ao vivo: tocar no ícone de uma ocorrência -----------------------------
     def _ver_ocorrencia(self, o):
@@ -1384,7 +1402,17 @@ class TelaMapa(Screen):
                            and e["dist_manobra"] <= PULSA_A_M)
         if e["fora_da_rota"]:
             app = App.get_running_app()
-            self.lbl_instr.text = "Recalculando a rota..." if app.recalculando else "Fora da rota"
+            # o caminho de volta, sem esperar a internet: os pontos no mapa levam até a rota,
+            # um pouco à frente de onde ele saiu, e a faixa diz a que distância ela está
+            nav = app.nav
+            longe = fmt_dist_nav(getattr(nav, "dist_da_linha", 0.0))
+            self.lbl_instr.text = ("Recalculando... a rota está a %s" if app.recalculando
+                                   else "Volte para a rota: %s") % longe
+            if nav is not None and len(nav.rota.pontos) >= 2:
+                alvo = nav.rota.ponto_em(min(nav.rota.total_m, nav.dist_feita + VOLTA_A_FRENTE_M))
+                self.mapa.definir_volta((alvo[0], alvo[1]))
+        else:
+            self.mapa.definir_volta(None)
         self.col_tempo_nav.valor.text = fmt_duracao(e["restante_s"])
         self.col_tempo_nav.rotulo.text = "às %s" % fmt_hora_chegada(e["restante_s"])
         self.col_falta.valor.text = fmt_dist_nav(e["restante_m"])

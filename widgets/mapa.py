@@ -98,6 +98,7 @@ RADAR_VOLTA_S = 1.7        # cada onda do "procurando caminho" leva isso
 PONTILHADO_MIN_M = 12.0    # o lugar a menos que isso do fim da rota: é ali mesmo, sem pontilhado
 PONTILHADO_MAX_M = 600.0
 PONTILHADO_TRACO_M = 5.0   # cada traço (e cada vão) do pontilhado
+PONTOS_DA_VOLTA = 9        # fora da rota: quantos pontos ligam a seta à rota
 ZOOM_MANUAL_S = 15.0       # navegando: depois de mexer no zoom, o automático espera isso
 ZOOM_TOQUE_S = 0.28        # o zoom do toque duplo desliza por esse tempo
 FESTA_S = 3.2              # ondas verdes no destino ao chegar
@@ -245,6 +246,7 @@ class MapaHUD(CamadasDoMapa, Widget):
         self._zoom_toque = None             # toque duplo: o zoom deslizando até o nível seguinte
         self._zoom_manual_ate = 0.0         # até quando o zoom automático da rota fica quieto
         self._lugares_juntos = (None, [])   # (quais listas de lugares, elas juntas e ordenadas)
+        self._volta = None                  # fora da rota: (lat, lon) do ponto da rota para onde voltar
         self._dest_pousou = True            # o pino que está caindo já tocou o chão?
         self._curva = []                    # a seta da próxima curva, desenhada no chão: [(lat, lon)]
         self._rastro = collections.deque(maxlen=RASTRO_PONTOS)   # por onde a seta acabou de passar (locais)
@@ -472,6 +474,14 @@ class MapaHUD(CamadasDoMapa, Widget):
         """Rotas que a pessoa pode escolher em vez da atual (desenho cinza)."""
         self._alternativas = [list(p) for p in listas]
         self._refazer_linhas()
+
+    def definir_volta(self, lat_lon):
+        """Fora da rota: uma fileira de pontos liga quem pedala ao ponto da rota para onde
+        voltar (pedido do dono, 13/10/2026: não ficar sem guia enquanto a rota nova não
+        chega, ou quando não há internet para recalcular). None tira."""
+        if lat_lon != self._volta:
+            self._volta = lat_lon
+            self._desenhar_tela()
 
     def definir_trilha(self, pontos):
         self._trilha = list(pontos)
@@ -1267,6 +1277,12 @@ class MapaHUD(CamadasDoMapa, Widget):
         self._e_ponta = [Ellipse(size=(dp(26), dp(26))), Ellipse(size=(dp(11), dp(11)))]
         self._m_ponta = grupo(Color(*tema.com_alfa(tema.CIANO, 0.35)), self._e_ponta[0],
                               Color(*tema.BRANCO), self._e_ponta[1])
+        # fora da rota: os pontos que ligam a seta ao lugar da rota para onde voltar
+        self._e_volta = [Ellipse(size=(dp(8), dp(8))) for _ in range(PONTOS_DA_VOLTA)]
+        self._e_volta_alvo = [Ellipse(size=(dp(24), dp(24))), Ellipse(size=(dp(12), dp(12)))]
+        self._m_volta = grupo(Color(*tema.LARANJA), *self._e_volta,
+                              Color(*tema.com_alfa(tema.LARANJA, 0.35)), self._e_volta_alvo[0],
+                              Color(*tema.BRANCO), self._e_volta_alvo[1])
         self._tam_dest = [e.size for e in self._e_dest]
         self._visiveis = []
         self._ultima_seta = None
@@ -1340,6 +1356,18 @@ class MapaHUD(CamadasDoMapa, Widget):
             for e in self._e_ponta:
                 e.pos = (x - e.size[0] / 2.0, y - e.size[1] / 2.0)
             quais.append(self._m_ponta)
+        if self._volta and self.eu:
+            de = self._para_tela(*(self._vista or self.eu)[:2])
+            ate = self._para_tela(*self._volta)
+            if math.hypot(ate[0] - de[0], ate[1] - de[1]) > dp(34):
+                n = len(self._e_volta)
+                for k, e in enumerate(self._e_volta):      # do corpo da seta até perto do alvo
+                    f = (k + 1.5) / (n + 1.5)
+                    e.pos = (de[0] + (ate[0] - de[0]) * f - e.size[0] / 2.0,
+                             de[1] + (ate[1] - de[1]) * f - e.size[1] / 2.0)
+                for e in self._e_volta_alvo:
+                    e.pos = (ate[0] - e.size[0] / 2.0, ate[1] - e.size[1] / 2.0)
+                quais.append(self._m_volta)
         if self.eu:
             precisao = self.eu[3]
             lat, lon, rumo = self._vista or self.eu[:3]

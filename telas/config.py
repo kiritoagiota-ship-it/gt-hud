@@ -4,7 +4,9 @@ vibração, pausa automática, orientação, tela ligada, suavização e simulad
 from kivy.app import App
 from kivy.clock import Clock
 from kivy.metrics import dp
+from kivy.properties import BooleanProperty
 from kivy.uix.anchorlayout import AnchorLayout
+from kivy.uix.behaviors import ButtonBehavior
 from kivy.uix.boxlayout import BoxLayout
 from kivy.uix.gridlayout import GridLayout
 from kivy.uix.label import Label
@@ -107,15 +109,19 @@ SECOES = [
 ]
 
 
-class Secao(BoxLayout):
-    """Título de um grupo de opções: nome em destaque e um risco até a borda."""
+class Secao(ButtonBehavior, BoxLayout):
+    """Título de um grupo de opções: nome em destaque, um risco até a borda e a setinha.
+    Tocar abre ou fecha o grupo (pedido do dono, 13/10/2026: a tela era uma lista comprida)."""
+    aberta = BooleanProperty(True)
 
     def __init__(self, titulo, **kw):
         kw.setdefault("size_hint_y", None)
-        kw.setdefault("height", dp(40))
+        kw.setdefault("height", dp(48))
         kw.setdefault("padding", (0, dp(14), 0, 0))
         super().__init__(**kw)
-        self.lbl = Label(text=titulo.upper(), font_size=tema.T_ROTULO, bold=True, color=tema.CIANO,
+        self.nome = titulo
+        self.bind(aberta=self._d)
+        self.lbl = Label(text=titulo.upper(), font_size=tema.T_ROTULO + 1, bold=True, color=tema.CIANO,
                          size_hint_x=None, halign="left", valign="middle")
         self.lbl.bind(texture_size=lambda l, t: setattr(l, "width", t[0] + dp(10)))
         self.add_widget(self.lbl)
@@ -129,7 +135,13 @@ class Secao(BoxLayout):
         self.canvas.after.clear()
         with self.canvas.after:
             Color(*tema.com_alfa(tema.CIANO, 0.35))
-            Line(points=[self.x + self.lbl.width + dp(4), y, self.right, y], width=dp(1))
+            Line(points=[self.x + self.lbl.width + dp(4), y, self.right - dp(26), y], width=dp(1))
+            # a setinha: para baixo com o grupo aberto, para a direita fechado
+            Color(*tema.CIANO)
+            cx, s = self.right - dp(12), dp(5)
+            pontos = [cx - s, y + s * 0.5, cx, y - s * 0.5, cx + s, y + s * 0.5] if self.aberta else \
+                [cx - s * 0.5, y + s, cx + s * 0.5, y, cx - s * 0.5, y - s]
+            Line(points=pontos, width=dp(1.6), cap="round", joint="round")
 
 
 class _Coletor:
@@ -141,20 +153,46 @@ class _Coletor:
     def add_widget(self, w):
         self.itens.append(w)
 
-    def arrumar(self, grade):
+    def arrumar(self, grade, abertas=None, ao_mudar=None):
+        """`abertas`: nomes das seções que começam abertas (None = todas); `ao_mudar(nomes)`
+        é chamada quando a pessoa abre ou fecha uma, com as que ficaram abertas."""
         por_titulo = {w.titulo.text: w for w in self.itens if isinstance(w, Linha)}
         postos = set()
+        self.grade, self.grupos, self._ao_mudar = grade, [], ao_mudar
         for nome, titulos in SECOES:
             linhas = [por_titulo[t] for t in titulos if t in por_titulo]
             if not linhas:
                 continue
-            grade.add_widget(Secao(nome))
-            for w in linhas:
-                grade.add_widget(w)
-                postos.add(id(w))
-        for w in self.itens:   # o que não está em nenhuma seção (e o rodapé) vai no fim
-            if id(w) not in postos:
-                grade.add_widget(w)
+            secao = Secao(nome)
+            secao.aberta = abertas is None or nome in abertas
+            secao.bind(on_release=self._trocar)
+            self.grupos.append((secao, linhas))
+            postos.update(id(w) for w in linhas)
+        # o que não está em nenhuma seção (e o rodapé) vai no fim, sempre à vista
+        self.soltos = [w for w in self.itens if id(w) not in postos]
+        self._por()
+
+    def _por(self):
+        self.grade.clear_widgets()
+        for secao, linhas in self.grupos:
+            self.grade.add_widget(secao)
+            if secao.aberta:
+                for w in linhas:
+                    self.grade.add_widget(w)
+        for w in self.soltos:
+            self.grade.add_widget(w)
+
+    def _trocar(self, secao):
+        secao.aberta = not secao.aberta
+        self._por()
+        if self._ao_mudar is not None:
+            self._ao_mudar([s.nome for s, _ in self.grupos if s.aberta])
+
+    def abrir_secao_de(self, linha):
+        """Abre a seção onde está essa linha (para quem chega querendo mexer nela)."""
+        for secao, linhas in self.grupos:
+            if any(w is linha for w in linhas) and not secao.aberta:
+                self._trocar(secao)
 
 
 _NOMES_TEMA = {"auto": "Automático", "claro": "Claro", "escuro": "Escuro", "monarca": "Monarca"}
@@ -354,7 +392,10 @@ class TelaConfig(Screen):
         self.lbl_versao = Texto(text="", font_size=tema.T_ROTULO, color=tema.CIANO_FRACO,
                                 halign="center", size_hint_y=None, height=dp(64))
         lista.add_widget(self.lbl_versao)
-        lista.arrumar(grade)
+        app = App.get_running_app()
+        self.secoes = lista
+        lista.arrumar(grade, list(app.ajustes["ajustes_abertas"]),
+                      lambda nomes: app.ajustes.__setitem__("ajustes_abertas", nomes))
         self.add_widget(raiz)
 
     @staticmethod

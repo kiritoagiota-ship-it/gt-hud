@@ -33,6 +33,10 @@ from kivy.metrics import dp  # noqa: E402
 
 import voz  # noqa: E402
 import widgets.mapa as wmapa  # noqa: E402
+import rota_falsa  # noqa: E402
+
+rota_falsa.instalar()      # (a rota sai na hora: este teste é dos endereços recebidos)
+
 
 FALAS = []
 

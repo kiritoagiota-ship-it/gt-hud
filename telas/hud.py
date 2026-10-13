@@ -58,7 +58,10 @@ class TelaHUD(Screen):
         self.b_med = Bloco(rotulo="Média (km/h)", valor="0")
         self.b_dist = Bloco(rotulo="Distância", valor="0 m")
         self.b_tempo = Bloco(rotulo="Tempo", valor="00:00")
-        for b in (self.b_max, self.b_med, self.b_dist, self.b_tempo):
+        # a carga da moto também aqui (bateria.py): barrinhas e km, e quanto deve restar
+        self.b_carga = Bloco(rotulo="Carga da moto", valor="-")
+        self.b_resta = Bloco(rotulo="Deve restar", valor="-")
+        for b in (self.b_max, self.b_med, self.b_dist, self.b_tempo, self.b_carga, self.b_resta):
             self.grade.add_widget(b)
 
         # controles
@@ -90,7 +93,7 @@ class TelaHUD(Screen):
             self.raiz.orientation = "vertical"
             self.velo.size_hint_x = 1
             self.grade.size_hint_y = None
-            self.grade.height = dp(190)
+            self.grade.height = dp(280)
             for w in (self.topo, self.velo, self.lbl_msg, self.grade, self.controles):
                 self.raiz.add_widget(w)
 
@@ -202,6 +205,14 @@ class TelaHUD(Screen):
         self.b_dist.valor = fmt_dist(v.distancia_m)
         self.b_tempo.valor = fmt_tempo(v.tempo_total_s)
         self.b_tempo.cor_acento = tema.LARANJA if v.estado == Viagem.PAUSADA else tema.CIANO
+        bat = App.get_running_app().bateria
+        resta = bat.restante_m()
+        # (número curto: o bloco é estreito; as barrinhas vão no rótulo)
+        self.b_carga.rotulo = "Carga da moto · %d/5" % bat.barras if bat.ativa else "Carga da moto"
+        self.b_carga.valor = fmt_dist(bat.metros) if bat.ativa else "-"
+        self.b_resta.rotulo = "Deve restar (estimado)"
+        self.b_resta.valor = "-" if resta is None else ("%d km" % round(resta / 1000.0))
+        self.b_resta.cor_acento = tema.LARANJA if resta is not None and resta < 5000 else tema.CIANO
 
     # --- controles da viagem ---------------------------------------------
     def _montar_controles(self):

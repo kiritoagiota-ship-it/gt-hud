@@ -33,6 +33,15 @@ from kivy.metrics import dp  # noqa: E402
 
 import voz  # noqa: E402
 import widgets.mapa as wmapa  # noqa: E402
+import busca  # noqa: E402
+import rota_falsa  # noqa: E402
+
+# (sem internet: a rota sai na hora e a busca usa só a base do celular; este teste é do
+# RECÁLCULO e da tela de busca, não dos servidores, e oscilava quando eles demoravam)
+rota_falsa.instalar()
+busca.buscar = (lambda texto, perto=None, salvos=(), chave_tomtom=None, endereco=False:
+                busca.buscar_local(texto, perto, salvos))
+
 
 FALAS = []
 
