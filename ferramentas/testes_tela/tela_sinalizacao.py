@@ -32,6 +32,9 @@ from kivy.core.window import Window  # noqa: E402
 from kivy.metrics import dp  # noqa: E402
 
 import voz  # noqa: E402
+import tema as _tema  # noqa: E402
+
+_tema.SO_MONARCA = False   # (este teste troca de tema: confere que a troca segue funcionando)
 import widgets.mapa as wmapa  # noqa: E402
 
 FALAS = []

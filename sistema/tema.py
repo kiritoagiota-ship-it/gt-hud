@@ -84,6 +84,12 @@ BRANCO, LARANJA, VERMELHO, VERDE, LUGAR, ROXO = ([0, 0, 0, 1] for _ in range(6))
 degrade_base = DEGRADE["escuro"]
 
 
+# O dono (14/10/2026): "vamos esquecer aquele lance dos outros temas, por enquanto só o
+# Monarca". Com isto ligado o app usa sempre o Monarca e a opção "Aparência" some dos
+# Ajustes. Os temas claro/escuro/automático continuam no código: é só desligar aqui.
+SO_MONARCA = True
+
+
 def aplicar(nome):
     """Troca a paleta ("escuro", "claro" ou "monarca"), no lugar."""
     global modo, degrade_base

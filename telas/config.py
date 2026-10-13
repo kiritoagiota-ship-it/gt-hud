@@ -120,6 +120,7 @@ class Secao(ButtonBehavior, BoxLayout):
         kw.setdefault("padding", (0, dp(14), 0, 0))
         super().__init__(**kw)
         self.nome = titulo
+        self._ev_desenho = None
         self.bind(aberta=self._d)
         self.lbl = Label(text=titulo.upper(), font_size=tema.T_ROTULO + 1, bold=True, color=tema.CIANO,
                          size_hint_x=None, halign="left", valign="middle")
@@ -130,7 +131,14 @@ class Secao(ButtonBehavior, BoxLayout):
         self.lbl.bind(width=self._d)
 
     def _d(self, *a):
+        # (no quadro seguinte, com o tamanho e o lugar já assentados: desenhando na hora, as
+        # seções fechadas ficavam com a setinha em cima do título até serem tocadas)
+        if self._ev_desenho is None:
+            self._ev_desenho = Clock.schedule_once(self._desenhar, 0)
+
+    def _desenhar(self, *a):
         from kivy.graphics import Color, Line
+        self._ev_desenho = None
         y = self.y + (self.height - dp(14)) / 2.0
         self.canvas.after.clear()
         with self.canvas.after:
@@ -378,11 +386,12 @@ class TelaConfig(Screen):
 
         self.btn_tema = BotaoHUD(text="", size_hint_x=None, width=dp(130),
                                  on_release=lambda *a: self._mudar_tema())
-        lista.add_widget(Linha("Aparência",
-                               "Automático: tema claro de dia (lê melhor no sol) e escuro à "
-                               "noite. Monarca: preto, roxo e azul, com avisos no estilo \"Sistema\". "
-                               "Toque para trocar.",
-                               self._centralizar(self.btn_tema)))
+        if not tema.SO_MONARCA:   # (por enquanto só o Monarca: a escolha de tema fica guardada)
+            lista.add_widget(Linha("Aparência",
+                                   "Automático: tema claro de dia (lê melhor no sol) e escuro à "
+                                   "noite. Monarca: preto, roxo e azul, com avisos no estilo \"Sistema\". "
+                                   "Toque para trocar.",
+                                   self._centralizar(self.btn_tema)))
 
         self.alt_sim = Alternar(self._mudar_sim)
         lista.add_widget(Linha("Modo simulador",

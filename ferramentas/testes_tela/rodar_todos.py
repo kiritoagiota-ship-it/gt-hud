@@ -31,17 +31,18 @@ def rodar(nome):
     # esconde defeito: um passo que quebra no meio some sem acusar falha (aconteceu em
     # 13/10/2026). Por isso: o que o diagnóstico ganhar de erro durante o teste é falha.
     diario = os.path.join(env["APPDATA"], "gthud", "diagnostico.txt")
-    antes = os.path.getsize(diario) if os.path.exists(diario) else 0
     saida = subprocess.run([sys.executable, os.path.join(PASTA, nome)], env=env, capture_output=True,
                            text=True, encoding="utf-8", errors="replace", timeout=600).stdout
     checas = [l for l in saida.splitlines() if l.startswith("[CHECA]")]
     falhas = [l for l in checas if "FALHOU" in l]
     try:
         with open(diario, encoding="utf-8", errors="replace") as f:
-            f.seek(antes if os.path.getsize(diario) >= antes else 0)
             novo = f.read()
     except OSError:
         novo = ""
+    # só o que é DESTA abertura do app (o app corta o começo do arquivo quando ele cresce: contar
+    # pelo tamanho de antes trazia erros velhos de volta e acusava teste que estava certo)
+    novo = novo[novo.rfind("===== app aberto "):] if "===== app aberto " in novo else ""
     blocos = novo.split(" !! ")[1:] + novo.split(" !!! ")[1:]
     for bloco in blocos:
         linhas = [l for l in bloco.strip().splitlines() if l.strip()]

@@ -213,6 +213,8 @@ class GTHudApp(App):
     # --- tema claro/escuro ------------------------------------------------------------
     def tema_desejado(self):
         """O tema que deveria estar valendo agora, pelos Ajustes e pela hora."""
+        if tema.SO_MONARCA:
+            return "monarca"
         escolha = self.ajustes["tema"]
         if escolha in ("claro", "escuro", "monarca"):
             return escolha

@@ -209,7 +209,7 @@ class TelaHUD(Screen):
         resta = bat.restante_m()
         # (número curto: o bloco é estreito; as barrinhas vão no rótulo)
         self.b_carga.rotulo = "Carga da moto · %d/5" % bat.barras if bat.ativa else "Carga da moto"
-        self.b_carga.valor = fmt_dist(bat.metros) if bat.ativa else "-"
+        self.b_carga.valor = ("%.1f km" % (bat.metros / 1000.0)).replace(".", ",") if bat.ativa else "-"
         self.b_resta.rotulo = "Deve restar (estimado)"
         self.b_resta.valor = "-" if resta is None else ("%d km" % round(resta / 1000.0))
         self.b_resta.cor_acento = tema.LARANJA if resta is not None and resta < 5000 else tema.CIANO
