@@ -488,16 +488,23 @@ void main() {
   pele = 0.0;
   vec2 torce = vec2(fbm3(Pf * 2.6 + 7.0), fbm3(Pf * 2.6 + 19.0)) - 0.5;
   // quem escuta ganha um anel verde abrindo
+#ifndef SEM_EXTRAS
   float raio = length(P - vec2(0.0, 0.02));
   for (int k = 0; k < 2; k++) {
     float f = fract(u_t * 0.9 + float(k) * 0.5);
     luz(VERDE, exp(-sq((raio - (0.80 + f * 0.17)) / 0.008)) * (1.0 - f) * 0.55 * u_escuta);
   }
+#endif
   vec3 fogo = mix(AZUL, LARANJA, u_alerta);
   cabeca(P, Pf, torce, fogo);
+#ifndef SEM_BOCA
   boca(Pf, torce);
+#endif
+#ifndef SEM_OLHOS
   olho(Pf, -1.0, u_olho, 1.0, fogo, torce);
   olho(Pf, 1.0, u_olho, 1.0 - 0.38 * u_torto, fogo, torce);
+#endif
+#ifndef SEM_EXTRAS
   // brasas soltas subindo
   for (int i = 0; i < 9; i++) {
     float n = float(i);
@@ -506,6 +513,7 @@ void main() {
     vec2 q = P - onde;
     luz(mod(n, 2.0) < 1.0 ? ROXO : AZUL, exp(-dot(q, q) / (0.00010 * (1.0 + 2.0 * (1.0 - vida)))) * sin(vida * 3.14159) * 0.75);
   }
+#endif
 #ifdef NO_APP
   // o Kivy mistura com a cor "pura": desfaz a multiplicação pela transparência
   gl_FragColor = vec4(min(col / max(alfa, 0.004), vec3(1.0)), alfa * u_presenca);

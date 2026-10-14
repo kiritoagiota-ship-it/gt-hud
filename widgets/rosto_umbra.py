@@ -236,6 +236,10 @@ class RostoUmbra(Widget):
         self._quadros_ok = -1
         self._avisou_placa = False
         self._compilado = False
+        # Teste do Umbra (umbra_teste.py): desenho próprio ou partes desligadas, sem a etapa de sempre
+        self.em_teste = False
+        self.fonte_propria = None
+        self.definicoes = ""
         self._ev = None
         self._t0 = time.monotonic()
         self._ultimo = None
@@ -370,7 +374,8 @@ class RostoUmbra(Widget):
         """O desenho ao vivo, compilado uma vez (completo ou leve, conforme o degrau)."""
         if self._compilado:
             return True
-        fonte = "#define NO_APP\n" + ("#define LEVE\n" if self.nivel == 1 else "") + FONTE
+        fonte = self.fonte_propria or ("#define NO_APP\n" + self.definicoes
+                                       + ("#define LEVE\n" if self.nivel == 1 else "") + FONTE)
         self._rc.shader.fs = fonte
         if not self._rc.shader.success:
             print("[umbra] o desenho do rosto não compilou neste aparelho")
@@ -379,12 +384,18 @@ class RostoUmbra(Widget):
         self._compilado = True
         return True
 
+    def recompilar(self):
+        """O próximo mostrar() compila o desenho de novo (o teste troca as partes)."""
+        self._compilado = False
+        self.quebrado = False
+
     def _ligar(self):
         if self.simples:
             self._ret_img.texture = self._textura("parado")
         else:
             # etapa arriscada: se o app cair aqui (placa de vídeo), na próxima vez ele desce um degrau
-            diagnostico.etapa(ETAPA_ROSTO)
+            if not self.em_teste:
+                diagnostico.etapa(ETAPA_ROSTO)
             print("[umbra] rosto: preparando o desenho %s, direto na tela" % ("leve" if self.nivel == 1 else "completo"),
                   flush=True)
             if not self._avisou_placa:
@@ -397,11 +408,12 @@ class RostoUmbra(Widget):
                 except Exception:
                     pass
             if not self._compilar():
-                diagnostico.etapa_ok(ETAPA_ROSTO)
+                if not self.em_teste:
+                    diagnostico.etapa_ok(ETAPA_ROSTO)
                 self.presenca = 0.0
                 return
             print("[umbra] rosto: desenho compilado", flush=True)
-            self._quadros_ok = 0
+            self._quadros_ok = 0 if not self.em_teste else -1
         if self._ev is None:
             self._ultimo = None
             self._quadro(0)                   # os números já certos antes do primeiro quadro na tela

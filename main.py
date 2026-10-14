@@ -107,6 +107,10 @@ class GTHudApp(App):
             self._aviso_umbra = ("O desenho do Umbra fechou o app: agora ele tenta um desenho mais leve."
                                  if nivel == 1 else "O desenho do Umbra fechou o app: por enquanto ele aparece em imagem.")
             print("[umbra] o desenho derrubou o app: próximo degrau = %d" % nivel)
+        elif caiu and caiu.startswith("teste_umbra:"):
+            import umbra_teste
+            self._aviso_umbra = "Teste do Umbra: o app fechou na peça \"%s\"." % umbra_teste.descricao(caiu)
+            print("[teste umbra] o app fechou na peça: %s" % caiu)
         elif caiu == "umbra_escuta":
             self.ajustes["umbra_escuta_falhou"] = self.versao()
             self._aviso_umbra = "O reconhecimento de voz fechou o app: a escuta do Umbra ficou desligada."
@@ -1037,6 +1041,14 @@ class GTHudApp(App):
         android_utils.vibrar_padrao("fora")
         self.na_tela(lambda: self.sm.get_screen("mapa").mensagem(frase, tema.LARANJA, 12))
         self.na_tela(self.umbra.aviso_bateria)   # e o Umbra pequeno avisa, com a voz
+
+    def testar_umbra(self):
+        """Ajustes > Sistema > Testar o Umbra: liga as peças dele uma de cada vez (umbra_teste.py)."""
+        import umbra_teste
+        self.sm.current = "mapa"
+        if getattr(self, "_teste_umbra", None) is None:
+            self._teste_umbra = umbra_teste.TesteUmbra(self)
+        Clock.schedule_once(lambda dt: self._teste_umbra.comecar(), 0.8)
 
     def nivel_rosto_umbra(self):
         """0 desenho completo, 1 leve, 2 imagens prontas (o degrau desta versão do app)."""

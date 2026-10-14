@@ -106,7 +106,7 @@ SECOES = [
     ("Velocímetro e viagem", ["Alerta de velocidade", "Vibrar no limite", "Ajuste do velocímetro",
                               "Resposta do velocímetro",
                               "Pausa automática"]),
-    ("Sistema", ["Diagnóstico", "Modo simulador"]),
+    ("Sistema", ["Diagnóstico", "Testar o Umbra", "Modo simulador"]),
 ]
 
 
@@ -253,6 +253,12 @@ class TelaConfig(Screen):
                                "Fala uma frase de exemplo com a voz escolhida.",
                                self._centralizar(BotaoHUD(text="Testar", size_hint_x=None, width=dp(130),
                                                           on_release=lambda *a: self._testar_voz()))))
+
+        lista.add_widget(Linha("Testar o Umbra",
+                               "Liga as peças do Umbra uma de cada vez (fala, imagem, desenho, microfone). "
+                               "Se o app fechar, ao abrir de novo ele diz em qual peça foi.",
+                               self._centralizar(BotaoHUD(text="Testar", size_hint_x=None, width=dp(130),
+                                                          on_release=lambda *a: App.get_running_app().testar_umbra()))))
 
         self.alt_umbra = Alternar(self._mudar_umbra)
         lista.add_widget(Linha("Umbra escuta parado",
