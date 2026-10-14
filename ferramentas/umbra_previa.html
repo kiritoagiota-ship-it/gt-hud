@@ -1143,7 +1143,8 @@ void main() {
     var m = MOLAS[nome] || (MOLAS[nome] = { x: alvo, v: 0 });
     if (calmo) { m.x = alvo; m.v = 0; return alvo; }
     var w = 2 * Math.PI * freq;
-    m.v += ((alvo - m.x) * w * w - 2 * amort * w * m.v) * dt;
+    // conta "implícita": estável a qualquer velocidade de tela (a direta divergia a 30 quadros/s)
+    m.v = (m.v + (alvo - m.x) * w * w * dt) / (1 + 2 * amort * w * dt + w * w * dt * dt);
     m.x += m.v * dt;
     return m.x;
   }

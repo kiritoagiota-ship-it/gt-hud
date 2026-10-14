@@ -96,9 +96,11 @@ class Movimento:
         self.direcao = 0.0              # -1 esquerda, 1 direita: olha para o lado da próxima curva
 
     def mola(self, nome, alvo, dt, freq, amort):
+        # conta "implícita": estável a qualquer velocidade de tela. A conta direta de antes divergia
+        # a 30 quadros/s (o olhar ia a 1e38 e o desenho estourava em branco; achado em 14/10/2026)
         m = self.molas.setdefault(nome, [alvo, 0.0])
         w = 2 * math.pi * freq
-        m[1] += ((alvo - m[0]) * w * w - 2 * amort * w * m[1]) * dt
+        m[1] = (m[1] + (alvo - m[0]) * w * w * dt) / (1.0 + 2 * amort * w * dt + w * w * dt * dt)
         m[0] += m[1] * dt
         return m[0]
 
