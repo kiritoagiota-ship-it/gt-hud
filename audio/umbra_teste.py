@@ -5,11 +5,15 @@ Umbra, sem erro do Python (a queda é fora dele), e as versões 1.0.84 a 1.0.87 
 tirando suspeitos às cegas. Aqui cada peça é marcada no disco antes de começar (diagnostico.etapa):
 se o app cair, a próxima abertura diz em qual peça foi (main.py mostra no mapa e anota no registro).
 
+Uma peça que já derrubou o app (nesta versão) é pulada da próxima vez: o teste segue dali.
+
 As peças vão da mais simples para a mais complexa: a fala, o rosto em imagem com legenda, um
-desenho mínimo na placa de vídeo, o desenho só da cabeça, cabeça e olhos, cabeça, olhos e boca,
+quadrado com o desenho padrão do Kivy num contexto próprio, um desenho mínimo na placa de vídeo, o desenho só da cabeça, cabeça e olhos, cabeça, olhos e boca,
 o desenho leve, o completo e o microfone.
 """
 from kivy.clock import Clock
+from kivy.graphics import Color, Rectangle, RenderContext
+from kivy.metrics import dp
 
 import diagnostico
 import tema
@@ -28,6 +32,7 @@ PASSOS = [
     # nome, o que aparece na tela, segundos
     ("fala", "só a fala gravada", 3.5),
     ("imagem", "o rosto em imagem, com legenda e fundo escuro", 3.0),
+    ("contexto_padrao", "um quadrado num contexto próprio, com o desenho padrão", 3.0),
     ("desenho_minimo", "um desenho mínimo na placa de vídeo", 3.0),
     ("so_cabeca", "o desenho só da cabeça", 3.0),
     ("cabeca_olhos", "o desenho da cabeça e dos olhos", 3.0),
@@ -54,6 +59,9 @@ def descricao(etapa):
 class TesteUmbra:
     def __init__(self, app):
         self.app = app
+        self.pular = ()                 # peças que já derrubaram o app nesta versão (main.py)
+        self.pulou = []
+        self._quadrado = None
         self.i = -1
         self._ev = None
         self.ativo = False
@@ -77,15 +85,23 @@ class TesteUmbra:
         r = self.rosto()
         r.em_teste = True
         self.i = -1
-        self.avisar("Teste do Umbra: começando (%d peças, uma de cada vez)" % len(PASSOS), 3.0)
+        self.pulou = []
+        self.pular = tuple(self.app.pecas_que_derrubaram()) if hasattr(self.app, "pecas_que_derrubaram") else ()
+        extra = (" (pulando %d que já fechou o app)" % len(self.pular)) if self.pular else ""
+        self.avisar("Teste do Umbra: começando (%d peças, uma de cada vez)%s" % (len(PASSOS), extra), 3.0)
         self._ev = Clock.schedule_once(self._proximo, 1.5)
 
     def _encerrar_passo(self):
         if self.i < 0:
             return
         nome = PASSOS[self.i][0]
+        if nome in self.pulou:
+            return
         r = self.rosto()
         r.esconder()
+        if self._quadrado is not None:
+            self.app.sm.get_screen("mapa").canvas.after.remove(self._quadrado)
+            self._quadrado = None
         if nome == "microfone":
             self.app.escuta.parar()
         diagnostico.etapa_ok(ETAPA + nome)
@@ -98,6 +114,11 @@ class TesteUmbra:
             self._terminar()
             return
         nome, texto, segundos = PASSOS[self.i]
+        if nome in self.pular:
+            self.pulou.append(nome)
+            print("[teste umbra] pulada (já fechou o app antes): %s" % nome, flush=True)
+            self._ev = Clock.schedule_once(self._proximo, 0.3)
+            return
         self.avisar("Teste %d/%d: %s" % (self.i + 1, len(PASSOS), texto), segundos + 0.4)
         diagnostico.etapa(ETAPA + nome)
         try:
@@ -116,6 +137,18 @@ class TesteUmbra:
                 print("[teste umbra] microfone sem permissão: peça pulada", flush=True)
                 return
             app.escuta.ouvir(1.0, conversa=False)
+            return
+        if nome == "contexto_padrao":
+            mapa = app.sm.get_screen("mapa")
+            rc = RenderContext(use_parent_projection=True, use_parent_modelview=True,
+                               use_parent_frag_modelview=True)
+            with rc:
+                Color(0.2, 0.9, 1.0, 0.85)
+                lado = min(mapa.width, mapa.height) * 0.5
+                Rectangle(pos=(mapa.x + (mapa.width - lado) / 2.0, mapa.y + mapa.height * 0.55 - lado / 2.0),
+                          size=(lado, lado))
+            mapa.canvas.after.add(rc)
+            self._quadrado = rc
             return
         if nome == "imagem":
             r.simples = True
@@ -136,4 +169,8 @@ class TesteUmbra:
         r.simples = r.nivel >= 2
         r.recompilar()
         self.app.umbra.pausado = False
-        self.avisar("Teste do Umbra: todas as peças passaram sem fechar o app", 8.0)
+        if self.pulou:
+            self.avisar("Teste do Umbra: terminou. Fecharam o app antes: %s"
+                        % ", ".join(descricao(ETAPA + n) for n in self.pulou), 10.0)
+        else:
+            self.avisar("Teste do Umbra: todas as peças passaram sem fechar o app", 8.0)

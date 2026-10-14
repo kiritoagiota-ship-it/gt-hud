@@ -47,6 +47,7 @@ PADRAO = {
     "umbra_rosto_nivel": ["", 0],
     # versão do app em que a escuta do Umbra derrubou o app: nessa versão ele não escuta
     "umbra_escuta_falhou": "",
+    "teste_umbra_caiu": ["", []],   # [versão, peças do Teste do Umbra que fecharam o app]
     "bateria": None,           # a carga de agora da moto: km desde o "Carreguei 100%" (bateria.py)
     "bateria_cargas": [],       # as cargas que já terminaram (km, barrinhas que sobraram)
     "tema_monarca_v1": False,    # o tema Monarca já foi ligado uma vez (pedido do dono)?

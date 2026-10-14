@@ -17,6 +17,7 @@ from kivy.uix.screenmanager import NoTransition, ScreenManager
 import android_utils
 import busca
 import diagnostico
+import laudo
 import fluxo
 import goiania
 import mapa_vetor
@@ -96,6 +97,7 @@ class GTHudApp(App):
 
         pasta = self.user_data_dir
         diagnostico.iniciar(pasta, self.versao())
+        laudo.anotar_saidas(pasta)   # por que o app fechou antes, segundo o Android (queda nativa)
         self.ajustes = Ajustes(pasta)
         # o Umbra derrubou o app da última vez (erro fora do Python: placa de vídeo ou reconhecimento
         # de voz)? Nesta versão, ele evita repetir a mesma etapa (diagnostico.etapa)
@@ -109,7 +111,11 @@ class GTHudApp(App):
             print("[umbra] o desenho derrubou o app: próximo degrau = %d" % nivel)
         elif caiu and caiu.startswith("teste_umbra:"):
             import umbra_teste
-            self._aviso_umbra = "Teste do Umbra: o app fechou na peça \"%s\"." % umbra_teste.descricao(caiu)
+            self._aviso_umbra = ("Teste do Umbra: o app fechou na peça \"%s\". Rode o teste de novo: ele pula essa peça e segue." % umbra_teste.descricao(caiu))
+            pecas = self.pecas_que_derrubaram()
+            nome = caiu[len(umbra_teste.ETAPA):]
+            if nome not in pecas:
+                self.ajustes["teste_umbra_caiu"] = [self.versao(), pecas + [nome]]
             print("[teste umbra] o app fechou na peça: %s" % caiu)
         elif caiu == "umbra_escuta":
             self.ajustes["umbra_escuta_falhou"] = self.versao()
@@ -1041,6 +1047,11 @@ class GTHudApp(App):
         android_utils.vibrar_padrao("fora")
         self.na_tela(lambda: self.sm.get_screen("mapa").mensagem(frase, tema.LARANJA, 12))
         self.na_tela(self.umbra.aviso_bateria)   # e o Umbra pequeno avisa, com a voz
+
+    def pecas_que_derrubaram(self):
+        """Peças do Teste do Umbra que já fecharam o app NESTA versão (o teste pula)."""
+        v = self.ajustes["teste_umbra_caiu"]
+        return list(v[1]) if isinstance(v, list) and len(v) == 2 and v[0] == self.versao() else []
 
     def testar_umbra(self):
         """Ajustes > Sistema > Testar o Umbra: liga as peças dele uma de cada vez (umbra_teste.py)."""

@@ -9,6 +9,11 @@ código Python no meio do desenho, e o volume da fala era lido numa thread: no G
 (Adreno 740, Android 16) o app caía na hora de pintar, até com o desenho leve. Agora não há Fbo,
 nem troca de mistura (o próprio desenho entrega a cor no formato que o Kivy mistura), nem thread.
 
+Até a 1.0.88 o RenderContext nascia com o desenho padrão do Kivy e depois recebia o do Umbra
+(shader.fs = ...: o Kivy refaz o programa já usado na placa de vídeo e reaproveita os endereços
+anotados antes da troca). No mesmo celular, até um degradê de uma linha caía assim (Teste do
+Umbra, 14/10/2026). Agora cada desenho ganha um RenderContext NOVO, que já nasce com ele.
+
 Se mesmo assim o desenho derrubar o app (diagnostico.etapa), a escada desce um degrau por
 versão: 0 desenho completo, 1 leve (#define LEVE), 2 imagens prontas (dados/umbra).
 
@@ -25,7 +30,7 @@ import wave
 
 from kivy.animation import Animation
 from kivy.clock import Clock
-from kivy.graphics import Color, Rectangle, RenderContext
+from kivy.graphics import Color, InstructionGroup, Rectangle, RenderContext
 from kivy.graphics import opengl as gl
 from kivy.metrics import dp, sp
 from kivy.properties import NumericProperty
@@ -246,15 +251,13 @@ class RostoUmbra(Widget):
         with self.canvas:
             self._cor_veu = Color(0.004, 0.003, 0.016, 0.0)
             self._veu = Rectangle()
-            # o desenho ao vivo: um RenderContext só para ele (o resto do app segue com o desenho normal)
-            self._rc = RenderContext(use_parent_projection=True, use_parent_modelview=True,
-                                     use_parent_frag_modelview=True)
+            # o desenho ao vivo: um RenderContext só para ele, criado já com o desenho (_compilar)
+            self._lugar_vivo = InstructionGroup()
             # o modo simples: uma imagem pronta comum
             self._cor_img = Color(1, 1, 1, 0)
             self._ret_img = Rectangle(size=(0, 0))
-        with self._rc:
-            Color(1, 1, 1, 1)
-            self._ret_vivo = Rectangle(size=(0, 0))
+        self._rc = None
+        self._ret_vivo = None
         self.lbl_ouvido = Texto(text="", font_size=sp(15), color=tema.CIANO_FRACO,
                                 halign="center", size_hint=(None, None), opacity=0)
         self.lbl_fala = Texto(text="", font_size=sp(19), bold=True, color=tema.BRANCO,
@@ -353,8 +356,9 @@ class RostoUmbra(Widget):
             self._ret_img.pos = (pos[0], pos[1] + self._bob)
             self._ret_img.size = (lado, lado) if visivel else (0, 0)
             self._cor_img.a = p
-            self._ret_vivo.size = (0, 0)
-        else:
+            if self._ret_vivo is not None:
+                self._ret_vivo.size = (0, 0)
+        elif self._ret_vivo is not None:
             self._ret_vivo.pos = pos
             self._ret_vivo.size = (lado, lado) if (visivel and self._compilado) else (0, 0)
             self._ret_img.size = (0, 0)
@@ -376,11 +380,24 @@ class RostoUmbra(Widget):
             return True
         fonte = self.fonte_propria or ("#define NO_APP\n" + self.definicoes
                                        + ("#define LEVE\n" if self.nivel == 1 else "") + FONTE)
-        self._rc.shader.fs = fonte
-        if not self._rc.shader.success:
+        # um RenderContext NOVO, que já nasce com o desenho (sem refazer um programa já usado)
+        try:
+            rc = RenderContext(fs=fonte, use_parent_projection=True, use_parent_modelview=True,
+                               use_parent_frag_modelview=True)
+            ok = rc.shader.success
+        except Exception as e:
+            print("[umbra] o desenho do rosto não ligou: %s" % e)
+            ok = False
+        if not ok:
             print("[umbra] o desenho do rosto não compilou neste aparelho")
             self.quebrado = True
             return False
+        with rc:
+            Color(1, 1, 1, 1)
+            ret = Rectangle(size=(0, 0))
+        self._lugar_vivo.clear()
+        self._lugar_vivo.add(rc)
+        self._rc, self._ret_vivo = rc, ret
         self._compilado = True
         return True
 
@@ -454,7 +471,7 @@ class RostoUmbra(Widget):
             self._bob = math.sin(t * 1.3) * dp(3) + u["boca"] * dp(2)
             self._redesenhar()
             return
-        if not self._compilado:
+        if not self._compilado or self._rc is None:
             return
         if self._quadros_ok >= 0:
             self._quadros_ok += 1
