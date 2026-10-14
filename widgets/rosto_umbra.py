@@ -15,6 +15,7 @@ encolhe e aparecem manchas cinza: medido em 13/10/2026).
 """
 import array
 import math
+import os
 import random
 import threading
 import time
@@ -28,6 +29,7 @@ from kivy.metrics import dp, sp
 from kivy.properties import NumericProperty
 from kivy.uix.widget import Widget
 
+import diagnostico
 import tema
 from widgets.comuns import Texto
 from widgets.umbra_pintor import FONTE
@@ -38,6 +40,8 @@ LADO_PEQUENO = dp(112)
 ATRASO_SOM_S = 0.08         # o som sai um tiquinho depois do play: a boca espera
 QUADROS_ENVELOPE = 50       # volume da fala: 50 medidas por segundo
 VEU = 0.72                  # quanto o mapa escurece por trás dele grande
+ETAPA_ROSTO = "umbra_rosto"  # (diagnostico.etapa) desenhar o rosto ao vivo
+PASTA_IMAGENS = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "dados", "umbra")
 
 FALA_ATE = {"falando": 99.0}
 ALVOS = {
@@ -228,6 +232,10 @@ class RostoUmbra(Widget):
         self.ao_tocar_fora = None       # tocou na tela com ele grande: fecha
         self.lugar_pequeno = None       # função (largura, altura) -> (x, y) do canto dele
         self.quebrado = False           # o desenho não compilou neste aparelho: não aparece
+        self.simples = False            # usa as imagens prontas (o desenho ao vivo derrubou o app aqui)
+        self._texturas = {}
+        self._bob = 0.0
+        self._quadros_ok = -1
         self._fbo = None
         self._fbo_lado = 0
         self._ev = None
@@ -335,8 +343,12 @@ class RostoUmbra(Widget):
         lado = self.rlado * escala
         self._ret.pos = (self.rx + (self.rlado - lado) / 2.0, self.ry + (self.rlado - lado) / 2.0)
         self._ret.size = (lado, lado)
-        self._cor_rosto.rgba = (p, p, p, p)            # (pré-multiplicada: a cor também some)
-        if self._fbo is not None:
+        if self.simples:
+            self._ret.pos = (self._ret.pos[0], self._ret.pos[1] + self._bob)
+            self._cor_rosto.rgba = (1, 1, 1, p)            # (imagem comum: só a transparência some)
+        else:
+            self._cor_rosto.rgba = (p, p, p, p)            # (pré-multiplicada: a cor também some)
+        if self._fbo is not None and not self.simples:
             self._ret.texture = self._fbo.texture
 
     @property
@@ -344,19 +356,26 @@ class RostoUmbra(Widget):
         return self._cor_veu.a > 0.0
 
     def _mistura_pre(self, instr):
-        if self._mistura is None:
-            def um(v):
-                try:
-                    return int(v[0])
-                except (TypeError, IndexError):
-                    return int(v)
-            self._mistura = tuple(um(gl.glGetIntegerv(p)) for p in (
-                gl.GL_BLEND_SRC_RGB, gl.GL_BLEND_DST_RGB, gl.GL_BLEND_SRC_ALPHA, gl.GL_BLEND_DST_ALPHA))
+        if self.simples:
+            return
         gl.glBlendFuncSeparate(gl.GL_ONE, gl.GL_ONE_MINUS_SRC_ALPHA, gl.GL_ONE, gl.GL_ONE_MINUS_SRC_ALPHA)
 
     def _mistura_volta(self, instr):
-        if self._mistura is not None:
-            gl.glBlendFuncSeparate(*self._mistura)
+        # volta para a mistura de sempre do Kivy (medida em 13/10/2026; não pergunta à placa de
+        # vídeo, para não depender do que cada celular responde)
+        if not self.simples:
+            gl.glBlendFuncSeparate(gl.GL_SRC_ALPHA, gl.GL_ONE_MINUS_SRC_ALPHA, gl.GL_ONE, gl.GL_ONE)
+
+    # --- o modo simples: imagens prontas (dados/umbra), sem desenho ao vivo ---------------------
+    def _textura(self, nome):
+        if nome not in self._texturas:
+            try:
+                from kivy.core.image import Image as ImagemKivy
+                self._texturas[nome] = ImagemKivy(os.path.join(PASTA_IMAGENS, nome + ".png")).texture
+            except Exception as e:
+                print("[umbra] imagem %s: %s" % (nome, e))
+                self._texturas[nome] = None
+        return self._texturas[nome]
 
     def _preparar_fbo(self):
         escala = ESCALA_GRANDE if self.modo == "grande" else ESCALA_PEQUENO
@@ -386,9 +405,18 @@ class RostoUmbra(Widget):
         return True
 
     def _ligar(self):
-        if not self._preparar_fbo():
-            self.presenca = 0.0
-            return
+        if self.simples:
+            self._ret.texture = self._textura("parado")
+        else:
+            # etapa arriscada: se o app cair aqui (placa de vídeo), na próxima vez ele usa as imagens
+            diagnostico.etapa(ETAPA_ROSTO)
+            print("[umbra] rosto: preparando o desenho", flush=True)
+            if not self._preparar_fbo():
+                diagnostico.etapa_ok(ETAPA_ROSTO)
+                self.presenca = 0.0
+                return
+            print("[umbra] rosto: desenho compilado (%d px)" % self._fbo_lado, flush=True)
+            self._quadros_ok = 0
         if self._ev is None:
             self._ultimo = None
             self._ev = Clock.schedule_interval(self._quadro, 0)
@@ -396,6 +424,9 @@ class RostoUmbra(Widget):
     def _desligar(self):
         if self.presenca > 0.01:
             return
+        if self._quadros_ok >= 0:            # sumiu antes de 0,75 s, mas sem cair: a etapa passou
+            self._quadros_ok = -1
+            diagnostico.etapa_ok(ETAPA_ROSTO)
         if self._ev is not None:
             self._ev.cancel()
             self._ev = None
@@ -411,9 +442,27 @@ class RostoUmbra(Widget):
         if v > 0.02 and self.mov.estado in ("parado", "ouvindo"):
             self.mov.mudar("falando", t)
         u = self.mov.quadro(t, dt, v, nivel)
+        if self.simples:
+            estado = self.mov.estado
+            nome = estado if estado in ("alerta", "confirmou", "confuso", "ouvindo") else (
+                "falando" if v > 0.30 else "parado")
+            if estado == "ouvindo" and v > 0.30:
+                nome = "falando"
+            tex = self._textura(nome)
+            if tex is not None:
+                self._ret.texture = tex
+            self._bob = math.sin(t * 1.3) * dp(3) + u["boca"] * dp(2)
+            self._redesenhar()
+            return
         f = self._fbo
         if f is None:
             return
+        if self._quadros_ok >= 0:
+            self._quadros_ok += 1
+            if self._quadros_ok >= 45:          # uns 0,75 s desenhando sem cair: a etapa passou
+                self._quadros_ok = -1
+                diagnostico.etapa_ok(ETAPA_ROSTO)
+                print("[umbra] rosto: desenhando sem problema", flush=True)
         f["u_res"] = [float(self._fbo_lado), float(self._fbo_lado)]
         f["u_t"] = float(t)
         for k in ("boca", "olho", "inclina", "feliz", "torto", "alerta", "escuta", "rolar", "palpebra",

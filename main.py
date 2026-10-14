@@ -97,6 +97,16 @@ class GTHudApp(App):
         pasta = self.user_data_dir
         diagnostico.iniciar(pasta, self.versao())
         self.ajustes = Ajustes(pasta)
+        # o Umbra derrubou o app da última vez (erro fora do Python: placa de vídeo ou reconhecimento
+        # de voz)? Nesta versão, ele evita repetir a mesma etapa (diagnostico.etapa)
+        self._aviso_umbra = None
+        caiu = diagnostico.etapa_que_derrubou()
+        if caiu == "umbra_rosto":
+            self.ajustes["umbra_rosto_simples"] = self.versao()
+            self._aviso_umbra = "O desenho do Umbra fechou o app: por enquanto ele aparece em imagem."
+        elif caiu == "umbra_escuta":
+            self.ajustes["umbra_escuta_falhou"] = self.versao()
+            self._aviso_umbra = "O reconhecimento de voz fechou o app: a escuta do Umbra ficou desligada."
         self.bateria = Bateria(self.ajustes)   # km rodados desde a última carga da moto
         self.posicao = None
         # tema ANTES de montar qualquer tela (claro de dia, escuro à noite)
@@ -367,7 +377,10 @@ class GTHudApp(App):
         self.aplicar_tela_ligada()
         self.aplicar_orientacao()
         self.solicitar_gps()
-        if diagnostico.fechou_com_erro():
+        if self._aviso_umbra:
+            aviso = self._aviso_umbra
+            Clock.schedule_once(lambda dt: self.sm.get_screen("mapa").mensagem(aviso, tema.LARANJA, 12), 4)
+        elif diagnostico.fechou_com_erro():
             Clock.schedule_once(lambda dt: self.sm.get_screen("mapa").mensagem(
                 "O app fechou com erro da última vez. Ajustes > Diagnóstico > Enviar",
                 tema.LARANJA, 10), 4)
@@ -394,6 +407,7 @@ class GTHudApp(App):
         self.bateria.guardar()
         self.fundo.ao_pausar()  # rota ativa: segue navegando minimizado
         self.umbra.pausar()     # minimizado, o microfone não escuta
+        diagnostico.etapa_ok("umbra_rosto")   # (minimizou no meio do desenho: não foi queda)
         return True  # não fecha o app ao trocar de tela no celular
 
     def on_resume(self):

@@ -25,6 +25,9 @@ ENVIAR_CARACTERES = 60_000   # cabe numa mensagem de WhatsApp
 INICIO = "===== app aberto "
 
 _caminho = None
+_pasta = None
+_etapa_que_derrubou = None
+SESSOES_A_ENVIAR = 8         # só as últimas aberturas do app (o registro antigo atrapalha)
 _trava = threading.Lock()
 _fechou_com_erro = False
 _contornados = {}   # mensagem do erro -> (hora da última anotação, vezes)
@@ -121,8 +124,9 @@ def _instalar_no_kivy():
 
 def iniciar(pasta, versao=""):
     """Chamar o quanto antes (no build do app)."""
-    global _caminho, _fechou_com_erro
+    global _caminho, _fechou_com_erro, _pasta, _etapa_que_derrubou
     os.makedirs(pasta, exist_ok=True)
+    _pasta = pasta
     _caminho = os.path.join(pasta, "diagnostico.txt")
     try:
         if os.path.getsize(_caminho) > MAX_BYTES:
@@ -135,6 +139,21 @@ def iniciar(pasta, versao=""):
     _fechou_com_erro = "!!! " in _ultima_sessao()
     _escrever("\n%s%s  versão %s =====\n" % (INICIO, time.strftime("%d/%m/%Y %H:%M:%S"), versao))
     _escrever(info_aparelho() + "\n")
+    # o app caiu de repente (sem erro do Python) no meio de uma etapa marcada? (etapa())
+    _etapa_que_derrubou = _ler_e_apagar("etapa_em_curso.txt").strip() or None
+    if _etapa_que_derrubou:
+        _fechou_com_erro = True
+        _escrever("%s !!! na última vez o app fechou de repente durante: %s\n"
+                  % (time.strftime("%H:%M:%S"), _etapa_que_derrubou))
+    java = _ler_e_apagar("erro_java.txt").strip()
+    if java:
+        _fechou_com_erro = True
+        _escrever("%s !!! erro do Android (Java) que fechou o app:\n%s\n" % (time.strftime("%H:%M:%S"), java))
+    try:   # erros do lado Java também vão para o registro (java/.../Diario.java)
+        from jnius import autoclass
+        autoclass("org.kirito.gthud.Diario").instalar(os.path.join(pasta, "erro_java.txt"))
+    except Exception:
+        pass
     sys.stdout = _Copia(sys.stdout)
     sys.stderr = _Copia(sys.stderr)
     original_hook = sys.excepthook
@@ -149,6 +168,51 @@ def iniciar(pasta, versao=""):
                              "erro numa thread (%s)" % getattr(args.thread, "name", "?"))
     threading.excepthook = gancho_thread
     _instalar_no_kivy()
+
+
+def _ler_e_apagar(nome):
+    caminho = os.path.join(_pasta or "", nome)
+    try:
+        with open(caminho, encoding="utf-8", errors="replace") as f:
+            texto = f.read()
+        os.remove(caminho)
+        return texto
+    except OSError:
+        return ""
+
+
+def etapa(nome):
+    """Marca, NO DISCO, que uma etapa arriscada começou (desenhar o rosto do Umbra, escutar).
+    Se o app cair de repente no meio dela (erro fora do Python, que não deixa rastro), na
+    próxima abertura etapa_que_derrubou() diz qual foi, e o app evita repetir."""
+    if _pasta is None:
+        return
+    try:
+        with open(os.path.join(_pasta, "etapa_em_curso.txt"), "w", encoding="utf-8") as f:
+            f.write(nome)
+            f.flush()
+            os.fsync(f.fileno())
+    except OSError:
+        pass
+
+
+def etapa_ok(nome):
+    """A etapa terminou bem: tira a marca."""
+    if _pasta is None:
+        return
+    caminho = os.path.join(_pasta, "etapa_em_curso.txt")
+    try:
+        with open(caminho, encoding="utf-8") as f:
+            if f.read() != nome:
+                return
+        os.remove(caminho)
+    except OSError:
+        pass
+
+
+def etapa_que_derrubou():
+    """A etapa em que o app caiu de repente da última vez (ou None)."""
+    return _etapa_que_derrubou
 
 
 def _ultima_sessao():
@@ -179,7 +243,11 @@ def info_aparelho():
 def texto_para_enviar():
     try:
         with open(_caminho, encoding="utf-8", errors="replace") as f:
-            registro = f.read()[-ENVIAR_CARACTERES:]
+            registro = f.read()
+        partes = registro.split("\n" + INICIO)
+        if len(partes) > SESSOES_A_ENVIAR:
+            registro = "\n" + INICIO + ("\n" + INICIO).join(partes[-SESSOES_A_ENVIAR:])
+        registro = registro[-ENVIAR_CARACTERES:]
     except (OSError, TypeError):
         registro = "(sem registro)"
     return "Diagnóstico do GT-HUD\n%s\n\n%s" % (info_aparelho(), registro)

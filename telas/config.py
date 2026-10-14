@@ -458,6 +458,8 @@ class TelaConfig(Screen):
     def _mudar_umbra(self, ligado):
         app = App.get_running_app()
         app.ajustes["umbra_escuta"] = ligado
+        if ligado:
+            app.ajustes["umbra_escuta_falhou"] = ""   # o dono ligou de novo: tenta outra vez
         self.alt_umbra.mostrar(ligado)
         if ligado:
             app.preparar_microfone(pedir_sempre=True)

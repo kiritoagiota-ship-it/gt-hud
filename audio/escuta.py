@@ -8,6 +8,9 @@ import time
 
 from kivy.utils import platform
 
+import diagnostico
+
+ETAPA = "umbra_escuta"       # (diagnostico.etapa) o reconhecimento de voz do Android rodando
 OUVINDO, ENTENDEU, NADA, PARADA, SEM = "ouvindo", "entendeu", "nada", "parada", "sem"
 _DO_JAVA = {0: PARADA, 1: OUVINDO, 2: ENTENDEU, 3: NADA, -1: SEM}
 
@@ -20,6 +23,10 @@ class Escuta:
         self._pc_estado = PARADA
         self._pc_texto = []
         self._pc_ate = 0.0
+        self._em_curso = False      # uma escuta do Android começou e ainda não terminou
+        self._avisou_nome = False
+        self._disponivel = False
+        self._disponivel_ate = 0.0
         if platform == "android":
             try:
                 from jnius import autoclass
@@ -36,13 +43,26 @@ class Escuta:
     def disponivel(self):
         if self._java is None:
             return platform != "android"     # no PC a escuta é simulada
+        agora = time.monotonic()
+        if agora < self._disponivel_ate:     # (o Umbra pergunta 10 vezes por segundo: o Android, a cada 30 s)
+            return self._disponivel
         try:
-            return bool(self._java.disponivel(self._atividade))
+            self._disponivel = bool(self._java.disponivel(self._atividade))
         except Exception:
-            return False
+            self._disponivel = False
+        self._disponivel_ate = agora + 30.0
+        return self._disponivel
 
-    def ouvir(self, silencio_s=1.2):
+    def ouvir(self, silencio_s=1.2, conversa=True):
         if self._java is not None:
+            # etapa arriscada: se o app cair aqui (reconhecimento de voz), na próxima vez a escuta fica desligada
+            diagnostico.etapa(ETAPA)
+            self._em_curso = True
+            if conversa:
+                print("[escuta] ouvindo o pedido", flush=True)
+            elif not self._avisou_nome:
+                self._avisou_nome = True
+                print("[escuta] escutando o nome (moto parada)", flush=True)
             try:
                 self._java.ouvir(self._atividade, int(silencio_s * 1000))
             except Exception as e:
@@ -56,7 +76,13 @@ class Escuta:
             self._pc_estado = OUVINDO
             self._pc_ate = time.monotonic() + 4.0    # no PC, sem nada para dizer, a escuta "acaba" sozinha
 
+    def _terminou(self):
+        if self._em_curso:
+            self._em_curso = False
+            diagnostico.etapa_ok(ETAPA)
+
     def parar(self):
+        self._terminou()
         if self._java is not None:
             try:
                 self._java.parar()
@@ -65,6 +91,7 @@ class Escuta:
         self._pc_estado = PARADA
 
     def desligar(self):
+        self._terminou()
         if self._java is not None:
             try:
                 self._java.desligar()
@@ -75,7 +102,12 @@ class Escuta:
         """OUVINDO, ENTENDEU (o texto está em alternativas()), NADA (silêncio ou não entendeu),
         PARADA ou SEM (o celular não tem reconhecimento de voz)."""
         if self._java is not None:
-            return _DO_JAVA.get(int(self._java.estado), PARADA)
+            sit = _DO_JAVA.get(int(self._java.estado), PARADA)
+            if sit != OUVINDO and self._em_curso:
+                self._terminou()
+                if sit in (NADA, SEM) and int(self._java.erro) not in (0, 6, 7):
+                    print("[escuta] o reconhecimento de voz devolveu o erro %d" % int(self._java.erro), flush=True)
+            return sit
         if self._pc_estado == OUVINDO and time.monotonic() > self._pc_ate:
             self._pc_estado = NADA
         return self._pc_estado

@@ -42,6 +42,10 @@ PADRAO = {
     "voz_fonte": "gravada",
     "umbra_escuta": True,       # com a moto parada, o microfone escuta o nome "Umbra" (umbra.py)
     "umbra_pediu_microfone": False,   # já pediu a permissão do microfone uma vez
+    # versão do app em que o desenho ao vivo / a escuta do Umbra derrubou o app (diagnostico.etapa):
+    # nessa versão ele usa as imagens prontas / não escuta; a versão seguinte tenta de novo
+    "umbra_rosto_simples": "",
+    "umbra_escuta_falhou": "",
     "bateria": None,           # a carga de agora da moto: km desde o "Carreguei 100%" (bateria.py)
     "bateria_cargas": [],       # as cargas que já terminaram (km, barrinhas que sobraram)
     "tema_monarca_v1": False,    # o tema Monarca já foi ligado uma vez (pedido do dono)?

@@ -132,6 +132,22 @@ def por_nome(dt):
     checar("umbra_valeu" in DITAS, "chamado pelo nome, respondeu o 'valeu': %s" % DITAS[-4:])
 
 
+def simples(dt):
+    # o modo simples (imagens prontas): o que o app usa se o desenho ao vivo derrubar o app
+    a = app()
+    a.umbra.microfone = False
+    r = rosto()
+    r.simples = True
+    a.escuta.dizer("valeu")
+    a.umbra.chamar()
+    checar(r.modo == "grande" and r._ret.texture is not None, "modo simples: aparece com a imagem")
+
+
+def simples_foto(dt):
+    foto("u5_simples")
+    checar(rosto().presenca > 0.9, "modo simples na tela")
+
+
 def fim(dt):
     print("[FIM] erros:", ERROS, flush=True)
     app().stop()
@@ -144,5 +160,7 @@ Clock.schedule_once(aviso, 13.5)
 Clock.schedule_once(aviso_foto, 13.9)
 Clock.schedule_once(sumiu, 16.0)
 Clock.schedule_once(por_nome, 30.0)
-Clock.schedule_once(fim, 31.0)
+Clock.schedule_once(simples, 31.0)
+Clock.schedule_once(simples_foto, 31.8)
+Clock.schedule_once(fim, 35.0)
 runpy.run_path("main.py", run_name="__main__")

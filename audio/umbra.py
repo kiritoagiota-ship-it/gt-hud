@@ -184,6 +184,7 @@ class Umbra:
         agora = self._t if agora is None else agora
         if self.conversando:
             return
+        print("[umbra] chamado" + (" pelo nome" if self.estado == VIGIA or resto else ""), flush=True)
         self.escuta.parar()
         self._silencios = self._sem_entender = 0
         self._confirmando = False
@@ -278,7 +279,18 @@ class Umbra:
         else:
             self.fechar(agora)
 
+    def escuta_falhou(self):
+        """O reconhecimento de voz derrubou o app nesta versão (diagnostico.etapa): não escuta."""
+        try:
+            return self.app.ajustes["umbra_escuta_falhou"] == self.app.versao()
+        except Exception:
+            return False
+
     def _ouvir(self, agora):
+        if self.escuta_falhou():
+            self._mostrar_e_sair("O reconhecimento de voz fechou o app neste celular. Deixamos a escuta "
+                                 "desligada até a próxima versão.", agora, 5.0)
+            return
         self.estado = OUVINDO
         self._desde = agora
         self._rosto_faz("definir_estado", "ouvindo")
@@ -450,7 +462,7 @@ class Umbra:
 
     def _pode_vigiar(self, agora):
         app = self.app
-        if self.pausado or not self.microfone or not app.ajustes["umbra_escuta"]:
+        if self.pausado or not self.microfone or not app.ajustes["umbra_escuta"] or self.escuta_falhou():
             return False
         if self.voz.ocupada() or not self.escuta.disponivel():
             return False
@@ -492,7 +504,7 @@ class Umbra:
         if agora >= self._vigia_volta and self._pode_vigiar(agora):
             self.estado = VIGIA
             self._desde = agora
-            self.escuta.ouvir(0.8)
+            self.escuta.ouvir(0.8, conversa=False)
 
 
 AVISO_BATERIA_M = 6000      # com menos que isso pela frente, "bateria fraca"
