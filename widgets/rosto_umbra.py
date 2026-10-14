@@ -233,9 +233,11 @@ class RostoUmbra(Widget):
         self.lugar_pequeno = None       # função (largura, altura) -> (x, y) do canto dele
         self.quebrado = False           # o desenho não compilou neste aparelho: não aparece
         self.simples = False            # usa as imagens prontas (o desenho ao vivo derrubou o app aqui)
+        self.nivel = 0                  # 0 desenho completo, 1 leve (sem língua, saliva, fileira de trás...)
         self._texturas = {}
         self._bob = 0.0
         self._quadros_ok = -1
+        self._avisou_placa = False
         self._fbo = None
         self._fbo_lado = 0
         self._ev = None
@@ -384,7 +386,7 @@ class RostoUmbra(Widget):
         if self._fbo is not None and abs(lado - self._fbo_lado) < 8:
             return True
         fbo = Fbo(size=(lado, lado), with_stencilbuffer=False)
-        fbo.shader.fs = FONTE
+        fbo.shader.fs = ("#define LEVE\n" + FONTE) if self.nivel == 1 else FONTE
         if not fbo.shader.success:
             print("[umbra] o desenho do rosto não compilou neste aparelho")
             self.quebrado = True
@@ -410,7 +412,16 @@ class RostoUmbra(Widget):
         else:
             # etapa arriscada: se o app cair aqui (placa de vídeo), na próxima vez ele usa as imagens
             diagnostico.etapa(ETAPA_ROSTO)
-            print("[umbra] rosto: preparando o desenho", flush=True)
+            print("[umbra] rosto: preparando o desenho %s" % ("leve" if self.nivel == 1 else "completo"), flush=True)
+            if not self._avisou_placa:
+                self._avisou_placa = True
+                try:
+                    def texto(v):
+                        return v.decode("ascii", "replace") if isinstance(v, bytes) else str(v)
+                    print("[umbra] placa de vídeo: %s | %s" % (texto(gl.glGetString(gl.GL_RENDERER)),
+                                                           texto(gl.glGetString(gl.GL_VERSION))), flush=True)
+                except Exception:
+                    pass
             if not self._preparar_fbo():
                 diagnostico.etapa_ok(ETAPA_ROSTO)
                 self.presenca = 0.0

@@ -158,12 +158,14 @@ void cabeca(vec2 P0, vec2 Pf, vec2 torce, vec3 fogo) {
     rolete(pw, lb.y + 0.050, lb.w, 0.036, 0.034 * cantos);
     // 5) veios sob a pele, só nas laterais do crânio e da mandíbula (a frente do rosto fica lisa)
     float zona = deg(0.22, 0.42, abs(pw.x)) * (deg(-0.22, -0.38, pw.y) + deg(0.32, 0.46, pw.y)) * (1.0 - deg(0.35, 0.65, alto));
+#ifndef LEVE
     if (zona > 0.01) {
       vec2 q = pw * vec2(4.2, 2.6) + vec2(3.1, 7.7);
       float v0 = veio(q), vx = veio(q + vec2(0.0168, 0.0)), vy = veio(q + vec2(0.0, 0.0104));
       float av = 0.006 * zona;
       relevo += vec3(av * v0, av * (vx - v0) / 0.004, av * (vy - v0) / 0.004);
     }
+#endif
     vec3 N = virar(normalize(vec3(-relevo.yz + 0.10 * torce, 1.0)));
     vec3 Nl = virar(normalize(vec3(-relevo.yz, 1.0)));             // sem os caroços miúdos: para o reflexo comprido
     float saliencia = relevo.x - meio.x;                    // quanto este ponto está acima (ou abaixo) da cúpula lisa
@@ -270,7 +272,8 @@ vec4 medidaDente(float k, float n, float meia, float semente, float presaA, floa
   float passo = 2.0 * meia / n;
   float centro = (k + 0.5) * passo - meia + (rnd(k + semente + 3.0) - 0.5) * 0.25 * passo;
   float fk = max(0.0, 1.0 - sq(centro / meia));
-  float presa = (k == presaA || k == n - 1.0 - presaA || k == presaB || k == n - 1.0 - presaB) ? 1.0 : 0.0;
+  float presa = max(max(step(abs(k - presaA), 0.5), step(abs(k - (n - 1.0 - presaA)), 0.5)),
+                    max(step(abs(k - presaB), 0.5), step(abs(k - (n - 1.0 - presaB)), 0.5)));
   float longo = step(0.90, rnd(k + semente + 17.0));
   float largura = passo * 0.5 * (0.62 + 0.28 * rnd(k + semente + 7.0) + 0.45 * presa);
   float comprido = ((0.050 + 0.120 * pow(fk, 0.7)) * (0.50 + 0.50 * rnd(k + semente)) + 0.02 * u_boca)
@@ -278,17 +281,17 @@ vec4 medidaDente(float k, float n, float meia, float semente, float presaA, floa
   return vec4(centro, largura, comprido, fk);
 }
 float curvaDente(float k, float semente, float centro) {
-  return (rnd(k + semente + 51.0) - 0.5) * 0.014 - sign(centro) * 0.008;   // foice: as pontas pendem para o meio
+  return (rnd(k + semente + 51.0) - 0.5) * 0.014 - (centro < 0.0 ? -1.0 : 1.0) * 0.008;   // foice: as pontas pendem para o meio
 }
 // onde nasce e para onde aponta um dente: perpendicular à linha da boca (os dentes abrem em leque),
 // para dentro do vão; "recuo" empurra a raiz para o fundo (a fileira de trás)
-void raizDente(float cx, float sinal, float recuo, out vec2 raiz, out vec2 dir) {
+vec4 raizDente(float cx, float sinal, float recuo) {
   vec4 lb = linhaDaBoca(cx);
   float meia = 0.50 + 0.03 * u_feliz;
   float inclVao = (0.035 + 0.30 * u_boca) * 0.6 * pow(max(lb.z, 0.04), -0.4) * (-2.0 * cx / (meia * meia));
   float incl = clamp(sinal > 0.0 ? lb.w : lb.w + inclVao, -1.1, 1.1);
-  dir = normalize(vec2(-incl, 1.0)) * sinal;
-  raiz = vec2(cx, sinal > 0.0 ? lb.x : lb.y) + dir * recuo;
+  vec2 dir = normalize(vec2(-incl, 1.0)) * sinal;
+  return vec4(vec2(cx, sinal > 0.0 ? lb.x : lb.y) + dir * recuo, dir);
 }
 
 // um dente: agulha de base curta e larga e ponta comprida, fina e curva como foice; raiz escura, ponta
@@ -306,7 +309,7 @@ void dente(vec2 p, vec2 raiz, vec2 dir, vec4 md, float curva, float escuro, floa
   float at = dot(q, lado) - curva * ao * ao;                     // atravessado, já descontando a curva
   float lar = largura * pow(clamp(1.0 - ao, 0.0, 1.0), 1.7);
   float corpo = deg(0.0028, -0.0028, abs(at) - lar) * step(-0.06, ao) * step(ao, 1.0) * vis;
-  if (corpo <= 0.0) return;
+  if (!(corpo <= 0.0)) {
   float u = clamp(at / max(lar, 0.0008), -1.0, 1.0);
   float redondo = sqrt(max(1.0 - u * u, 0.0));
   float pontaV = clamp(ao, 0.0, 1.0);
@@ -318,6 +321,7 @@ void dente(vec2 p, vec2 raiz, vec2 dir, vec4 md, float curva, float escuro, floa
   esmalte += vec3(0.85, 0.90, 1.0) * exp(-sq((ao - 0.90) / 0.06)) * exp(-sq((u + 0.2) / 0.5)) * 0.30;   // ponta molhada
   esmalte += vec3(0.60, 0.25, 0.95) * pow(abs(u), 5.0) * contra;                                       // contraluz violeta
   por(min(esmalte, vec3(1.0)) * escuro * (0.60 + 0.40 * fk), corpo);
+  }
 }
 
 // uma fileira de dentes: acha a faixa do dente que passaria por este ponto (já contando a inclinação do leque)
@@ -336,10 +340,14 @@ void fileira(vec2 p, float n, float sinal, float semente, float escuro, float pr
   if (ma.z > mb.z) { tv = ma; ma = mb; mb = tv; tk = ka; ka = kb; kb = tk; }
   if (mb.z > mc.z) { tv = mb; mb = mc; mc = tv; tk = kb; kb = kc; kc = tk; }
   if (ma.z > mb.z) { tv = ma; ma = mb; mb = tv; tk = ka; ka = kb; kb = tk; }
-  vec2 r, d;
-  if (ka >= 0.0 && ka < n) { raizDente(ma.x, sinal, recuo, r, d); dente(p, r, d, ma, curvaDente(ka, semente, ma.x), escuro, contra, vis); }
-  if (kb >= 0.0 && kb < n) { raizDente(mb.x, sinal, recuo, r, d); dente(p, r, d, mb, curvaDente(kb, semente, mb.x), escuro, contra, vis); }
-  if (kc >= 0.0 && kc < n) { raizDente(mc.x, sinal, recuo, r, d); dente(p, r, d, mc, curvaDente(kc, semente, mc.x), escuro, contra, vis); }
+  vec4 rd;
+#ifndef LEVE
+  if (ka >= 0.0 && ka < n) { rd = raizDente(ma.x, sinal, recuo); dente(p, rd.xy, rd.zw, ma, curvaDente(ka, semente, ma.x), escuro, contra, vis); }
+#endif
+  if (kb >= 0.0 && kb < n) { rd = raizDente(mb.x, sinal, recuo); dente(p, rd.xy, rd.zw, mb, curvaDente(kb, semente, mb.x), escuro, contra, vis); }
+#ifndef LEVE
+  if (kc >= 0.0 && kc < n) { rd = raizDente(mc.x, sinal, recuo); dente(p, rd.xy, rd.zw, mc, curvaDente(kc, semente, mc.x), escuro, contra, vis); }
+#endif
 }
 
 // a língua: um tubo comprido que afina, vem do fundo da boca e, quando "ext" sobe, sai por cima dos dentes
@@ -365,7 +373,7 @@ void lingua(vec2 p, float cima, float baixo, float ext, float interior) {
   float largura = 0.095 * (1.0 - pow(tMelhor, 2.2)) * (0.75 + 0.25 * u_boca);   // larga e chata, afinando até a ponta
   float fora = step(baixo - 0.006, p.y) * step(0.30, ext);       // a parte que já saiu da boca
   float corpo = deg(0.004, -0.004, melhor - largura) * max(interior, fora) * deg(0.0, 0.25, ext + u_boca);
-  if (corpo <= 0.0) return;
+  if (!(corpo <= 0.0)) {
   float us = ladoS * melhor / max(largura, 0.001);               // -1 a 1, de um lado ao outro
   float tubo = pow(max(1.0 - us * us, 0.0), 0.25);
   vec3 c = vec3(0.36, 0.07, 0.38) * (0.45 + 0.55 * tubo);
@@ -373,6 +381,7 @@ void lingua(vec2 p, float cima, float baixo, float ext, float interior) {
   c += vec3(0.85, 0.75, 1.0) * exp(-sq((us + 0.45) / 0.14)) * 0.42;   // molhada
   c += vec3(0.55, 0.20, 0.80) * (1.0 - tMelhor) * u_boca * 0.25;      // perto do fundo, a luz da garganta
   por(c, corpo);
+  }
 }
 
 // um fio de saliva entre as mandíbulas: grosso no meio, fino onde gruda, com uma gota escorrendo
@@ -398,7 +407,7 @@ void boca(vec2 P, vec2 torce) {
   float cima = lb.x, baixo = lb.y, vao = baixo - cima;
   float dentroX = step(abs(x), meia);
   float d = dentroX > 0.5 ? abs(y - (cima + baixo) * 0.5) - vao * 0.5 : length(vec2(abs(x) - meia, y - canto));
-  if (d > 0.45) return;
+  if (!(d > 0.45)) {
   float aberta = deg(0.05, 0.60, u_boca);
   float ext = clamp(u_lingua, 0.0, 1.0);
   // a luz violeta que vaza pelo vão
@@ -429,6 +438,7 @@ void boca(vec2 P, vec2 torce) {
   float gengiva = exp(-sq((y - cima) / 0.016)) + exp(-sq((y - baixo) / 0.016));
   por(vec3(0.09, 0.018, 0.10), interior * gengiva * 0.80 * aberta);
   luz(vec3(0.55, 0.30, 0.75), interior * (exp(-sq((y - cima - 0.013) / 0.0045)) + exp(-sq((y - baixo + 0.013) / 0.0045))) * 0.30 * aberta);
+#ifndef LEVE
   // a fileira de trás: menor, no escuro, só aparece com a boca aberta
   float atras = interior * aberta;
   if (atras > 0.0) {
@@ -444,11 +454,15 @@ void boca(vec2 P, vec2 torce) {
     luz(vec3(0.80, 0.85, 1.0), fio * temFio * 0.20);
   }
   if (ext < 0.35) lingua(p, cima, baixo, ext, interior);         // dentro: atrás dos dentes de baixo
+#endif
   fileira(p, 19.0, -1.0, 5.0, 0.86, 4.0, -9.0, 0.0, 1.0, 0.45 * aberta, 1.0);
   // a sombra do lábio de cima caindo para dentro da boca (escurece as pontas dos dentes de baixo)
   por(vec3(0.0, 0.0, 0.010), interior * exp(-sq((y - cima) / 0.035)) * 0.50 * aberta);
-  if (ext >= 0.35) lingua(p, cima, baixo, ext, interior);        // saindo: na frente dos dentes de baixo
+#ifndef LEVE
+  if (ext >= 0.35) lingua(p, cima, baixo, ext, interior);
+#endif        // saindo: na frente dos dentes de baixo
   fileira(p, 20.0, 1.0, 71.0, 1.0, 3.0, 8.0, 0.0, 1.0, 0.45 * aberta, 1.0);
+  }
 }
 
 void main() {

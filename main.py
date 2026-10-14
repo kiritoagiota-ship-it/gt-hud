@@ -102,8 +102,11 @@ class GTHudApp(App):
         self._aviso_umbra = None
         caiu = diagnostico.etapa_que_derrubou()
         if caiu == "umbra_rosto":
-            self.ajustes["umbra_rosto_simples"] = self.versao()
-            self._aviso_umbra = "O desenho do Umbra fechou o app: por enquanto ele aparece em imagem."
+            nivel = min(2, self.nivel_rosto_umbra() + 1)
+            self.ajustes["umbra_rosto_nivel"] = [self.versao(), nivel]
+            self._aviso_umbra = ("O desenho do Umbra fechou o app: agora ele tenta um desenho mais leve."
+                                 if nivel == 1 else "O desenho do Umbra fechou o app: por enquanto ele aparece em imagem.")
+            print("[umbra] o desenho derrubou o app: próximo degrau = %d" % nivel)
         elif caiu == "umbra_escuta":
             self.ajustes["umbra_escuta_falhou"] = self.versao()
             self._aviso_umbra = "O reconhecimento de voz fechou o app: a escuta do Umbra ficou desligada."
@@ -1034,6 +1037,14 @@ class GTHudApp(App):
         android_utils.vibrar_padrao("fora")
         self.na_tela(lambda: self.sm.get_screen("mapa").mensagem(frase, tema.LARANJA, 12))
         self.na_tela(self.umbra.aviso_bateria)   # e o Umbra pequeno avisa, com a voz
+
+    def nivel_rosto_umbra(self):
+        """0 desenho completo, 1 leve, 2 imagens prontas (o degrau desta versão do app)."""
+        try:
+            versao, nivel = self.ajustes["umbra_rosto_nivel"]
+            return int(nivel) if versao == self.versao() else 0
+        except (TypeError, ValueError):
+            return 0
 
     def preparar_microfone(self, pedir_sempre=False):
         """Permissão do microfone para o Umbra escutar o nome: pede uma vez (ou de novo quando
