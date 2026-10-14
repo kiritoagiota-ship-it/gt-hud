@@ -182,7 +182,7 @@ class TesteConversa(unittest.TestCase):
         self.escuta.dizer("me leva pra casa")
         self.u.chamar(agora=self.t)
         self.assertEqual(self.rosto.modo, "grande")
-        self.assertIn(self.voz.ditas[0], ("umbra_oi_1", "umbra_oi_2", "umbra_oi_3"))
+        self.assertTrue(self.voz.ditas[0].startswith("umbra_oi_"))
         self.andar(3)                                         # cumprimentou, ouviu, respondeu
         self.assertEqual(self.voz.ditas[1], "umbra_casa")
         self.assertIn(("destino", "Casa"), self.app.feito)
@@ -205,8 +205,8 @@ class TesteConversa(unittest.TestCase):
         self.escuta.dizer("")
         self.u.chamar(agora=self.t)
         self.andar(8)
-        self.assertIn("umbra_silencio", self.voz.ditas)
-        self.assertEqual(self.voz.ditas[-1], "umbra_tchau")
+        self.assertTrue(any(d.startswith("umbra_silencio") for d in self.voz.ditas))
+        self.assertTrue(self.voz.ditas[-1].startswith("umbra_tchau"))
         self.assertIsNone(self.rosto.modo)
 
     def test_nao_entendeu_pede_de_novo(self):
@@ -215,7 +215,7 @@ class TesteConversa(unittest.TestCase):
         self.u.chamar(agora=self.t)
         self.andar(8)
         self.assertTrue(any(d.startswith("umbra_nao_entendi") for d in self.voz.ditas))
-        self.assertEqual(self.voz.ditas[-1], "umbra_valeu")
+        self.assertTrue(self.voz.ditas[-1].startswith("umbra_valeu"))
 
     def test_bateria(self):
         self.escuta.dizer("como tá a bateria")
@@ -260,7 +260,7 @@ class TesteConversa(unittest.TestCase):
         self.u.chamar(agora=self.t)
         self.andar(3)
         self.assertIn(("encerrar",), self.app.feito)
-        self.assertEqual(self.voz.ditas[-1], "umbra_cancelada")
+        self.assertTrue(self.voz.ditas[-1].startswith("umbra_cancelada"))
 
     def test_outras_rotas_navegando(self):
         self.app.nav = object()
@@ -320,6 +320,7 @@ class TesteConversa(unittest.TestCase):
         self.u.chamar(agora=self.t)
         self.andar(2.5)
         self.assertIn(("procurar",), self.app.feito)
+        self.assertIn("umbra_procurando", self.voz.ditas)
         self.assertEqual(self.rosto.estados[-1], "farejando")
         self.app._resposta([{"nome": "Shopping Flamboyant", "endereco": "Av. Jamel Cecílio", "lat": -16.71,
                              "lon": -49.24}])
@@ -327,6 +328,7 @@ class TesteConversa(unittest.TestCase):
         self.assertTrue(any(f and "Jamel" in f for _, f in self.rosto.legendas))
         self.escuta.dizer("bora")
         self.andar(2.5)
+        self.assertIn("umbra_lugar_achado", self.voz.ditas)
         self.assertEqual(self.voz.ditas[-1], "rota_calculada")
 
     def test_lugar_nao_achado(self):
@@ -334,6 +336,7 @@ class TesteConversa(unittest.TestCase):
         self.u.chamar(agora=self.t)
         self.andar(2.5)
         self.app._resposta([])
+        self.assertEqual(self.voz.ditas[-1], "umbra_nao_achou")
         self.assertNotIn(("destino",), [f[:1] for f in self.app.feito])
         self.andar(3)
         self.assertIsNone(self.rosto.modo)
@@ -355,7 +358,7 @@ class TesteConversa(unittest.TestCase):
         self.escuta.dizer("não vai")
         self.andar(2.5)
         self.assertIn(("cancelar_previa",), self.app.feito)
-        self.assertNotEqual(self.voz.ditas[-1], "rota_calculada")
+        self.assertEqual(self.voz.ditas[-1], "umbra_ok_nao")
 
     def test_cumprimento_nao_repete_seguido(self):
         ditas = []
@@ -369,6 +372,7 @@ class TesteConversa(unittest.TestCase):
         self.app.vel = 25.0
         self.u.chamar(agora=self.t)
         self.assertEqual(self.rosto.modo, "medio")
+        self.assertEqual(self.voz.ditas[-1], "umbra_andando")         # "Olho na pista..."
         self.u.fechar()
         self.app.vel = 0.0
         self.u.chamar(agora=self.t)

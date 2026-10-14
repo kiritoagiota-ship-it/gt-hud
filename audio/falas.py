@@ -94,6 +94,20 @@ UMBRA = {
     "umbra_cancelada": "Rota cancelada. Liberdade.",
     "umbra_valeu": "Não agradece. Nós gostamos de mandar.",
     "umbra_tchau": "Estaremos por perto.",
+    # aprovadas pelo dono em 14/10/2026: qualquer lugar pelo nome, o "não", chamado andando...
+    "umbra_procurando": "Deixa a gente farejar esse lugar...",
+    "umbra_lugar_achado": "Achamos. É esse aí? Vamos?",
+    "umbra_nao_achou": "Esse lugar não existe pra nós. Fala de outro jeito.",
+    "umbra_ok_nao": "Tudo bem. Nós sabemos esperar.",
+    "umbra_andando": "Olho na pista. Nós cuidamos do resto.",
+    # ... e variações, para ele não repetir sempre a mesma coisa
+    "umbra_oi_4": "Chamou? Estávamos com saudade do asfalto.",
+    "umbra_oi_5": "Estamos ouvindo. Pra onde, parceiro?",
+    "umbra_tchau_2": "Voltamos pra sombra. Chama quando quiser.",
+    "umbra_nao_entendi_3": "Hã? Fala de novo, sem pressa.",
+    "umbra_silencio_2": "Ficou mudo? Nós esperamos.",
+    "umbra_valeu_2": "Agradece não. Nós já estamos acostumados a ser incríveis.",
+    "umbra_cancelada_2": "Cancelado. Nós vamos fingir que não vimos.",
 }
 FALAS.update(UMBRA)
 

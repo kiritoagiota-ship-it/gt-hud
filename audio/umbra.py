@@ -297,7 +297,8 @@ class Umbra:
             self._processar([resto], agora)
             return
         self.estado = SAUDANDO
-        self._falar(self._uma("umbra_oi"), "ouvir", agora)
+        self._falar(self._uma("umbra_andando" if self._andando() and "umbra_andando" in falas.UMBRA else "umbra_oi"),
+                    "ouvir", agora)
 
     def _andando(self):
         try:
@@ -477,14 +478,14 @@ class Umbra:
                 self.voz.calar()                       # (no lugar do "navegação encerrada")
             elif getattr(app, "rota_previa", None) is not None or getattr(app, "destino", None) is not None:
                 app.cancelar_previa()
-            self._falar("umbra_cancelada", "sair", agora, "confirmou")
+            self._falar(self._uma("umbra_cancelada"), "sair", agora, "confirmou")
         elif intencao == "iniciar":
             if getattr(app, "rota_previa", None) is not None and app.nav is None:
                 self._falar("rota_calculada", "rota", agora, "confirmou")
             else:
                 self._falar("umbra_oi_2", "ouvir", agora)
         elif intencao == "valeu":
-            self._falar("umbra_valeu", "sair", agora, "confirmou")
+            self._falar(self._uma("umbra_valeu"), "sair", agora, "confirmou")
         elif intencao == "tchau":
             self._falar(self._uma("umbra_tchau"), "sair", agora)
         elif self._sem_entender == 0 and parece_lugar(texto):
