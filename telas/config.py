@@ -97,7 +97,8 @@ class Alternar(BotaoHUD):
 # As opções, agrupadas (eram mais de 20 linhas soltas, na ordem em que
 # foram sendo criadas): seção -> títulos das linhas, na ordem da tela.
 SECOES = [
-    ("Voz", ["Voz do assistente", "Voz usada", "Qual voz", "Tom da voz", "Efeito de IA", "Testar a voz", "Sons de aviso"]),
+    ("Voz", ["Voz do assistente", "Voz usada", "Qual voz", "Tom da voz", "Efeito de IA", "Testar a voz", "Sons de aviso",
+             "Umbra escuta parado"]),
     ("Navegação", ["Rota preferida", "Trânsito ao vivo", "Testar o trânsito", "Aviso de chuva", "Avisar subidas e descidas", "Avisar semáforos", "Continuar em segundo plano",
                    "Janela ao minimizar", "Tipo de janela", "Corrida ao vivo"]),
     ("Mapa e tela", ["Aparência", "Mapa gira com a direção", "Mapa offline de Goiânia",
@@ -252,6 +253,12 @@ class TelaConfig(Screen):
                                "Fala uma frase de exemplo com a voz escolhida.",
                                self._centralizar(BotaoHUD(text="Testar", size_hint_x=None, width=dp(130),
                                                           on_release=lambda *a: self._testar_voz()))))
+
+        self.alt_umbra = Alternar(self._mudar_umbra)
+        lista.add_widget(Linha("Umbra escuta parado",
+                               "Com a moto parada e o app na tela, o microfone escuta o nome \"Umbra\" para "
+                               "chamar o assistente. O botão do Umbra no mapa funciona sempre.",
+                               self._centralizar(self.alt_umbra)))
 
         self.alt_subidas = Alternar(self._mudar_subidas)
         lista.add_widget(Linha("Avisar subidas e descidas",
@@ -418,6 +425,7 @@ class TelaConfig(Screen):
         self.sel_tom.mostrar(aj["voz_tom"])
         self._mostrar_fonte_voz()
         self.alt_efeito.mostrar(aj["voz_efeito"])
+        self.alt_umbra.mostrar(aj["umbra_escuta"])
         self.alt_subidas.mostrar(aj["avisar_subidas"])
         self.alt_semaforos.mostrar(aj["avisar_semaforos"])
         self.alt_fundo.mostrar(aj["segundo_plano"])
@@ -446,6 +454,13 @@ class TelaConfig(Screen):
         aj = App.get_running_app().ajustes
         aj["limite_kmh"] = max(10, min(tema.VEL_MAXIMA, aj["limite_kmh"] + d))
         self.sel_limite.mostrar(aj["limite_kmh"])
+
+    def _mudar_umbra(self, ligado):
+        app = App.get_running_app()
+        app.ajustes["umbra_escuta"] = ligado
+        self.alt_umbra.mostrar(ligado)
+        if ligado:
+            app.preparar_microfone(pedir_sempre=True)
 
     def _mudar_simples(self, chave, botao, ligado):
         App.get_running_app().ajustes[chave] = ligado

@@ -330,6 +330,9 @@ class TelaMapa(Screen):
         self.btn_menos = BotaoHUD(text="", icone="menos", size_hint=(None, None), opaco=True,
                                   on_release=lambda *a: self.mapa.mudar_zoom(-1))
         self.doca = Doca(size_hint=(None, None))
+        # o Umbra (umbra.py): o botão que chama, e o rosto por cima de tudo
+        self.btn_umbra = BotaoHUD(text="", icone="umbra", opaco=True, size_hint=(None, None),
+                                  on_release=lambda *a: app.umbra.chamar())
         self.lbl_msg = Aviso(text="", font_size=tema.T_ROTULO + 1, bold=True, size_hint=(None, None))
 
         # --- folha de baixo: livre (busca + atalhos) ---
@@ -434,6 +437,11 @@ class TelaMapa(Screen):
         self.mapa.ao_tocar_lugar = self._ver_lugar
 
         self.add_widget(self.raiz)
+        from widgets.rosto_umbra import RostoUmbra
+        self.rosto_umbra = RostoUmbra(voz=app.voz, escuta=app.escuta)
+        self.rosto_umbra.ao_tocar_fora = lambda: app.umbra.fechar()
+        self.rosto_umbra.lugar_pequeno = self._lugar_umbra
+        self.add_widget(self.rosto_umbra)   # (fora da raiz: nada do _montar tira ele de cima)
         self.bind(size=self._posicionar)
         self._montar()
 
@@ -785,7 +793,7 @@ class TelaMapa(Screen):
 
     # --- montagem e posição dos elementos -----------------------------------------
     def _montar(self, *a):
-        visiveis = [self.mapa, self.disco, self.lbl_msg, self.btn_mais, self.btn_menos]
+        visiveis = [self.mapa, self.disco, self.lbl_msg, self.btn_mais, self.btn_menos, self.btn_umbra]
         if not self.mapa.seguindo:
             visiveis.append(self.btn_centro)
         gps = [self.status] if self._gps_a_vista else []
@@ -939,6 +947,9 @@ class TelaMapa(Screen):
             y_extra = base + 2 * (ab + gap)
         self.btn_centro.pos = (x_btn, y_extra)
         self.btn_centro.size = (lb, ab)
+        # o Umbra: logo acima (do centralizar, quando ele está na tela)
+        y_umbra = y_extra + (ab + gap if not self.mapa.seguindo else 0)
+        self.btn_umbra.pos, self.btn_umbra.size = (x_btn, y_umbra), (lb, ab)
 
         # mensagem curta
         if deitada:
@@ -959,6 +970,16 @@ class TelaMapa(Screen):
         self.mapa.areas_cobertas = [(w.x, w.y, w.right, w.top) for w in self.raiz.children
                                     if w is not self.mapa and w is not self.lbl_msg]
         self.mapa._aplicar()
+
+    def _lugar_umbra(self, W, H, lado):
+        """Onde o Umbra pequeno aparece (nos avisos): no canto de cima, à direita, logo abaixo
+        da faixa da curva (navegando) ou do botão do menu, sem tapar a curva nem os botões."""
+        m = dp(10)
+        topo = H - m
+        if W > H:          # deitada: a coluna da esquerda é da curva; ele fica à direita, em cima
+            return (W - m - dp(58) - m - lado, topo - lado)
+        abaixo = dp(132) if self.estado == NAVEGANDO else dp(56)
+        return (W - m - lado, topo - abaixo - m - lado)
 
     # --- tocar num lugar do mapa (emblema ou nome) ---------------------------------------
     def _ver_lugar(self, lugar):

@@ -47,6 +47,8 @@ from telas.mapa import TelaMapa
 from telas.viagens import TelaViagens
 from viagem import Viagem
 from voz import Voz
+from escuta import Escuta
+from umbra import Umbra
 from widgets.comuns import entrar
 
 # vibra uma vez ao passar do limite e só rearma depois de cair DESARME_KMH
@@ -147,6 +149,11 @@ class GTHudApp(App):
                 self.ajustes["voz_tom"] = 0.94   # voz masculina já é grave: menos rebaixada
         self.aplicar_voz()
         Clock.schedule_once(self._voz_automatica, 1.0)
+        # o Umbra: aparece quando chamado (nome com a moto parada, ou botão) e nos avisos da rota
+        self.escuta = Escuta()
+        self.umbra = Umbra(self, self.voz, self.escuta,
+                           rosto=lambda: self.sm.get_screen("mapa").rosto_umbra)
+        self.voz.ao_tocar = self.umbra.ao_falar
 
         self.rumo = None
         self.precisao = None         # da última leitura boa (m)
@@ -380,15 +387,19 @@ class GTHudApp(App):
         Clock.schedule_once(self.atualizar_fluxo, 6)
         self.sons.carregar_todos(Clock.schedule_once)
         Clock.schedule_interval(self.atualizar_fluxo, FLUXO_A_CADA_S)
+        Clock.schedule_interval(self.umbra.tique, 0.1)
 
     def on_pause(self):
         self._guardar_posicao()
         self.bateria.guardar()
         self.fundo.ao_pausar()  # rota ativa: segue navegando minimizado
+        self.umbra.pausar()     # minimizado, o microfone não escuta
         return True  # não fecha o app ao trocar de tela no celular
 
     def on_resume(self):
         self.fundo.ao_voltar()
+        self.umbra.retomar()
+        self.umbra.microfone = android_utils.tem_microfone()
         self.fundo.sincronizar()   # (ver _resposta_permissao)
         if self.sm.current == "config":  # pode estar voltando da tela de permissão da bolha
             self.sm.get_screen("config").on_pre_enter()
@@ -418,6 +429,7 @@ class GTHudApp(App):
         self.bateria.guardar()
         self.parar_corrida()
         self.fundo.terminou()
+        self.escuta.desligar()
         self.salvar_viagem_atual()  # não perde a viagem se o app fechar
         self.gps.parar()
 
@@ -631,6 +643,8 @@ class GTHudApp(App):
             # contando os km da carga da moto: o serviço que mantém o GPS com o app minimizado
             # tem de ser ligado AGORA, com o app na tela (o Android recusa depois de minimizar)
             self.fundo.sincronizar()
+            # o Umbra escuta o nome com a moto parada: pede o microfone UMA vez, depois do GPS
+            Clock.schedule_once(lambda dt: self.preparar_microfone(), 2.5)
         else:
             boot.permissao_negada()
 
@@ -1005,6 +1019,21 @@ class GTHudApp(App):
         self.sons.tocar("aviso")
         android_utils.vibrar_padrao("fora")
         self.na_tela(lambda: self.sm.get_screen("mapa").mensagem(frase, tema.LARANJA, 12))
+        self.na_tela(self.umbra.aviso_bateria)   # e o Umbra pequeno avisa, com a voz
+
+    def preparar_microfone(self, pedir_sempre=False):
+        """Permissão do microfone para o Umbra escutar o nome: pede uma vez (ou de novo quando
+        o dono liga a escuta nos Ajustes)."""
+        if android_utils.tem_microfone():
+            self.umbra.microfone = True
+            return
+        if not self.ajustes["umbra_escuta"] or (self.ajustes["umbra_pediu_microfone"] and not pedir_sempre):
+            return
+        self.ajustes["umbra_pediu_microfone"] = True
+
+        def resposta(ok):
+            self.umbra.microfone = bool(ok)
+        android_utils.pedir_microfone(resposta)
 
     def avisos_da_rota(self, rota):
         """Frases curtas para a prévia: se a carga da moto dá, chuva, trânsito de agora e

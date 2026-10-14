@@ -40,7 +40,9 @@ PADRAO = {
     # (o leitor de texto do Android). Até a 1.0.58 o app SEMPRE usava a do celular quando ela
     # existia, e as gravações nunca tocavam (o dono regravou a voz e "não saiu a voz nova").
     "voz_fonte": "gravada",
-    "bateria": None,            # a carga de agora da moto: km desde o "Carreguei 100%" (bateria.py)
+    "umbra_escuta": True,       # com a moto parada, o microfone escuta o nome "Umbra" (umbra.py)
+    "umbra_pediu_microfone": False,   # já pediu a permissão do microfone uma vez
+    "bateria": None,           # a carga de agora da moto: km desde o "Carreguei 100%" (bateria.py)
     "bateria_cargas": [],       # as cargas que já terminaram (km, barrinhas que sobraram)
     "tema_monarca_v1": False,    # o tema Monarca já foi ligado uma vez (pedido do dono)?
     "voz_indice": -1,        # -1 = automática: a mais grave (masculina) do celular

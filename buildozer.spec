@@ -30,7 +30,11 @@ android.manifest.intent_filters = intent_filters.xml
 fullscreen = 0
 
 # INTERNET: mapa (tiles do OpenStreetMap), rota (Valhalla) e busca (Nominatim)
-android.permissions = ACCESS_FINE_LOCATION,ACCESS_COARSE_LOCATION,WAKE_LOCK,VIBRATE,INTERNET,ACCESS_NETWORK_STATE,FOREGROUND_SERVICE,FOREGROUND_SERVICE_LOCATION,POST_NOTIFICATIONS,SYSTEM_ALERT_WINDOW
+# RECORD_AUDIO: o Umbra escuta o nome e os pedidos (reconhecimento de voz do Google)
+android.permissions = ACCESS_FINE_LOCATION,ACCESS_COARSE_LOCATION,WAKE_LOCK,VIBRATE,INTERNET,ACCESS_NETWORK_STATE,FOREGROUND_SERVICE,FOREGROUND_SERVICE_LOCATION,POST_NOTIFICATIONS,SYSTEM_ALERT_WINDOW,RECORD_AUDIO
+# do Android 11 em diante o app so enxerga o reconhecedor de voz se declarar que quer usa-lo
+# (aspas simples no XML: o buildozer passa o texto entre aspas duplas para o p4a)
+android.extra_manifest_xml = ./manifest_extra.xml
 
 # Java proprio: Localizacao.java recebe o GPS e Satelites.java conta satelites
 android.add_src = %(source.dir)s/java

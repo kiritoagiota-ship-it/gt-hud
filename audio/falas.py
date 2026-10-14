@@ -71,6 +71,32 @@ FALAS.update({
     "sem_rota": "Não encontrei um caminho de bike até esse destino.",
 })
 
+# O Umbra, o assistente que aparece quando é chamado (umbra.py). Frases aprovadas pelo dono em
+# 14/10/2026: humor na pegada de simbionte, falando como "nós". Valem igual para a voz gravada e
+# para a do celular (são frases inteiras, não pedaços de instrução).
+UMBRA = {
+    "umbra_oi_1": "Nós estamos aqui. Fala.",
+    "umbra_oi_2": "Acordou a gente. Pra onde vamos?",
+    "umbra_oi_3": "Fala, parceiro. Estamos com fome de estrada.",
+    "umbra_silencio": "Nada? Tudo bem. Nós esperamos... por enquanto.",
+    "umbra_nao_entendi_1": "Não entendemos. Fala de novo, devagar.",
+    "umbra_nao_entendi_2": "Isso não fez sentido nem pra nós.",
+    "umbra_casa": "Pra casa. Finalmente, um lugar escuro e quieto.",
+    "umbra_trabalho": "Trabalho de novo? Tá bom. Vamos.",
+    "umbra_sem_casa": "Você nunca nos disse onde fica sua casa.",
+    "umbra_sem_trabalho": "Nós não sabemos onde você trabalha.",
+    "umbra_rotas": "Mais caminhos. Escolhe um, nós cuidamos do resto.",
+    "umbra_farejando": "Farejando o mais perto...",
+    "umbra_achou": "Achamos um. Vamos?",
+    "umbra_nada_perto": "Nada por perto. Que tédio.",
+    "umbra_bateria_ok": "Bateria tranquila. Dá pra rodar bastante.",
+    "umbra_bateria_fraca": "Bateria fraca. Melhor não abusar.",
+    "umbra_cancelada": "Rota cancelada. Liberdade.",
+    "umbra_valeu": "Não agradece. Nós gostamos de mandar.",
+    "umbra_tchau": "Estaremos por perto.",
+}
+FALAS.update(UMBRA)
+
 
 # O que a VOZ GRAVADA do app diz (pedido do dono, 08/10/2026: voz "tipo o Venom", que fala
 # como "nós"; frases aprovadas por ele antes de gravar). As chaves são as mesmas de FALAS: o

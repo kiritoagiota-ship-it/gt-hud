@@ -33,7 +33,7 @@ class TesteGravacao(unittest.TestCase):
     def test_cabe_nos_creditos_do_plano_gratuito(self):
         total = sum(len(t) for t in falas.GRAVADAS.values())
         self.assertLess(total, gravar.LIMITE_CARACTERES)
-        self.assertLess(total, 10000 / 3)            # dá para gravar tudo 3 vezes com 10.000 créditos
+        self.assertLess(total, 10000 / 2)            # dá para gravar tudo 2 vezes com 10.000 créditos (com as falas do Umbra)
 
     def test_cada_pedaco_leva_o_texto_vizinho(self):
         self.assertEqual(gravar.vizinhos("em_200"), ("Parceiro,", "viramos à direita."))

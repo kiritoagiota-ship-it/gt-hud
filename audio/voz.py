@@ -81,6 +81,11 @@ class Voz:
         self._fala = None          # classe Java Fala (motor do celular)
         self._limite_fala = 0.0    # time.monotonic() em que a fala atual "travou"
         self._t_medida = None      # medindo as vozes (a fila espera)
+        # o Umbra (umbra.py) quer saber quando uma fala começa (para aparecer nos avisos) e o que
+        # está tocando (para a boca acompanhar o volume): ao_tocar(pedaços), e tocando =
+        # (arquivo WAV ou None se é a voz do celular, hora em que começou, duração em segundos)
+        self.ao_tocar = None
+        self.tocando = None
         if platform == "android":
             try:
                 from jnius import autoclass
@@ -221,6 +226,7 @@ class Voz:
                 self._livre_em = agora + 0.3  # depois, "ocupada" diz quando terminou
                 self._limite_fala = agora + TRAVADA_BASE_S + TRAVADA_POR_LETRA_S * len(frase)
                 self._agendar(0.3)
+                self._comecou(pedacos, None, agora, 0.07 * len(frase))
                 return
         self._tocar_gravada(tem_gravacao, agora)
 
@@ -240,6 +246,22 @@ class Voz:
         som.play()
         self._livre_em = agora + duracao + 0.25
         self._agendar(duracao + 0.3)
+        self._comecou(pedacos, caminho, agora, duracao)
+
+    def _comecou(self, pedacos, caminho, agora, duracao):
+        self.tocando = (caminho, agora, duracao)
+        if self.ao_tocar is not None:
+            try:
+                self.ao_tocar(pedacos)
+            except Exception as e:      # o assistente nunca cala a navegação
+                print("[voz] ao_tocar:", e)
+
+    def ocupada(self):
+        """Falando agora, ou com fala na fila."""
+        agora = time.monotonic()
+        if self._fila or agora < self._livre_em:
+            return True
+        return self._fala is not None and bool(self._fala.ocupada)
 
     def _arquivo(self, chave):
         return os.path.join(PASTA_VOZ, chave + ".wav")

@@ -194,3 +194,30 @@ def pedir_permissoes(callback):
         cb(bool(resultados) and bool(resultados[0]))
 
     request_permissions([fina, Permission.ACCESS_COARSE_LOCATION], _resposta)
+
+
+def tem_microfone():
+    """O app pode usar o microfone (o Umbra escutar o nome)? No PC: sim (a escuta é simulada)."""
+    if not NO_ANDROID:
+        return True
+    try:
+        return bool(check_permission(Permission.RECORD_AUDIO))
+    except Exception:
+        return False
+
+
+def pedir_microfone(callback):
+    """Pede a permissão do microfone; callback(True/False) na thread do Kivy."""
+    cb = mainthread(callback)
+    if tem_microfone():
+        cb(True)
+        return
+
+    def _resposta(permissoes, resultados):
+        cb(bool(resultados) and bool(resultados[0]))
+
+    try:
+        request_permissions([Permission.RECORD_AUDIO], _resposta)
+    except Exception as e:
+        print("[microfone]", e)
+        cb(False)

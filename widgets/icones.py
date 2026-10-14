@@ -57,6 +57,26 @@ def desenhar(nome, cx, cy, tam, cor):
     elif nome == "lupa":
         Line(circle=(cx - r * 0.15, cy + r * 0.15, r * 0.6), width=grosso)
         Line(points=[cx + r * 0.3, cy - r * 0.3, cx + r * 0.9, cy - r * 0.9], width=grosso, cap="round")
+    elif nome == "umbra":
+        # os olhos do Umbra: duas lâminas inclinadas, pontudas, mais gordas embaixo
+        from kivy.graphics import Mesh
+        for lado in (-1, 1):
+            dentro = (cx + lado * r * 0.10, cy - r * 0.22)        # ponta de dentro, baixa
+            fora = (cx + lado * r * 1.00, cy + r * 0.45)          # ponta de fora, alta
+            pontos = []
+            for k in range(9):                                    # beirada de cima: quase reta
+                f = k / 8.0
+                pontos.append((dentro[0] + (fora[0] - dentro[0]) * f,
+                               dentro[1] + (fora[1] - dentro[1]) * f + math.sin(math.pi * f) * r * 0.08))
+            for k in range(7, 0, -1):                             # beirada de baixo: barriga
+                f = k / 8.0
+                pontos.append((dentro[0] + (fora[0] - dentro[0]) * f,
+                               dentro[1] + (fora[1] - dentro[1]) * f
+                               - math.sin(math.pi * f) ** 0.8 * r * 0.36 * (0.6 + 0.4 * f)))
+            vertices = [cx + lado * r * 0.55, cy - r * 0.05, 0, 0]
+            for x, y in pontos + pontos[:1]:
+                vertices += [x, y, 0, 0]
+            Mesh(vertices=vertices, indices=list(range(len(vertices) // 4)), mode="triangle_fan")
 
 
 NOMES = ("mais", "menos", "centralizar", "rotas", "vivo", "menu", "lupa", "parar")
