@@ -1,29 +1,31 @@
 """O rosto do Umbra na tela: grande no meio (quando chamado) ou pequeno no canto (nos avisos).
 
-O desenho é o mesmo da página de prévia (widgets/umbra_pintor.py, feito pela placa de vídeo).
-Ele é pintado numa textura fora da tela (Fbo) e a textura é posta no lugar: no modo grande a
-textura tem só ESCALA_GRANDE do tamanho na tela (a fumaça e o brilho são macios, não perdem
-nada, e a placa do celular trabalha bem menos).
+O desenho é o mesmo da página de prévia (widgets/umbra_pintor.py, feito pela placa de vídeo),
+pintado DIRETO na tela, do jeito padrão do Kivy: um RenderContext com o desenho e um retângulo
+(a posição de cada ponto vem da coordenada da textura do retângulo, #define NO_APP).
+
+Até a 1.0.86 ele era pintado numa textura escondida (Fbo), com a mistura do OpenGL trocada por
+código Python no meio do desenho, e o volume da fala era lido numa thread: no Galaxy S23 Ultra
+(Adreno 740, Android 16) o app caía na hora de pintar, até com o desenho leve. Agora não há Fbo,
+nem troca de mistura (o próprio desenho entrega a cor no formato que o Kivy mistura), nem thread.
+
+Se mesmo assim o desenho derrubar o app (diagnostico.etapa), a escada desce um degrau por
+versão: 0 desenho completo, 1 leve (#define LEVE), 2 imagens prontas (dados/umbra).
 
 O movimento (cabeça que vira, piscada, olhar, reações de cada estado) é o mesmo da prévia, por
 tempo e não por quadro. A boca segue o VOLUME da fala que está tocando (voz.tocando): da
 gravação, lido do próprio arquivo; da voz do celular, sílabas simuladas.
-
-O shader devolve a cor já multiplicada pela transparência ("pré-multiplicada"); o Kivy mistura
-de outro jeito, então a mistura é trocada só enquanto o rosto é desenhado (sem isso o brilho
-encolhe e aparecem manchas cinza: medido em 13/10/2026).
 """
 import array
 import math
 import os
 import random
-import threading
 import time
 import wave
 
 from kivy.animation import Animation
 from kivy.clock import Clock
-from kivy.graphics import Callback, ClearBuffers, ClearColor, Color, Fbo, Rectangle
+from kivy.graphics import Color, Rectangle, RenderContext
 from kivy.graphics import opengl as gl
 from kivy.metrics import dp, sp
 from kivy.properties import NumericProperty
@@ -34,8 +36,6 @@ import tema
 from widgets.comuns import Texto
 from widgets.umbra_pintor import FONTE
 
-ESCALA_GRANDE = 0.62        # resolução da textura no modo grande (o rosto fica grande na tela)
-ESCALA_PEQUENO = 1.0
 LADO_PEQUENO = dp(112)
 ATRASO_SOM_S = 0.08         # o som sai um tiquinho depois do play: a boca espera
 QUADROS_ENVELOPE = 50       # volume da fala: 50 medidas por segundo
@@ -161,13 +161,14 @@ class Movimento:
         return u
 
 
+
 # ---------------------------------------------------------------- o volume da fala gravada
 _envelopes = {}
-_lendo = set()
 
 
 def _ler_envelope(caminho):
-    """Volume do WAV (16 bits) em QUADROS_ENVELOPE medidas por segundo, de 0 a 1."""
+    """Volume do WAV (16 bits) em QUADROS_ENVELOPE medidas por segundo, de 0 a 1. Lido uma vez por
+    frase (as frases se repetem: fica guardado), na hora, sem thread."""
     try:
         with wave.open(caminho, "rb") as w:
             taxa, canais, largura = w.getframerate(), w.getnchannels(), w.getsampwidth()
@@ -179,7 +180,7 @@ def _ler_envelope(caminho):
         passo = max(1, int(taxa * canais / QUADROS_ENVELOPE))
         valores = []
         for i in range(0, len(amostras), passo):
-            trecho = amostras[i:i + passo:4]             # (uma em cada 4 basta para o volume)
+            trecho = amostras[i:i + passo:8]             # (uma em cada 8 basta para o volume)
             if trecho:
                 valores.append(math.sqrt(sum(x * x for x in trecho) / len(trecho)))
         topo = max(valores) if valores else 0.0
@@ -190,7 +191,7 @@ def _ler_envelope(caminho):
     if len(_envelopes) > 40:
         _envelopes.clear()
     _envelopes[caminho] = env
-    _lendo.discard(caminho)
+    return env
 
 
 def volume_da_fala(tocando, agora):
@@ -202,15 +203,11 @@ def volume_da_fala(tocando, agora):
     if el < 0 or el > duracao:
         return 0.0
     if caminho:
-        if caminho in _envelopes:
-            env = _envelopes[caminho]
-            if env:
-                i = int(el * QUADROS_ENVELOPE)
-                return env[i] if i < len(env) else 0.0
-        elif caminho not in _lendo:
-            _lendo.add(caminho)
-            threading.Thread(target=_ler_envelope, args=(caminho,), daemon=True).start()
-    # voz do celular (ou o arquivo ainda sendo lido): sílabas simuladas
+        env = _envelopes[caminho] if caminho in _envelopes else _ler_envelope(caminho)
+        if env:
+            i = int(el * QUADROS_ENVELOPE)
+            return env[i] if i < len(env) else 0.0
+    # voz do celular (ou arquivo que não deu para ler): sílabas simuladas
     silaba = abs(math.sin(el * 9.0))
     frase = 0.55 + 0.45 * math.sin(el * 2.3 + 1.0)
     return _lim(silaba * frase, 0.0, 1.0)
@@ -230,7 +227,7 @@ class RostoUmbra(Widget):
         self.modo = None
         self.mov = Movimento()
         self.ao_tocar_fora = None       # tocou na tela com ele grande: fecha
-        self.lugar_pequeno = None       # função (largura, altura) -> (x, y) do canto dele
+        self.lugar_pequeno = None       # função (largura, altura, lado) -> (x, y) do canto dele
         self.quebrado = False           # o desenho não compilou neste aparelho: não aparece
         self.simples = False            # usa as imagens prontas (o desenho ao vivo derrubou o app aqui)
         self.nivel = 0                  # 0 desenho completo, 1 leve (sem língua, saliva, fileira de trás...)
@@ -238,20 +235,23 @@ class RostoUmbra(Widget):
         self._bob = 0.0
         self._quadros_ok = -1
         self._avisou_placa = False
-        self._fbo = None
-        self._fbo_lado = 0
+        self._compilado = False
         self._ev = None
         self._t0 = time.monotonic()
         self._ultimo = None
-        self._mistura = None
         with self.canvas:
             self._cor_veu = Color(0.004, 0.003, 0.016, 0.0)
             self._veu = Rectangle()
-            Callback(self._mistura_pre)
-            self._cor_rosto = Color(1, 1, 1, 0)
-            self._ret = Rectangle()
-            Callback(self._mistura_volta)
-        self.lbl_ouvido = Texto(text="", font_size=sp(15), italic=True, color=tema.CIANO_FRACO,
+            # o desenho ao vivo: um RenderContext só para ele (o resto do app segue com o desenho normal)
+            self._rc = RenderContext(use_parent_projection=True, use_parent_modelview=True,
+                                     use_parent_frag_modelview=True)
+            # o modo simples: uma imagem pronta comum
+            self._cor_img = Color(1, 1, 1, 0)
+            self._ret_img = Rectangle(size=(0, 0))
+        with self._rc:
+            Color(1, 1, 1, 1)
+            self._ret_vivo = Rectangle(size=(0, 0))
+        self.lbl_ouvido = Texto(text="", font_size=sp(15), color=tema.CIANO_FRACO,
                                 halign="center", size_hint=(None, None), opacity=0)
         self.lbl_fala = Texto(text="", font_size=sp(19), bold=True, color=tema.BRANCO,
                               halign="center", size_hint=(None, None), opacity=0)
@@ -340,33 +340,20 @@ class RostoUmbra(Widget):
     def _redesenhar(self, *a):
         p = self.presenca
         self._veu.pos, self._veu.size = self.pos, self.size
-        self._cor_veu.a = VEU * p if self.modo == "grande" or (self.modo is None and self._veu_era) else 0.0
+        self._cor_veu.a = VEU * p if self.modo == "grande" or (self.modo is None and self._cor_veu.a > 0.0) else 0.0
         escala = 0.86 + 0.14 * p
         lado = self.rlado * escala
-        self._ret.pos = (self.rx + (self.rlado - lado) / 2.0, self.ry + (self.rlado - lado) / 2.0)
-        self._ret.size = (lado, lado)
+        pos = (self.rx + (self.rlado - lado) / 2.0, self.ry + (self.rlado - lado) / 2.0)
+        visivel = p > 0.001
         if self.simples:
-            self._ret.pos = (self._ret.pos[0], self._ret.pos[1] + self._bob)
-            self._cor_rosto.rgba = (1, 1, 1, p)            # (imagem comum: só a transparência some)
+            self._ret_img.pos = (pos[0], pos[1] + self._bob)
+            self._ret_img.size = (lado, lado) if visivel else (0, 0)
+            self._cor_img.a = p
+            self._ret_vivo.size = (0, 0)
         else:
-            self._cor_rosto.rgba = (p, p, p, p)            # (pré-multiplicada: a cor também some)
-        if self._fbo is not None and not self.simples:
-            self._ret.texture = self._fbo.texture
-
-    @property
-    def _veu_era(self):
-        return self._cor_veu.a > 0.0
-
-    def _mistura_pre(self, instr):
-        if self.simples:
-            return
-        gl.glBlendFuncSeparate(gl.GL_ONE, gl.GL_ONE_MINUS_SRC_ALPHA, gl.GL_ONE, gl.GL_ONE_MINUS_SRC_ALPHA)
-
-    def _mistura_volta(self, instr):
-        # volta para a mistura de sempre do Kivy (medida em 13/10/2026; não pergunta à placa de
-        # vídeo, para não depender do que cada celular responde)
-        if not self.simples:
-            gl.glBlendFuncSeparate(gl.GL_SRC_ALPHA, gl.GL_ONE_MINUS_SRC_ALPHA, gl.GL_ONE, gl.GL_ONE)
+            self._ret_vivo.pos = pos
+            self._ret_vivo.size = (lado, lado) if (visivel and self._compilado) else (0, 0)
+            self._ret_img.size = (0, 0)
 
     # --- o modo simples: imagens prontas (dados/umbra), sem desenho ao vivo ---------------------
     def _textura(self, nome):
@@ -379,40 +366,27 @@ class RostoUmbra(Widget):
                 self._texturas[nome] = None
         return self._texturas[nome]
 
-    def _preparar_fbo(self):
-        escala = ESCALA_GRANDE if self.modo == "grande" else ESCALA_PEQUENO
-        _, _, lado_tela = self._alvo()
-        lado = max(64, int(lado_tela * escala))
-        if self._fbo is not None and abs(lado - self._fbo_lado) < 8:
+    def _compilar(self):
+        """O desenho ao vivo, compilado uma vez (completo ou leve, conforme o degrau)."""
+        if self._compilado:
             return True
-        fbo = Fbo(size=(lado, lado), with_stencilbuffer=False)
-        fbo.shader.fs = ("#define LEVE\n" + FONTE) if self.nivel == 1 else FONTE
-        if not fbo.shader.success:
+        fonte = "#define NO_APP\n" + ("#define LEVE\n" if self.nivel == 1 else "") + FONTE
+        self._rc.shader.fs = fonte
+        if not self._rc.shader.success:
             print("[umbra] o desenho do rosto não compilou neste aparelho")
             self.quebrado = True
             return False
-        with fbo:
-            ClearColor(0, 0, 0, 0)
-            ClearBuffers()
-            Callback(self._mistura_pre)
-            Color(1, 1, 1, 1)
-            Rectangle(pos=(0, 0), size=(lado, lado))
-            Callback(self._mistura_volta)
-        # o Fbo só é pintado se fizer parte do desenho do widget (antes do rosto, que usa a textura dele)
-        if self._fbo is not None:
-            self.canvas.before.remove(self._fbo)
-        self.canvas.before.add(fbo)
-        self._fbo, self._fbo_lado = fbo, lado
-        self._ret.texture = fbo.texture
+        self._compilado = True
         return True
 
     def _ligar(self):
         if self.simples:
-            self._ret.texture = self._textura("parado")
+            self._ret_img.texture = self._textura("parado")
         else:
-            # etapa arriscada: se o app cair aqui (placa de vídeo), na próxima vez ele usa as imagens
+            # etapa arriscada: se o app cair aqui (placa de vídeo), na próxima vez ele desce um degrau
             diagnostico.etapa(ETAPA_ROSTO)
-            print("[umbra] rosto: preparando o desenho %s" % ("leve" if self.nivel == 1 else "completo"), flush=True)
+            print("[umbra] rosto: preparando o desenho %s, direto na tela" % ("leve" if self.nivel == 1 else "completo"),
+                  flush=True)
             if not self._avisou_placa:
                 self._avisou_placa = True
                 try:
@@ -422,15 +396,17 @@ class RostoUmbra(Widget):
                                                            texto(gl.glGetString(gl.GL_VERSION))), flush=True)
                 except Exception:
                     pass
-            if not self._preparar_fbo():
+            if not self._compilar():
                 diagnostico.etapa_ok(ETAPA_ROSTO)
                 self.presenca = 0.0
                 return
-            print("[umbra] rosto: desenho compilado (%d px)" % self._fbo_lado, flush=True)
+            print("[umbra] rosto: desenho compilado", flush=True)
             self._quadros_ok = 0
         if self._ev is None:
             self._ultimo = None
+            self._quadro(0)                   # os números já certos antes do primeiro quadro na tela
             self._ev = Clock.schedule_interval(self._quadro, 0)
+        self._redesenhar()
 
     def _desligar(self):
         if self.presenca > 0.01:
@@ -442,6 +418,7 @@ class RostoUmbra(Widget):
             self._ev.cancel()
             self._ev = None
         self._cor_veu.a = 0.0
+        self._redesenhar()
 
     def _quadro(self, dt):
         agora = time.monotonic()
@@ -461,12 +438,11 @@ class RostoUmbra(Widget):
                 nome = "falando"
             tex = self._textura(nome)
             if tex is not None:
-                self._ret.texture = tex
+                self._ret_img.texture = tex
             self._bob = math.sin(t * 1.3) * dp(3) + u["boca"] * dp(2)
             self._redesenhar()
             return
-        f = self._fbo
-        if f is None:
+        if not self._compilado:
             return
         if self._quadros_ok >= 0:
             self._quadros_ok += 1
@@ -474,12 +450,14 @@ class RostoUmbra(Widget):
                 self._quadros_ok = -1
                 diagnostico.etapa_ok(ETAPA_ROSTO)
                 print("[umbra] rosto: desenhando sem problema", flush=True)
-        f["u_res"] = [float(self._fbo_lado), float(self._fbo_lado)]
-        f["u_t"] = float(t)
+        rc = self._rc
+        lado = max(1.0, float(self._ret_vivo.size[0]))
+        rc["u_res"] = [lado, lado]
+        rc["u_t"] = float(t)
+        rc["u_presenca"] = float(self.presenca)
         for k in ("boca", "olho", "inclina", "feliz", "torto", "alerta", "escuta", "rolar", "palpebra",
                   "enfase", "brilho", "lingua"):
-            f["u_" + k] = float(u[k])
-        f["u_giro"] = [float(u["giro"][0]), float(u["giro"][1])]
-        f["u_olhar"] = [float(u["olhar"][0]), float(u["olhar"][1])]
-        f.ask_update()
-        self.canvas.ask_update()
+            rc["u_" + k] = float(u[k])
+        rc["u_giro"] = [float(u["giro"][0]), float(u["giro"][1])]
+        rc["u_olhar"] = [float(u["olhar"][0]), float(u["olhar"][1])]
+        rc.ask_update()

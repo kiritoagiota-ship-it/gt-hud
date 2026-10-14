@@ -140,7 +140,7 @@ def simples(dt):
     r.simples = True
     a.escuta.dizer("valeu")
     a.umbra.chamar()
-    checar(r.modo == "grande" and r._ret.texture is not None, "modo simples: aparece com a imagem")
+    checar(r.modo == "grande" and r._ret_img.texture is not None, "modo simples: aparece com a imagem")
 
 
 def simples_foto(dt):

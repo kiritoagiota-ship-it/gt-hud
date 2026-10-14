@@ -11,6 +11,10 @@ precision mediump float;
 #endif
 #endif
 uniform vec2 u_res;
+#ifdef NO_APP
+varying vec2 tex_coord0;       // (o Kivy passa: 0 a 1 no retângulo do rosto)
+uniform float u_presenca;      // aparecendo/sumindo (0 a 1)
+#endif
 uniform float u_t, u_boca, u_olho, u_inclina, u_feliz, u_torto, u_alerta, u_escuta;
 uniform vec2 u_giro, u_olhar;                          // cabeça virando (x) e acenando (y); para onde ele olha
 uniform float u_rolar, u_palpebra, u_enfase, u_brilho; // cabeça de lado; pálpebra descendo; sílaba forte; força do brilho
@@ -466,7 +470,11 @@ void boca(vec2 P, vec2 torce) {
 }
 
 void main() {
+#ifdef NO_APP
+  vec2 uv = vec2(tex_coord0.x, 1.0 - tex_coord0.y);   // (no Kivy a textura vem de cabeça para baixo)
+#else
   vec2 uv = gl_FragCoord.xy / u_res;
+#endif
   vec2 P = vec2(uv.x * 2.0 - 1.0, 1.0 - uv.y * 2.0);            // y cresce para baixo
   P.y -= 0.015 * sin(u_t * 1.3);                                 // a cabeça respira
   // a cabeça de lado: gira no plano da tela, em volta do pescoço
@@ -498,6 +506,11 @@ void main() {
     vec2 q = P - onde;
     luz(mod(n, 2.0) < 1.0 ? ROXO : AZUL, exp(-dot(q, q) / (0.00010 * (1.0 + 2.0 * (1.0 - vida)))) * sin(vida * 3.14159) * 0.75);
   }
+#ifdef NO_APP
+  // o Kivy mistura com a cor "pura": desfaz a multiplicação pela transparência
+  gl_FragColor = vec4(min(col / max(alfa, 0.004), vec3(1.0)), alfa * u_presenca);
+#else
   gl_FragColor = vec4(col, alfa);
+#endif
 }
 '''
