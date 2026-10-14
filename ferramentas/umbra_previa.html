@@ -603,9 +603,38 @@ void main() {
     luz(mod(n, 2.0) < 1.0 ? ROXO : AZUL, exp(-dot(q, q) / (0.00010 * (1.0 + 2.0 * (1.0 - vida)))) * sin(vida * 3.14159) * 0.75);
   }
 #endif
+  // nunca um quadrado em volta dele: tudo some até ZERO antes da beirada do retângulo onde ele é
+  // pintado (a aura e o anel de quem escuta chegavam a 14% na borda), e a névoa fraquinha que
+  // sobra longe da cabeça vira transparente de vez
+  vec2 q4 = abs(uv * 2.0 - 1.0);
+  q4 *= q4;
+  float r4 = sqrt(sqrt(dot(q4, q4)));                       // contorno de cantos redondos
+  float beira = 1.0 - r4;
+  float semBeira = smoothstep(0.0, 0.13, beira);
+  float semQuadro = semBeira * smoothstep(0.004, 0.02, alfa);
+  col *= semQuadro;
+  alfa *= semQuadro;
 #ifdef NO_APP
+  // aparecendo/sumindo: o rosto se forma da fumaça escura, de dentro para fora, com a borda
+  // acesa em roxo (u_presenca de 0 a 1); sumindo, desfaz do mesmo jeito
+  float pr = clamp(u_presenca, 0.0, 1.0);
+  if (pr < 0.999) {
+    float nz = fbm3(P * 2.8 + vec2(0.0, u_t * 0.7));
+    float campo = nz * 0.75 + length(P) * 0.35;           // o meio forma primeiro
+    float lim = mix(-0.05, 1.30, pr);
+    float dentro = smoothstep(lim, lim - 0.12, campo);    // 1 = já formado
+    float borda = exp(-sq((campo - lim) / 0.045)) * min(alfa * 2.0, 1.0);
+    float fum = smoothstep(lim + 0.40, lim, campo) * (1.0 - dentro) * 4.0 * pr * (1.0 - pr) * 0.75
+                * smoothstep(0.95, 0.55, length(P * vec2(1.0, 0.9)));   // só em volta dele, nunca o quadrado
+    col *= dentro;
+    alfa *= dentro;
+    fum *= semBeira;
+    col += ROXO * borda * 0.9 + vec3(0.015, 0.008, 0.035) * fum;
+    alfa += borda * 0.7 + fum;
+    alfa = min(alfa, 1.0);
+  }
   // o Kivy mistura com a cor "pura": desfaz a multiplicação pela transparência
-  gl_FragColor = vec4(min(col / max(alfa, 0.004), vec3(1.0)), alfa * u_presenca);
+  gl_FragColor = vec4(min(col / max(alfa, 0.004), vec3(1.0)), alfa * min(pr * 3.0, 1.0));
 #else
   gl_FragColor = vec4(col, alfa);
 #endif

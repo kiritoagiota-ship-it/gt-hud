@@ -42,6 +42,8 @@ from widgets.comuns import Texto
 from widgets.umbra_pintor import FONTE
 
 LADO_PEQUENO = dp(112)
+LADO_MEDIO = dp(190)         # chamado com a moto andando: no canto, sem escurecer o mapa
+ENTRA_S, SAI_S = 0.60, 0.45  # aparecer/sumir: tempo para a fumaça formar/desfazer o rosto
 ATRASO_SOM_S = 0.08         # o som sai um tiquinho depois do play: a boca espera
 QUADROS_ENVELOPE = 50       # volume da fala: 50 medidas por segundo
 VEU = 0.72                  # quanto o mapa escurece por trás dele grande
@@ -63,6 +65,9 @@ ALVOS = {
                       giroX=0.25, giroY=-0.05, rolar=0.12, palpebra=0.05),
     "alerta":    dict(olho=0.8, inclina=0.9, feliz=0.0, torto=0.0, alerta=1.0, escuta=0.0, boca=0.05,
                       giroX=0.0, giroY=-0.10, rolar=0.0, palpebra=0.0),
+    # procurando o lugar: olhos estreitos, cabeça baixa varrendo de um lado a outro, fungadas
+    "farejando": dict(olho=0.62, inclina=0.35, feliz=0.0, torto=0.0, alerta=0.0, escuta=0.0, boca=0.06,
+                      giroX=0.0, giroY=-0.12, rolar=0.0, palpebra=0.30),
 }
 
 
@@ -84,6 +89,7 @@ class Movimento:
         self.estado = "parado"
         self.prox_piscada, self.piscada_ini, self.dupla = 1.6, -10.0, False
         self.olhar_alvo, self.prox_olhar = [0.0, 0.0], 1.2
+        self.direcao = 0.0              # -1 esquerda, 1 direita: olha para o lado da próxima curva
 
     def mola(self, nome, alvo, dt, freq, amort):
         m = self.molas.setdefault(nome, [alvo, 0.0])
@@ -106,6 +112,8 @@ class Movimento:
             self.empurrar("giroY", 7); self.empurrar("brilho", 4)
         elif nome == "confuso":                    # cabeça de lado
             self.empurrar("rolar", 1.4); self.empurrar("giroX", 2.5)
+        elif nome == "farejando":                  # baixa a cabeça para farejar
+            self.empurrar("giroY", -3); self.empurrar("olho", -3)
         elif nome == "ouvindo":                    # se inclina para ouvir, olha para você
             self.empurrar("giroY", 2.5); self.empurrar("olho", 4)
             self.prox_olhar = agora
@@ -129,6 +137,10 @@ class Movimento:
         return max(self._curva(f), self._curva(f - 0.30) if self.dupla else 0.0)
 
     def _olhar(self, t):
+        if self.estado == "farejando":           # varre de um lado a outro, junto com a cabeça
+            return [0.75 * math.sin(t * 1.9), 0.12]
+        if self.direcao:                          # aviso de rota: olha para o lado da curva
+            return [0.8 * self.direcao, 0.05 + 0.08 * math.sin(t * 0.9)]
         if t > self.prox_olhar:
             atento = self.estado in ("ouvindo", "falando")
             longe = self.r.random() < 0.3
@@ -145,14 +157,17 @@ class Movimento:
         ox = self.mola("olharX", oa[0], dt, 5.5, 1.0)
         oy = self.mola("olharY", oa[1], dt, 5.5, 1.0)
         falando = voz_v > 0.02
+        farejando = self.estado == "farejando"
+        fungada = max(0.0, math.sin(t * 9.0)) ** 6 * (1.0 if math.sin(t * 1.3) > 0.2 else 0.0) if farejando else 0.0
         u = {}
         u["giro"] = (self.mola("giroX", al["giroX"] + 0.22 * _deriva(t, 0) + 0.28 * ox
+                               + (0.30 * math.sin(t * 1.9) if farejando else 0.0) + 0.30 * self.direcao
                                + (0.06 * math.sin(t * 2.7) if falando else 0.0), dt, 1.1, 0.55),
                      self.mola("giroY", al["giroY"] + 0.12 * _deriva(t, 4) + 0.30 * e, dt, 1.6, 0.45))
         u["olhar"] = (ox, oy)
         u["rolar"] = self.mola("rolar", al["rolar"] + 0.025 * _deriva(t, 8), dt, 1.2, 0.5)
         u["olho"] = _lim(self.mola("olho", al["olho"], dt, 3.0, 0.55), 0.05, 1.6)
-        u["inclina"] = self.mola("inclina", al["inclina"] + 0.25 * e, dt, 2.2, 0.8)
+        u["inclina"] = self.mola("inclina", al["inclina"] + 0.25 * e + 0.25 * fungada, dt, 2.2, 0.8)
         for k in ("feliz", "torto"):
             u[k] = _lim(self.mola(k, al[k], dt, 2.2, 0.9), 0.0, 1.0)
         u["alerta"] = _lim(self.mola("alerta", al["alerta"], dt, 2.5, 1.0), 0.0, 1.0)
@@ -277,20 +292,21 @@ class RostoUmbra(Widget):
         Animation.cancel_all(self)
         if primeira:
             self.rx, self.ry, self.rlado = x, y, lado
-            Animation(presenca=1.0, d=0.28, t="out_back").start(self)
+            Animation(presenca=1.0, d=ENTRA_S if not self.simples else 0.28, t="out_quad").start(self)
         else:
             Animation(presenca=1.0, rx=x, ry=y, rlado=lado, d=0.30, t="out_quad").start(self)
-        grande = modo == "grande"
+        conversa = modo in ("grande", "medio")
         for lbl in (self.lbl_ouvido, self.lbl_fala):
             Animation.cancel_all(lbl)
-            Animation(opacity=1.0 if grande else 0.0, d=0.25).start(lbl)
-        if not grande:
+            Animation(opacity=1.0 if conversa else 0.0, d=0.25).start(lbl)
+        if not conversa:
             self.lbl_ouvido.text = self.lbl_fala.text = ""
         self._ligar()
 
     def esconder(self):
         Animation.cancel_all(self)
-        a = Animation(presenca=0.0, d=0.22, t="in_quad")
+        self.mov.direcao = 0.0
+        a = Animation(presenca=0.0, d=SAI_S if not self.simples else 0.22, t="in_quad")
         a.bind(on_complete=lambda *x: self._desligar())
         a.start(self)
         for lbl in (self.lbl_ouvido, self.lbl_fala):
@@ -300,6 +316,10 @@ class RostoUmbra(Widget):
 
     def definir_estado(self, nome):
         self.mov.mudar(nome, time.monotonic() - self._t0)
+
+    def olhar_para(self, lado):
+        """-1 esquerda, 1 direita, 0 livre (nos avisos de rota: o lado da próxima curva)."""
+        self.mov.direcao = float(lado)
 
     def legenda(self, ouvido=None, fala=None):
         """O que a pessoa disse (entre aspas) e o que ele diz. None = deixa como está."""
@@ -315,6 +335,11 @@ class RostoUmbra(Widget):
             if self.ao_tocar_fora is not None:
                 self.ao_tocar_fora()
             return True                  # com ele grande, o mapa por baixo não recebe o toque
+        if (self.modo == "medio" and self.presenca > 0.3 and self.rx <= toque.x <= self.rx + self.rlado
+                and self.ry <= toque.y <= self.ry + self.rlado):
+            if self.ao_tocar_fora is not None:
+                self.ao_tocar_fora()
+            return True                  # médio: só o toque NELE fecha; o mapa segue funcionando
         return False
 
     # --- desenho -------------------------------------------------------------------
@@ -323,7 +348,7 @@ class RostoUmbra(Widget):
         if self.modo == "grande":
             lado = min(W, H) * (0.80 if H >= W else 0.62)
             return (self.x + (W - lado) / 2.0, self.y + H * (0.60 if H >= W else 0.52) - lado / 2.0, lado)
-        lado = LADO_PEQUENO
+        lado = LADO_MEDIO if self.modo == "medio" else LADO_PEQUENO
         if self.lugar_pequeno is not None:
             x, y = self.lugar_pequeno(W, H, lado)
             return (self.x + x, self.y + y, lado)
@@ -339,16 +364,17 @@ class RostoUmbra(Widget):
         for lbl, alt in ((self.lbl_ouvido, dp(44)), (self.lbl_fala, dp(64))):
             lbl.size = (larg, alt)
             lbl.text_size = (larg, None)
-        base = self.ry - dp(8)
-        self.lbl_fala.pos = (self.x + m, base - self.lbl_fala.height)
-        self.lbl_ouvido.pos = (self.x + m, self.lbl_fala.y - self.lbl_ouvido.height)
         self._redesenhar()
 
     def _redesenhar(self, *a):
         p = self.presenca
+        # a legenda acompanha o rosto (inclusive quando ele muda de tamanho sem sumir)
+        base = self.ry - dp(8)
+        self.lbl_fala.pos = (self.x + dp(16), base - self.lbl_fala.height)
+        self.lbl_ouvido.pos = (self.x + dp(16), self.lbl_fala.y - self.lbl_ouvido.height)
         self._veu.pos, self._veu.size = self.pos, self.size
         self._cor_veu.a = VEU * p if self.modo == "grande" or (self.modo is None and self._cor_veu.a > 0.0) else 0.0
-        escala = 0.86 + 0.14 * p
+        escala = (0.86 + 0.14 * p) if self.simples else (0.95 + 0.05 * p)
         lado = self.rlado * escala
         pos = (self.rx + (self.rlado - lado) / 2.0, self.ry + (self.rlado - lado) / 2.0)
         visivel = p > 0.001

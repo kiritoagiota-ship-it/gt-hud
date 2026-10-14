@@ -12,6 +12,7 @@ Tudo anda pelo tique() (o app chama 10 vezes por segundo), com a hora passada de
 dá para testar sem relógio de verdade (testes/test_umbra.py).
 """
 import random
+import re
 import time
 import unicodedata
 
@@ -50,6 +51,21 @@ _PERTO = [
 ]
 
 
+# "não" perto do pedido desfaz o pedido: "não vai", "pode não", "vai pra casa não"
+NEGACOES = ("nao", "nem", "nunca", "jamais")
+NEGA_FRASES = ("nao quero", "nao precisa", "nem pensar", "deixa pra la", "agora nao", "melhor nao")
+# "me leva pro Flamboyant", "bora pra rodoviária": o que vem depois é o destino
+_IR = re.compile(r"(?:^| )(?:me leva|leva eu|leva a gente|me levar|levar|leva|vamos|vamo|bora|partiu|quero ir|"
+                 r"ir|vai|navega|navegar|rota|me guia|guia)"
+                 r"(?: (?:ate|para|pra|pro|pros|pras|ao|aos|a|o|as|os|no|na))+ (.+)$")
+_SOBRA_FIM = NEGACOES + ("agora", "ai", "logo", "rapido", "favor", "por", "ja")
+_ARTIGOS = ("o", "a", "os", "as", "um", "uma")
+_PERTO_FIM = ("mais perto", "mais proximo", "mais proxima", "aqui perto", "perto", "proximo", "proxima")
+_PERGUNTAS = ("que", "qual", "quais", "como", "quando", "quem", "quanto", "quantos", "quantas", "porque",
+              "por que", "cade")
+LUGAR_MAX_PALAVRAS = 4    # resposta curta e sem sentido ("Flamboyant"): ele tenta como nome de lugar
+
+
 def normalizar(texto):
     """Minúsculas, sem acento e sem pontuação: "Me leva pra CASA!" -> "me leva pra casa"."""
     t = unicodedata.normalize("NFD", (texto or "").lower())
@@ -61,6 +77,55 @@ def normalizar(texto):
 def _tem(texto, palavra):
     """A palavra (ou expressão) aparece inteira no texto normalizado."""
     return (" %s " % normalizar(palavra)) in (" %s " % texto)
+
+
+def _posicao(texto, palavra):
+    """Em que palavra do texto (normalizado) a expressão começa; -1 se não aparece."""
+    i = (" %s " % texto).find(" %s " % normalizar(palavra))
+    return -1 if i < 0 else len(texto[:i].split())
+
+
+def _negado(texto, k):
+    """O pedido que começa na palavra k foi negado? "não vai", "pode não", "não quero ir pra casa"."""
+    p = texto.split()
+    if not p:
+        return False
+    if p[-1] in NEGACOES or any(_tem(texto, f) for f in NEGA_FRASES):
+        return True
+    return any(w in NEGACOES for w in p[max(0, k - 2):max(0, k)])
+
+
+def _destino(texto):
+    """(destino, palavra em que o pedido começa) de "me leva pro shopping flamboyant", ou (None, -1)."""
+    m = _IR.search(texto)
+    if not m:
+        return None, -1
+    d = m.group(1).split()
+    while d and d[-1] in _SOBRA_FIM:
+        d.pop()
+    while d and d[0] in _ARTIGOS:
+        d.pop(0)
+    return (" ".join(d) or None), len(texto[:m.start()].split()) + (1 if m.start() > 0 else 0)
+
+
+def _categoria_exata(destino):
+    """"farmácia", "um mercado mais perto" -> a categoria; "padaria do zé" -> None (é um lugar)."""
+    d = destino
+    for fim in _PERTO_FIM:
+        if d.endswith(" " + fim):
+            d = d[:-len(fim) - 1]
+            break
+    d = " ".join(w for w in d.split() if w not in _ARTIGOS)
+    for categoria, palavras in _PERTO:
+        if d in tuple(normalizar(p) for p in palavras):
+            return categoria
+    return None
+
+
+def parece_lugar(texto):
+    """Uma resposta curta e não entendida pode ser só o nome do lugar ("Flamboyant")."""
+    t = normalizar(texto)
+    return 0 < len(t.split()) <= LUGAR_MAX_PALAVRAS and not any(_tem(t, q) for q in _PERGUNTAS)
 
 
 def chamado(alternativas):
@@ -81,27 +146,51 @@ def entender(texto):
     t = normalizar(texto)
     if not t:
         return "nada_dito", None
-    for nome, palavras in _PALAVRAS[:1]:                       # cancelar vem antes de tudo
-        if any(_tem(t, p) for p in palavras):
-            return nome, None
+
+    def achou(palavras):
+        ks = [_posicao(t, p) for p in palavras]
+        ks = [k for k in ks if k >= 0]
+        return min(ks) if ks else -1
+    k = achou(_PALAVRAS[0][1])                                  # cancelar vem antes de tudo
+    if k >= 0:
+        return ("negou", None) if _negado(t, k) else ("cancelar", None)
+    destino, _k = _destino(t)                                  # "me leva pro Flamboyant"
+    if destino:
+        # aqui só o "não" do fim ou um "não quero" valem: "não, me leva pra casa" é um pedido
+        if _negado(t, 0):
+            return "negou", None
+        for nome, palavras in _PALAVRAS[1:3]:                  # casa, trabalho
+            if destino in tuple(normalizar(p) for p in palavras) or destino in ("meu " + normalizar(p) for p in palavras):
+                return nome, None
+        categoria = _categoria_exata(destino)
+        return ("perto", categoria) if categoria else ("lugar", destino)
     for categoria, palavras in _PERTO:                        # "farmácia mais perto"
-        if any(_tem(t, p) for p in palavras):
-            return "perto", categoria
+        k = achou(palavras)
+        if k >= 0:
+            return ("negou", None) if _negado(t, k) else ("perto", categoria)
     for nome, palavras in _PALAVRAS[1:]:
-        if any(_tem(t, p) for p in palavras):
+        k = achou(palavras)
+        if k >= 0:
+            if nome in ("casa", "trabalho", "rotas", "iniciar") and _negado(t, k):
+                return "negou", None
             return nome, None
     return "desconhecido", None
 
 
 def entender_alternativas(alternativas):
-    """A primeira alternativa do reconhecedor que dá uma intenção conhecida."""
-    primeira = None
+    """A primeira alternativa do reconhecedor que dá uma intenção conhecida. Buscar um lugar pelo
+    nome fica por último: "me leva pra cara" (ouvido errado) perde para "me leva pra casa"."""
+    primeira = lugar = None
     for alt in alternativas:
         r = entender(alt)
         if primeira is None:
             primeira = r
-        if r[0] not in ("desconhecido", "nada_dito"):
+        if r[0] == "lugar":
+            lugar = lugar or (r, alt)
+        elif r[0] not in ("desconhecido", "nada_dito"):
             return r, alt
+    if lugar:
+        return lugar
     return (primeira or ("nada_dito", None)), (alternativas[0] if alternativas else "")
 
 
@@ -145,6 +234,7 @@ class Umbra:
         self._parado_desde = None
         self._vigia_volta = 0.0             # hora em que a escuta do nome pode recomeçar
         self._buscando = False
+        self._ultima = {}                   # a última frase sorteada de cada grupo (não repete seguida)
         self.ultimo_pedido = None           # (para os testes e o diagnóstico) a última intenção
 
     # --- o rosto -----------------------------------------------------------------
@@ -173,7 +263,15 @@ class Umbra:
         self._rosto_faz("legenda", None, falas.GRAVADAS.get(chave, ""))
 
     def _sorteia(self, *chaves):
-        return chaves[self.sorteio.randrange(len(chaves))]
+        """Uma das frases, nunca a mesma da última vez (do mesmo grupo)."""
+        opcoes = [c for c in chaves if c != self._ultima.get(chaves)] or list(chaves)
+        c = opcoes[self.sorteio.randrange(len(opcoes))]
+        self._ultima[chaves] = c
+        return c
+
+    def _uma(self, base):
+        """Sorteia entre a frase e as variações gravadas dela (base, base_1, base_2...)."""
+        return self._sorteia(*_familia(base))
 
     # --- chamar (botão ou nome) ----------------------------------------------------
     @property
@@ -188,7 +286,9 @@ class Umbra:
         self.escuta.parar()
         self._silencios = self._sem_entender = 0
         self._confirmando = False
-        self._rosto_faz("mostrar", "grande")
+        self._rosto_faz("olhar_para", 0)
+        # andando, ele vem médio no canto e sem escurecer o mapa (pedido do dono, 14/10/2026)
+        self._rosto_faz("mostrar", "medio" if self._andando() else "grande")
         self._rosto_faz("legenda", "", "")
         if resto:
             self._rosto_faz("legenda", resto, "")
@@ -197,7 +297,21 @@ class Umbra:
             self._processar([resto], agora)
             return
         self.estado = SAUDANDO
-        self._falar(self._sorteia("umbra_oi_1", "umbra_oi_2", "umbra_oi_3"), "ouvir", agora)
+        self._falar(self._uma("umbra_oi"), "ouvir", agora)
+
+    def _andando(self):
+        try:
+            return self.app.velocidade_agora() >= PARADO_KMH
+        except Exception:
+            return False
+
+    def _lado_da_curva(self):
+        """-1/1: a próxima curva da rota é para a esquerda/direita (0: reto ou sem rota)."""
+        try:
+            acao = ((self.app.estado_nav or {}).get("manobra") or {}).get("acao") or ""
+        except Exception:
+            return 0
+        return -1 if "esquerda" in acao else (1 if "direita" in acao else 0)
 
     def fechar(self, agora=None):
         """Some (tocou fora dele, ou terminou)."""
@@ -231,6 +345,7 @@ class Umbra:
         self._desde = self._t
         self._rosto_faz("mostrar", "pequeno")
         self._rosto_faz("definir_estado", humor)
+        self._rosto_faz("olhar_para", self._lado_da_curva() if navegando and humor != "confirmou" else 0)
 
     def aviso_bateria(self):
         """Bateria da moto no fim (main.conferir_bateria_baixa): ele avisa, pequeno."""
@@ -306,16 +421,16 @@ class Umbra:
             self.escuta.parar()
             self._silencios += 1
             if self._silencios == 1:
-                self._falar("umbra_silencio", "ouvir", agora, "confuso")
+                self._falar(self._uma("umbra_silencio"), "ouvir", agora, "confuso")
             else:
-                self._falar("umbra_tchau", "sair", agora)
+                self._falar(self._uma("umbra_tchau"), "sair", agora)
         elif sit == "sem":
             self._rosto_faz("legenda", None, "O celular não tem reconhecimento de voz.")
             self._falar("umbra_tchau", "sair", agora)
 
     # --- o que fazer com o pedido ------------------------------------------------------
     def _processar(self, alternativas, agora):
-        (intencao, dado), _texto = entender_alternativas(alternativas)
+        (intencao, dado), texto = entender_alternativas(alternativas)
         self.ultimo_pedido = (intencao, dado)
         app = self.app
         if self._confirmando:                      # perguntou "Vamos?"
@@ -323,10 +438,11 @@ class Umbra:
             if intencao == "iniciar":
                 self._falar("rota_calculada", "rota", agora, "confirmou")
                 return
-            if intencao in ("tchau", "cancelar"):
-                if getattr(app, "rota_previa", None) is not None and app.nav is None:
+            if intencao in ("tchau", "cancelar", "negou"):
+                if app.nav is None and (getattr(app, "rota_previa", None) is not None
+                                        or getattr(app, "destino", None) is not None):
                     app.cancelar_previa()
-                self._falar("umbra_tchau", "sair", agora)
+                self._falar(_ou("umbra_ok_nao", "umbra_tchau"), "sair", agora)
                 return
         if intencao == "nada_dito":
             self._silencios += 1
@@ -351,6 +467,10 @@ class Umbra:
             self._bateria(agora)
         elif intencao == "perto":
             self._perto(dado, agora)
+        elif intencao == "lugar":
+            self._lugar(dado, agora)
+        elif intencao == "negou":
+            self._falar(_ou("umbra_ok_nao", "umbra_tchau"), "sair", agora)
         elif intencao == "cancelar":
             if app.nav is not None:
                 app.encerrar_navegacao()
@@ -366,13 +486,18 @@ class Umbra:
         elif intencao == "valeu":
             self._falar("umbra_valeu", "sair", agora, "confirmou")
         elif intencao == "tchau":
-            self._falar("umbra_tchau", "sair", agora)
+            self._falar(self._uma("umbra_tchau"), "sair", agora)
+        elif self._sem_entender == 0 and parece_lugar(texto):
+            self._lugar(normalizar(texto), agora, tentativa=True)   # "Flamboyant": talvez seja o lugar
         else:
-            self._sem_entender += 1
-            if self._sem_entender <= 2:
-                self._falar(self._sorteia("umbra_nao_entendi_1", "umbra_nao_entendi_2"), "ouvir", agora, "confuso")
-            else:
-                self._falar("umbra_tchau", "sair", agora, "confuso")
+            self._nao_entendeu(agora)
+
+    def _nao_entendeu(self, agora):
+        self._sem_entender += 1
+        if self._sem_entender <= 2:
+            self._falar(self._uma("umbra_nao_entendi"), "ouvir", agora, "confuso")
+        else:
+            self._falar(self._uma("umbra_tchau"), "sair", agora, "confuso")
 
     def _ir_para(self, lugar):
         app = self.app
@@ -407,7 +532,7 @@ class Umbra:
         if app.posicao is None:
             self._falar("umbra_nada_perto", "sair", agora, "confuso")
             return
-        self._falar("umbra_farejando", "esperar", agora)
+        self._falar("umbra_farejando", "esperar", agora, "farejando")
         self._buscando = True
         termos = next((t for nome, t in _categorias() if nome == categoria), ())
         origem = app.posicao
@@ -433,6 +558,58 @@ class Umbra:
             self._buscando = False
             if self.conversando:
                 self._falar("umbra_nada_perto", "sair", self._t, "confuso")
+        rodar = getattr(app, "em_segundo_plano", None)
+        if rodar is None:
+            import rede
+            rodar = rede.em_segundo_plano
+        rodar(procurar, achou, falhou)
+
+    def _lugar(self, nome, agora, tentativa=False):
+        """"Me leva pro Flamboyant": busca o lugar (a mesma busca da tela), mostra a rota e
+        pergunta "Vamos?". tentativa: era só uma resposta não entendida; se não achar nada,
+        vira "não entendemos"."""
+        app = self.app
+        self._falar(_ou("umbra_procurando", "umbra_farejando"), "esperar", agora, "farejando")
+        self._rosto_faz("legenda", nome, None)
+        self._buscando = True
+        origem = app.posicao
+        salvos = list(getattr(app, "salvos", None) or [])
+        try:
+            chave = (app.ajustes["tomtom"] or "").strip() or None
+        except Exception:
+            chave = None
+
+        def procurar():
+            import busca
+            return busca.buscar(nome, origem, salvos, chave)
+
+        def nada():
+            if tentativa:
+                self._nao_entendeu(self._t)
+            else:
+                self._falar(_ou("umbra_nao_achou", "umbra_nada_perto"), "sair", self._t, "confuso")
+
+        def achou(lista):
+            self._buscando = False
+            if not self.conversando:
+                return
+            lista = [l for l in (lista or []) if l.get("lat") is not None]
+            if not lista:
+                nada()
+                return
+            lugar = _o_de_goiania(lista)
+            texto = lugar.get("nome", "")
+            if lugar.get("endereco"):
+                texto += "\n" + lugar["endereco"]
+            self._rosto_faz("legenda", None, texto)
+            self._ir_para(dict(lugar))
+            self._confirmando = True
+            self._falar(_ou("umbra_lugar_achado", "umbra_achou"), "ouvir", self._t, "confirmou")
+
+        def falhou(erro):
+            self._buscando = False
+            if self.conversando:
+                nada()
         rodar = getattr(app, "em_segundo_plano", None)
         if rodar is None:
             import rede
@@ -508,6 +685,29 @@ class Umbra:
 
 
 AVISO_BATERIA_M = 6000      # com menos que isso pela frente, "bateria fraca"
+
+
+def _familia(base):
+    """A frase e as variações gravadas dela: "umbra_oi" -> umbra_oi_1, umbra_oi_2..."""
+    chaves = sorted(k for k in falas.UMBRA if k == base or (k.startswith(base + "_") and k[len(base) + 1:].isdigit()))
+    return tuple(chaves) or (base,)
+
+
+def _ou(chave, reserva):
+    """A frase nova, se já foi gravada; senão a que já existe."""
+    return chave if chave in falas.UMBRA else reserva
+
+
+def _o_de_goiania(lista):
+    """O primeiro resultado dentro de Goiânia (o app só navega na cidade); senão o primeiro."""
+    try:
+        import goiania
+        for lugar in lista:
+            if goiania.dentro(lugar["lat"], lugar["lon"], 0.01):
+                return lugar
+    except Exception:
+        pass
+    return lista[0]
 
 
 def _categorias():

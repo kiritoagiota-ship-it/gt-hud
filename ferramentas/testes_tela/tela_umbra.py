@@ -79,6 +79,7 @@ def comeco(dt):
         a.posicao = (-16.6869, -49.2648)
     a.ajustes["atalhos"] = {"casa": {"nome": "Casa", "lat": -16.6990, "lon": -49.2580}}
     a.umbra.microfone = False             # primeiro pelo botão (a escuta do nome fica parada)
+    a.velocidade_agora = lambda: 0.0      # parado (andando, ele viria médio: ver medio())
     t = a.sm.get_screen("mapa")
     checar(t.btn_umbra.parent is not None, "o botão do Umbra está no mapa")
     checar(t.btn_umbra.x > t.width / 2, "na coluna de botões da direita")
@@ -132,6 +133,42 @@ def por_nome(dt):
     checar("umbra_valeu" in DITAS, "chamado pelo nome, respondeu o 'valeu': %s" % DITAS[-4:])
 
 
+def medio(dt):
+    # chamado com a moto andando: médio no canto, sem escurecer o mapa (pedido do dono, 14/10/2026)
+    a = app()
+    a.umbra.microfone = False
+    a.velocidade_agora = lambda: 25.0
+    a.umbra.chamar()
+    checar(rosto().modo == "medio", "andando: aparece médio (%s)" % rosto().modo)
+
+
+def fumaca_foto(dt):
+    foto("u5_fumaca")
+    checar(0.05 < rosto().presenca < 0.95, "no meio da entrada (presença %.2f)" % rosto().presenca)
+
+
+def medio_foto(dt):
+    foto("u6_medio")
+    r, t = rosto(), app().sm.get_screen("mapa")
+    checar(r._cor_veu.a < 0.01, "médio: o mapa não escurece (véu %.2f)" % r._cor_veu.a)
+    checar(r.rx > t.width / 2 and r.rlado < t.width * 0.6, "médio: no canto da direita, menor que o grande")
+
+
+def farejando(dt):
+    a = app()
+    a.umbra.fechar()
+    a.velocidade_agora = lambda: 0.0
+    r = rosto()
+    r.mostrar("grande")
+    r.definir_estado("farejando")
+
+
+def farejando_foto(dt):
+    foto("u7_farejando")
+    checar(rosto().mov.estado == "farejando", "cara de farejando")
+    rosto().esconder()
+
+
 def simples(dt):
     # o modo simples (imagens prontas): o que o app usa se o desenho ao vivo derrubar o app
     a = app()
@@ -154,13 +191,18 @@ def fim(dt):
 
 
 Clock.schedule_once(comeco, 7)
-Clock.schedule_once(grande, 7.6)
+Clock.schedule_once(grande, 8.0)
 Clock.schedule_once(rota, 13.0)
 Clock.schedule_once(aviso, 13.5)
 Clock.schedule_once(aviso_foto, 13.9)
 Clock.schedule_once(sumiu, 16.0)
 Clock.schedule_once(por_nome, 30.0)
-Clock.schedule_once(simples, 31.0)
-Clock.schedule_once(simples_foto, 31.8)
-Clock.schedule_once(fim, 35.0)
+Clock.schedule_once(medio, 31.0)
+Clock.schedule_once(fumaca_foto, 31.25)
+Clock.schedule_once(medio_foto, 32.2)
+Clock.schedule_once(farejando, 33.0)
+Clock.schedule_once(farejando_foto, 34.4)
+Clock.schedule_once(simples, 35.4)
+Clock.schedule_once(simples_foto, 36.2)
+Clock.schedule_once(fim, 39.0)
 runpy.run_path("main.py", run_name="__main__")

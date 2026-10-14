@@ -25,6 +25,19 @@ class TesteEntender(unittest.TestCase):
             "valeu": ("valeu", None),
             "nada não": ("tchau", None),
             "bora": ("iniciar", None),
+            # o "não" desfaz o pedido (até a 1.0.89, "não vai" iniciava a rota)
+            "não vai": ("negou", None),
+            "pode não": ("negou", None),
+            "vai pra casa não": ("negou", None),
+            "não quero ir pra casa": ("negou", None),
+            "não cancela": ("negou", None),
+            "não, me leva pra casa": ("casa", None),
+            # qualquer lugar pelo nome
+            "me leva pro Shopping Flamboyant": ("lugar", "shopping flamboyant"),
+            "bora pra padaria do zé": ("lugar", "padaria do ze"),
+            "me leva no flamboyant por favor": ("lugar", "flamboyant"),
+            "me leva pra farmácia": ("perto", "Farmácia"),
+            "vamos pro meu trabalho": ("trabalho", None),
             "qual é a capital da frança": ("desconhecido", None),
             "": ("nada_dito", None),
         }
@@ -92,6 +105,9 @@ class RostoFalso:
 
     def legenda(self, ouvido=None, fala=None):
         self.legendas.append((ouvido, fala))
+
+    def olhar_para(self, lado):
+        self.lado = lado
 
 
 class BateriaFalsa:
@@ -298,6 +314,75 @@ class TesteConversa(unittest.TestCase):
         self.escuta.dizer("umbra")
         self.andar(6)
         self.assertIsNone(self.rosto.modo)
+
+    def test_lugar_pelo_nome(self):
+        self.escuta.dizer("me leva pro shopping flamboyant")
+        self.u.chamar(agora=self.t)
+        self.andar(2.5)
+        self.assertIn(("procurar",), self.app.feito)
+        self.assertEqual(self.rosto.estados[-1], "farejando")
+        self.app._resposta([{"nome": "Shopping Flamboyant", "endereco": "Av. Jamel Cecílio", "lat": -16.71,
+                             "lon": -49.24}])
+        self.assertIn(("destino", "Shopping Flamboyant"), self.app.feito)
+        self.assertTrue(any(f and "Jamel" in f for _, f in self.rosto.legendas))
+        self.escuta.dizer("bora")
+        self.andar(2.5)
+        self.assertEqual(self.voz.ditas[-1], "rota_calculada")
+
+    def test_lugar_nao_achado(self):
+        self.escuta.dizer("me leva pro lugar que nao existe")
+        self.u.chamar(agora=self.t)
+        self.andar(2.5)
+        self.app._resposta([])
+        self.assertNotIn(("destino",), [f[:1] for f in self.app.feito])
+        self.andar(3)
+        self.assertIsNone(self.rosto.modo)
+
+    def test_resposta_curta_vira_busca_e_sem_resultado_nao_entendeu(self):
+        self.escuta.dizer("flamboyant")
+        self.u.chamar(agora=self.t)
+        self.andar(2.5)
+        self.assertIn(("procurar",), self.app.feito)
+        self.escuta.dizer("valeu")
+        self.app._resposta([])
+        self.assertTrue(self.voz.ditas[-1].startswith("umbra_nao_entendi"))
+
+    def test_nao_na_confirmacao_cancela(self):
+        self.escuta.dizer("farmácia mais perto")
+        self.u.chamar(agora=self.t)
+        self.andar(2.5)
+        self.app._resposta([{"nome": "Drogasil", "lat": -16.69, "lon": -49.26}])
+        self.escuta.dizer("não vai")
+        self.andar(2.5)
+        self.assertIn(("cancelar_previa",), self.app.feito)
+        self.assertNotEqual(self.voz.ditas[-1], "rota_calculada")
+
+    def test_cumprimento_nao_repete_seguido(self):
+        ditas = []
+        for _ in range(12):
+            self.u.chamar(agora=self.t)
+            ditas.append(self.voz.ditas[-1])
+            self.u.fechar()
+        self.assertTrue(all(a != b for a, b in zip(ditas, ditas[1:])), ditas)
+
+    def test_andando_aparece_medio(self):
+        self.app.vel = 25.0
+        self.u.chamar(agora=self.t)
+        self.assertEqual(self.rosto.modo, "medio")
+        self.u.fechar()
+        self.app.vel = 0.0
+        self.u.chamar(agora=self.t)
+        self.assertEqual(self.rosto.modo, "grande")
+
+    def test_aviso_olha_para_a_curva(self):
+        self.app.nav = object()
+        self.app.estado_nav = {"manobra": {"acao": "levemente_esquerda"}}
+        self.voz.falar(["radar"])
+        self.assertEqual(self.rosto.lado, -1)
+        self.andar(2)
+        self.app.estado_nav = {"manobra": {"acao": "direita"}}
+        self.voz.falar(["recalculando"])
+        self.assertEqual(self.rosto.lado, 1)
 
     def test_tocar_fora_fecha(self):
         self.u.chamar(agora=self.t)
