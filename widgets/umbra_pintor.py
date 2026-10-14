@@ -477,6 +477,15 @@ void main() {
 #endif
   vec2 P = vec2(uv.x * 2.0 - 1.0, 1.0 - uv.y * 2.0);            // y cresce para baixo
   P.y -= 0.015 * sin(u_t * 1.3);                                 // a cabeça respira
+#ifdef NO_APP
+  // subindo da poça (u_presenca de 0 a 1): começa toda abaixo dela, sobe, passa um tiquinho
+  // do lugar e assenta; sumindo, o mesmo ao contrário
+  float pr = clamp(u_presenca, 0.0, 1.0);
+  vec2 Pchao = P;                                                // a poça fica parada
+  float sobe = smoothstep(0.12, 0.80, pr);
+  float pulo = sin(3.14159 * clamp((pr - 0.60) / 0.40, 0.0, 1.0));
+  P.y -= 1.75 * (1.0 - sobe) - 0.05 * pulo;
+#endif
   // a cabeça de lado: gira no plano da tela, em volta do pescoço
   float cr = cos(u_rolar), sr = sin(u_rolar);
   P = vec2(cr * P.x + sr * (P.y - 0.25), -sr * P.x + cr * (P.y - 0.25) + 0.25);
@@ -526,26 +535,31 @@ void main() {
   col *= semQuadro;
   alfa *= semQuadro;
 #ifdef NO_APP
-  // aparecendo/sumindo: o rosto se forma da fumaça escura, de dentro para fora, com a borda
-  // acesa em roxo (u_presenca de 0 a 1); sumindo, desfaz do mesmo jeito
-  float pr = clamp(u_presenca, 0.0, 1.0);
-  if (pr < 0.999) {
-    float nz = fbm3(P * 2.8 + vec2(0.0, u_t * 0.7));
-    float campo = nz * 0.75 + length(P) * 0.35;           // o meio forma primeiro
-    float lim = mix(-0.05, 1.30, pr);
-    float dentro = smoothstep(lim, lim - 0.12, campo);    // 1 = já formado
-    float borda = exp(-sq((campo - lim) / 0.045)) * min(alfa * 2.0, 1.0);
-    float fum = smoothstep(lim + 0.40, lim, campo) * (1.0 - dentro) * 4.0 * pr * (1.0 - pr) * 0.75
-                * smoothstep(0.95, 0.55, length(P * vec2(1.0, 0.9)));   // só em volta dele, nunca o quadrado
-    col *= dentro;
-    alfa *= dentro;
-    fum *= semBeira;
-    col += ROXO * borda * 0.9 + vec3(0.015, 0.008, 0.035) * fum;
-    alfa += borda * 0.7 + fum;
-    alfa = min(alfa, 1.0);
-  }
+  // a poça de sombra de onde ele sobe (e para onde volta): abre, ele passa, fecha
+  float abre = smoothstep(0.0, 0.20, pr) * (1.0 - smoothstep(0.82, 1.0, pr));
+  float linha = mix(1.30, 0.70, abre);                 // a superfície: o que está abaixo dela não aparece
+  float onda = (fbm3(vec2(Pchao.x * 4.0, u_t * 1.5)) - 0.5) * 0.05;
+  float acima = smoothstep(linha + 0.015, linha - 0.03, Pchao.y + onda);
+  // o que acabou de sair ainda vem coberto de sombra
+  float escuro = 1.0 - 0.8 * smoothstep(linha - 0.45, linha, Pchao.y) * abre;
+  col *= acima * escuro;
+  alfa *= acima;
+  // a poça: elipse escura, borda roxa ondulando e fiapos de sombra subindo dela
+  float temPoca = smoothstep(0.0, 0.05, abre);
+  vec2 el = vec2(Pchao.x / (0.74 * abre + 0.001), (Pchao.y - 0.70) / (0.085 * abre + 0.001));
+  float dp = length(el) + (fbm3(Pchao * 5.0 + u_t * 0.8) - 0.5) * 0.35;
+  float poca = smoothstep(1.0, 0.80, dp) * temPoca;
+  float aro = exp(-sq((dp - 0.95) / 0.07)) * temPoca;
+  float subindo = clamp((linha - Pchao.y) / 0.5, 0.0, 1.0);
+  float fiapo = smoothstep(0.55, 0.80, fbm3(vec2(Pchao.x * 3.0, Pchao.y * 2.0 + u_t * 1.4)))
+                * (1.0 - subindo) * smoothstep(linha + 0.01, linha - 0.02, Pchao.y)
+                * smoothstep(0.78, 0.35, abs(Pchao.x)) * abre;
+  vec3 pcol = (vec3(0.012, 0.006, 0.030) * poca * 0.92 + ROXO * aro * 0.8 + vec3(0.03, 0.015, 0.07) * fiapo) * semBeira;
+  float palfa = clamp(poca * 0.92 + aro * 0.6 + fiapo * 0.6, 0.0, 1.0) * semBeira;
+  col += pcol * (1.0 - alfa);                          // ele passa NA FRENTE da poça
+  alfa += palfa * (1.0 - alfa);
   // o Kivy mistura com a cor "pura": desfaz a multiplicação pela transparência
-  gl_FragColor = vec4(min(col / max(alfa, 0.004), vec3(1.0)), alfa * min(pr * 3.0, 1.0));
+  gl_FragColor = vec4(min(col / max(alfa, 0.004), vec3(1.0)), alfa * min(pr * 8.0, 1.0));
 #else
   gl_FragColor = vec4(col, alfa);
 #endif

@@ -206,12 +206,15 @@ AVISOS_CHEGADA = {"chegou"}
 
 PARADO_KMH = 3.0            # abaixo disso (por PARADO_S) a moto está parada: ele escuta o nome
 PARADO_S = 3.0
+ANDANDO_KMH = 8.0           # já escutando, só para acima disso (o GPS parado oscila uns km/h à toa)
 OUVIR_MAX_S = 12.0          # uma escuta que não termina sozinha
 ESPERA_ROTA_MAX_S = 30.0
 INICIAR_DEPOIS_S = 1.2      # a rota apareceu: um instante para ver antes de começar
 FOLGA_FALA_S = 0.5          # depois de pedir uma fala, o tempo para ela começar
 VIGIA_PAUSA_S = 0.4         # entre uma escuta do nome e a próxima
-VIGIA_PAUSA_ERRO_S = 6.0    # o reconhecedor falhou (sem internet, ocupado): espera mais
+VIGIA_PAUSA_ERRO_S = 2.5    # o reconhecedor falhou (sem internet, ocupado): espera um pouco (vem um novo)
+VIGIA_PAUSA_LIMITE_S = 15.0  # "pedidos demais" (erro 10): o Google pediu calma
+NOME_PARCIAL_S = 0.35       # o nome apareceu no meio da fala e nada veio depois: já atende
 P_UMBRA = 3                 # prioridade das falas dele (passa na frente)
 
 
@@ -235,6 +238,9 @@ class Umbra:
         self._vigia_volta = 0.0             # hora em que a escuta do nome pode recomeçar
         self._buscando = False
         self._ultima = {}                   # a última frase sorteada de cada grupo (não repete seguida)
+        self._parcial_nome = None           # o nome apareceu no resultado parcial (e desde quando)
+        self._parcial_desde = 0.0
+        self._voltar_a_avisar = False       # anota no diagnóstico quando volta a escutar o nome
         self.ultimo_pedido = None           # (para os testes e o diagnóstico) a última intenção
 
     # --- o rosto -----------------------------------------------------------------
@@ -283,6 +289,7 @@ class Umbra:
         if self.conversando:
             return
         print("[umbra] chamado" + (" pelo nome" if self.estado == VIGIA or resto else ""), flush=True)
+        self._voltar_a_avisar = True
         self.escuta.parar()
         self._silencios = self._sem_entender = 0
         self._confirmando = False
@@ -644,7 +651,7 @@ class Umbra:
             return False
         if self.voz.ocupada() or not self.escuta.disponivel():
             return False
-        if app.velocidade_agora() >= PARADO_KMH:
+        if app.velocidade_agora() >= (ANDANDO_KMH if self.estado == VIGIA else PARADO_KMH):
             self._parado_desde = None
             return False
         if self._parado_desde is None:
@@ -662,27 +669,52 @@ class Umbra:
                 sim, resto = chamado(self.escuta.alternativas())
                 self.estado = OCULTO
                 if sim:
-                    tela = getattr(self.app, "sm", None)
-                    if tela is not None and tela.current != "mapa":
-                        tela.current = "mapa"
-                    self.chamar(resto, agora)
+                    self._ouviu_o_nome(resto, agora)
                 else:
                     self._vigia_volta = agora + VIGIA_PAUSA_S
             elif sit in ("nada", "parada", "sem"):
                 self.estado = OCULTO
                 erro = self.escuta.erro()
                 # 6/7 = silêncio, nada parecido com fala (normal); o resto é falha: espera mais
-                self._vigia_volta = agora + (VIGIA_PAUSA_S if erro in (0, 6, 7) else VIGIA_PAUSA_ERRO_S)
+                self._vigia_volta = agora + (VIGIA_PAUSA_S if erro in (0, 6, 7) else
+                                             VIGIA_PAUSA_LIMITE_S if erro == 10 else VIGIA_PAUSA_ERRO_S)
                 if erro == 9:                      # sem permissão do microfone
                     self.microfone = False
-            elif agora - self._desde > OUVIR_MAX_S:
-                self.escuta.parar()
-                self.estado = OCULTO
+            else:
+                # o nome já apareceu no meio da fala e nada veio depois dele: atende sem esperar o
+                # fim da escuta (o silêncio e a resposta final do reconhecedor levam ~1 s a mais)
+                parcial = self.escuta.parcial()
+                sim, resto = chamado([parcial]) if parcial else (False, "")
+                if sim and not resto:
+                    if parcial != self._parcial_nome:
+                        self._parcial_nome, self._parcial_desde = parcial, agora
+                    elif agora - self._parcial_desde >= NOME_PARCIAL_S:
+                        self._parcial_nome = None
+                        self.escuta.parar()
+                        self.estado = OCULTO
+                        print("[umbra] ouviu o nome no meio da fala", flush=True)
+                        self._ouviu_o_nome("", agora)
+                        return
+                else:
+                    self._parcial_nome = None
+                if agora - self._desde > OUVIR_MAX_S:
+                    self.escuta.parar()
+                    self.estado = OCULTO
             return
         if agora >= self._vigia_volta and self._pode_vigiar(agora):
             self.estado = VIGIA
             self._desde = agora
+            self._parcial_nome = None
+            if self._voltar_a_avisar:
+                self._voltar_a_avisar = False
+                print("[escuta] voltou a escutar o nome", flush=True)
             self.escuta.ouvir(0.8, conversa=False)
+
+    def _ouviu_o_nome(self, resto, agora):
+        tela = getattr(self.app, "sm", None)
+        if tela is not None and tela.current != "mapa":
+            tela.current = "mapa"
+        self.chamar(resto, agora)
 
 
 AVISO_BATERIA_M = 6000      # com menos que isso pela frente, "bateria fraca"

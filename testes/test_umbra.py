@@ -302,6 +302,43 @@ class TesteConversa(unittest.TestCase):
         self.andar(4)                                          # parado por 3 s: escuta e ouve o nome
         self.assertEqual(self.rosto.modo, "grande")
 
+    def test_chamar_pelo_nome_de_novo_depois_de_sumir(self):
+        # relato do dono (14/10/2026): chamou, ele respondeu, sumiu sozinho e não voltou mais
+        self.u.microfone = True
+        for _ in range(3):
+            self.escuta.dizer("umbra")
+            self.escuta.dizer("")
+            self.escuta.dizer("")
+            self.andar(4)
+            self.assertIn(self.rosto.modo, ("grande",))
+            self.andar(10)                                     # silêncio duas vezes: ele vai embora
+            self.assertIsNone(self.rosto.modo)
+
+    def test_nome_no_meio_da_fala(self):
+        self.u.microfone = True
+        self.escuta.parcial = lambda: "ei umbra"               # o parcial já tem o nome; a escuta segue
+        self.andar(3.3)
+        self.assertIsNone(self.rosto.modo)                     # ainda esperando os 3 s parado
+        self.andar(0.7)
+        self.assertEqual(self.rosto.modo, "grande")
+
+    def test_nome_com_pedido_espera_a_frase_inteira(self):
+        self.u.microfone = True
+        self.escuta.parcial = lambda: "umbra me leva"           # veio mais coisa: espera o resultado final
+        self.andar(4.5)
+        self.assertIsNone(self.rosto.modo)
+
+    def test_gps_oscilando_parado_nao_desliga_a_escuta(self):
+        self.u.microfone = True
+        self.andar(3.2)
+        self.assertEqual(self.u.estado, umbra.VIGIA)
+        self.app.vel = 5.0                                     # GPS parado oscilando
+        self.andar(1)
+        self.assertEqual(self.u.estado, umbra.VIGIA)
+        self.app.vel = 15.0                                    # andando de verdade
+        self.andar(0.3)
+        self.assertEqual(self.u.estado, umbra.OCULTO)
+
     def test_sem_microfone_nao_escuta(self):
         self.u.microfone = False
         self.escuta.dizer("umbra")

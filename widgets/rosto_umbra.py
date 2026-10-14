@@ -43,7 +43,11 @@ from widgets.umbra_pintor import FONTE
 
 LADO_PEQUENO = dp(112)
 LADO_MEDIO = dp(190)         # chamado com a moto andando: no canto, sem escurecer o mapa
-ENTRA_S, SAI_S = 0.60, 0.45  # aparecer/sumir: tempo para a fumaça formar/desfazer o rosto
+# aparecer/sumir (pedido do dono, 14/10/2026: "sobe das sombras"): a poça abre, ele sobe dela
+# escuro, dá um leve impulso, os olhos acendem por último e a poça fecha; sumindo, os olhos
+# apagam primeiro e ele afunda. O movimento está no desenho (u_presenca); aqui só o tempo.
+ENTRA_S, SAI_S = 0.95, 0.70
+OLHOS_DE = 0.72             # presença a partir da qual os olhos acendem (entrando) / até onde apagam (saindo)
 ATRASO_SOM_S = 0.08         # o som sai um tiquinho depois do play: a boca espera
 QUADROS_ENVELOPE = 50       # volume da fala: 50 medidas por segundo
 VEU = 0.72                  # quanto o mapa escurece por trás dele grande
@@ -263,6 +267,7 @@ class RostoUmbra(Widget):
         self._ev = None
         self._t0 = time.monotonic()
         self._ultimo = None
+        self._entrando = False
         with self.canvas:
             self._cor_veu = Color(0.004, 0.003, 0.016, 0.0)
             self._veu = Rectangle()
@@ -292,7 +297,9 @@ class RostoUmbra(Widget):
         Animation.cancel_all(self)
         if primeira:
             self.rx, self.ry, self.rlado = x, y, lado
-            Animation(presenca=1.0, d=ENTRA_S if not self.simples else 0.28, t="out_quad").start(self)
+            self._entrando = True
+            Animation(presenca=1.0, d=ENTRA_S if not self.simples else 0.28,
+                      t="linear" if not self.simples else "out_quad").start(self)
         else:
             Animation(presenca=1.0, rx=x, ry=y, rlado=lado, d=0.30, t="out_quad").start(self)
         conversa = modo in ("grande", "medio")
@@ -306,7 +313,9 @@ class RostoUmbra(Widget):
     def esconder(self):
         Animation.cancel_all(self)
         self.mov.direcao = 0.0
-        a = Animation(presenca=0.0, d=SAI_S if not self.simples else 0.22, t="in_quad")
+        self._entrando = False
+        a = Animation(presenca=0.0, d=SAI_S if not self.simples else 0.22,
+                      t="linear" if not self.simples else "in_quad")
         a.bind(on_complete=lambda *x: self._desligar())
         a.start(self)
         for lbl in (self.lbl_ouvido, self.lbl_fala):
@@ -374,7 +383,7 @@ class RostoUmbra(Widget):
         self.lbl_ouvido.pos = (self.x + dp(16), self.lbl_fala.y - self.lbl_ouvido.height)
         self._veu.pos, self._veu.size = self.pos, self.size
         self._cor_veu.a = VEU * p if self.modo == "grande" or (self.modo is None and self._cor_veu.a > 0.0) else 0.0
-        escala = (0.86 + 0.14 * p) if self.simples else (0.95 + 0.05 * p)
+        escala = (0.86 + 0.14 * p) if self.simples else 1.0   # ao vivo, quem anima é a subida
         lado = self.rlado * escala
         pos = (self.rx + (self.rlado - lado) / 2.0, self.ry + (self.rlado - lado) / 2.0)
         visivel = p > 0.001
@@ -426,6 +435,25 @@ class RostoUmbra(Widget):
         self._rc, self._ret_vivo = rc, ret
         self._compilado = True
         return True
+
+    def aquecer(self):
+        """Monta e desenha o rosto uma vez, invisível, logo depois que o app abre: senão a 1ª
+        chamada trava (~0,5 s no PC, mais no celular) montando o desenho antes de ele subir."""
+        if self.simples or self.quebrado or self._compilado or self.modo is not None:
+            return
+        diagnostico.etapa(ETAPA_ROSTO)          # (se derrubar o app, a escada de sempre vale)
+        if not self._compilar():
+            diagnostico.etapa_ok(ETAPA_ROSTO)
+            return
+        self._quadro(0)                         # u_presenca 0: nada aparece
+        self._ret_vivo.pos, self._ret_vivo.size = (self.x, self.y), (dp(4), dp(4))
+        Clock.schedule_once(self._fim_aquecer, 0.6)
+
+    def _fim_aquecer(self, dt):
+        if self.modo is None and self._ret_vivo is not None:
+            self._ret_vivo.size = (0, 0)
+        diagnostico.etapa_ok(ETAPA_ROSTO)
+        print("[umbra] rosto pronto (desenho montado com antecedência)", flush=True)
 
     def recompilar(self):
         """O próximo mostrar() compila o desenho de novo (o teste troca as partes)."""
@@ -510,9 +538,14 @@ class RostoUmbra(Widget):
         rc["u_res"] = [lado, lado]
         rc["u_t"] = float(t)
         rc["u_presenca"] = float(self.presenca)
-        for k in ("boca", "olho", "inclina", "feliz", "torto", "alerta", "escuta", "rolar", "palpebra",
-                  "enfase", "brilho", "lingua"):
+        # os olhos: acendem no fim da subida (com um lampejo) e apagam antes de ele afundar
+        f = _lim((self.presenca - OLHOS_DE) / (1.0 - OLHOS_DE), 0.0, 1.0)
+        f = f * f * (3 - 2 * f)
+        lampejo = 0.9 * math.sin(math.pi * f) if self._entrando and self.presenca < 0.999 else 0.0
+        for k in ("boca", "olho", "inclina", "feliz", "torto", "alerta", "escuta", "rolar", "enfase", "lingua"):
             rc["u_" + k] = float(u[k])
+        rc["u_brilho"] = float(u["brilho"] * (0.04 + 0.96 * f) + lampejo)
+        rc["u_palpebra"] = float(max(u["palpebra"], 1.0 - f))   # sobe de olhos fechados; abrem no alto
         rc["u_giro"] = [float(u["giro"][0]), float(u["giro"][1])]
         rc["u_olhar"] = [float(u["olhar"][0]), float(u["olhar"][1])]
         rc.ask_update()

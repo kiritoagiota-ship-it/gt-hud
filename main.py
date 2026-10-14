@@ -390,6 +390,8 @@ class GTHudApp(App):
         self.aplicar_tela_ligada()
         self.aplicar_orientacao()
         self.solicitar_gps()
+        # o desenho do Umbra pronto de antemão: a 1ª chamada não trava montando ele
+        Clock.schedule_once(lambda dt: self._aquecer_umbra(), 6)
         if self._aviso_umbra:
             aviso = self._aviso_umbra
             Clock.schedule_once(lambda dt: self.sm.get_screen("mapa").mensagem(aviso, tema.LARANJA, 12), 4)
@@ -1060,6 +1062,12 @@ class GTHudApp(App):
         if getattr(self, "_teste_umbra", None) is None:
             self._teste_umbra = umbra_teste.TesteUmbra(self)
         Clock.schedule_once(lambda dt: self._teste_umbra.comecar(), 0.8)
+
+    def _aquecer_umbra(self):
+        try:
+            self.sm.get_screen("mapa").rosto_umbra.aquecer()
+        except Exception as e:
+            print("[umbra] aquecer:", e)
 
     def nivel_rosto_umbra(self):
         """0 desenho completo, 1 leve, 2 imagens prontas (o degrau desta versão do app)."""

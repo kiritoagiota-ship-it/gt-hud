@@ -20,6 +20,10 @@ import java.util.ArrayList;
  * volume da voz de quem fala, de 0 a 1, para o rosto reagir).
  *
  * O SpeechRecognizer só funciona na thread principal do Android: tudo passa pelo Handler.
+ *
+ * Um reconhecedor NOVO a cada escuta (o anterior é destruído): reaproveitar o mesmo por muitas
+ * escutas seguidas (a escuta do nome com a moto parada) fazia ele "emperrar" no Galaxy S23 Ultra,
+ * devolvendo erro ou nada, e o Umbra não voltava a ouvir o nome (relato do dono, 14/10/2026).
  */
 public class Escuta {
     public static final int PARADA = 0, OUVINDO = 1, ENTENDEU = 2, NADA = 3, SEM_RECONHECIMENTO = -1;
@@ -42,8 +46,9 @@ public class Escuta {
         }
     }
 
-    /** Começa uma escuta. silencioMs: quanto silêncio depois da fala encerra a escuta. */
-    public static void ouvir(Context c, final int silencioMs) {
+    /** Começa uma escuta. silencioMs: quanto silêncio depois da fala encerra a escuta. offline:
+     * prefere o reconhecimento no próprio celular (mais rápido, sem internet, sem limite de pedidos). */
+    public static void ouvir(Context c, final int silencioMs, final boolean offline) {
         ctx = c.getApplicationContext();
         final int minha = ++sessao;
         estado = OUVINDO;
@@ -58,9 +63,15 @@ public class Escuta {
                     return;
                 }
                 try {
-                    if (rec == null) {
-                        rec = SpeechRecognizer.createSpeechRecognizer(ctx);
+                    if (rec != null) {
+                        try {
+                            rec.destroy();
+                        } catch (Exception e) {
+                            // nada: vem um novo logo abaixo
+                        }
+                        rec = null;
                     }
+                    rec = SpeechRecognizer.createSpeechRecognizer(ctx);
                     rec.setRecognitionListener(new Ouvinte(minha));
                     Intent i = new Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH);
                     i.putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM);
@@ -71,6 +82,9 @@ public class Escuta {
                     i.putExtra(RecognizerIntent.EXTRA_CALLING_PACKAGE, ctx.getPackageName());
                     i.putExtra(RecognizerIntent.EXTRA_SPEECH_INPUT_COMPLETE_SILENCE_LENGTH_MILLIS, (long) silencioMs);
                     i.putExtra(RecognizerIntent.EXTRA_SPEECH_INPUT_POSSIBLY_COMPLETE_SILENCE_LENGTH_MILLIS, (long) silencioMs);
+                    if (offline) {
+                        i.putExtra(RecognizerIntent.EXTRA_PREFER_OFFLINE, true);
+                    }
                     rec.startListening(i);
                 } catch (Exception e) {
                     if (minha == sessao) {

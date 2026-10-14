@@ -13,6 +13,11 @@ import diagnostico
 ETAPA = "umbra_escuta"       # (diagnostico.etapa) o reconhecimento de voz do Android rodando
 OUVINDO, ENTENDEU, NADA, PARADA, SEM = "ouvindo", "entendeu", "nada", "parada", "sem"
 _DO_JAVA = {0: PARADA, 1: OUVINDO, 2: ENTENDEU, 3: NADA, -1: SEM}
+# os erros do SpeechRecognizer do Android (para o diagnóstico)
+ERROS = {1: "rede lenta", 2: "rede", 3: "áudio", 4: "servidor", 5: "cliente", 6: "silêncio", 7: "nada parecido",
+         8: "ocupado", 9: "sem permissão", 10: "pedidos demais", 11: "servidor desconectou", 12: "idioma não suportado",
+         13: "idioma indisponível", -2: "não abriu"}
+ERRO_IDIOMA_NAO_SUPORTADO, ERRO_IDIOMA_INDISPONIVEL = 12, 13
 
 
 class Escuta:
@@ -27,6 +32,9 @@ class Escuta:
         self._avisou_nome = False
         self._disponivel = False
         self._disponivel_ate = 0.0
+        self.offline_ok = True      # o reconhecimento no próprio celular funciona aqui (para o nome)
+        self._offline_agora = False
+        self.erros = 0              # erros do reconhecedor seguidos (vão para o diagnóstico)
         if platform == "android":
             try:
                 from jnius import autoclass
@@ -53,7 +61,12 @@ class Escuta:
         self._disponivel_ate = agora + 30.0
         return self._disponivel
 
-    def ouvir(self, silencio_s=1.2, conversa=True):
+    def ouvir(self, silencio_s=1.2, conversa=True, offline=None):
+        """offline: prefere o reconhecimento no próprio celular (padrão: só para o nome, não para
+        o pedido, que o online entende melhor)."""
+        if offline is None:
+            offline = not conversa and self.offline_ok
+        self._offline_agora = offline
         if self._java is not None:
             # etapa arriscada: se o app cair aqui (reconhecimento de voz), na próxima vez a escuta fica desligada
             diagnostico.etapa(ETAPA)
@@ -64,7 +77,7 @@ class Escuta:
                 self._avisou_nome = True
                 print("[escuta] escutando o nome (moto parada)", flush=True)
             try:
-                self._java.ouvir(self._atividade, int(silencio_s * 1000))
+                self._java.ouvir(self._atividade, int(silencio_s * 1000), bool(offline))
             except Exception as e:
                 print("[escuta]", e)
             return
@@ -105,10 +118,21 @@ class Escuta:
             sit = _DO_JAVA.get(int(self._java.estado), PARADA)
             if sit != OUVINDO and self._em_curso:
                 self._terminou()
-                if sit in (NADA, SEM) and int(self._java.erro) not in (0, 6, 7):
-                    print("[escuta] o reconhecimento de voz devolveu o erro %d" % int(self._java.erro), flush=True)
+                erro = int(self._java.erro)
+                if sit in (NADA, SEM) and erro not in (0, 6, 7):
+                    self.erros += 1
+                    print("[escuta] o reconhecimento de voz devolveu o erro %d (%s)%s" % (
+                        erro, ERROS.get(erro, "?"), " no modo sem internet" if self._offline_agora else ""), flush=True)
+                    if self._offline_agora and erro in (ERRO_IDIOMA_NAO_SUPORTADO, ERRO_IDIOMA_INDISPONIVEL, 5):
+                        self.offline_ok = False      # sem o pacote de português no celular: segue online
+                        print("[escuta] sem reconhecimento offline em português: usando o online", flush=True)
+                else:
+                    self.erros = 0
             return sit
-        if self._pc_estado == OUVINDO and time.monotonic() > self._pc_ate:
+        if self._pc_estado == OUVINDO and self._pc_fila:     # "falou" com a escuta já aberta: ouve na hora
+            self._pc_texto = [self._pc_fila.pop(0)]
+            self._pc_estado = ENTENDEU if self._pc_texto[0] else NADA
+        elif self._pc_estado == OUVINDO and time.monotonic() > self._pc_ate:
             self._pc_estado = NADA
         return self._pc_estado
 
