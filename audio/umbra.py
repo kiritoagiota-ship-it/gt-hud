@@ -208,6 +208,19 @@ PARADO_KMH = 3.0            # abaixo disso (por PARADO_S) a moto está parada: e
 PARADO_S = 3.0
 ANDANDO_KMH = 8.0           # já escutando, só para acima disso (o GPS parado oscila uns km/h à toa)
 OUVIR_MAX_S = 12.0          # uma escuta que não termina sozinha
+# paciência (pedido do dono, 15/10/2026: "não passa nem 2 segundos e ele acha que eu tô inativo"): o
+# reconhecedor do celular devolve "nada" logo depois de pouco silêncio; enquanto não passar isso desde
+# que ele começou a ouvir o pedido, ele volta a ouvir calado, sem contar como silêncio
+PACIENCIA_S = 8.0
+RECOMECO_S = 0.25           # entre uma escuta que voltou vazia e a próxima
+ERROS_DE_SILENCIO = (0, 6, 7)   # (escuta.ERROS) sem fala / nada parecido com fala: vale esperar mais
+# agir antes do fim da frase: o que o reconhecedor já entendeu no meio da fala (o "parcial") e
+# ficou parado esse tempo vale como o pedido, sem esperar o silêncio e o resultado final (~1 s)
+PARCIAL_ESTAVEL_S = 0.5
+PARCIAL_CURTO_S = 0.8       # palavra solta ("sim", "valeu", "não"): espera um pouco mais (pode vir mais)
+DECIDE_NO_PARCIAL = ("casa", "trabalho", "cancelar", "rotas", "bateria", "perto", "valeu", "tchau", "negou",
+                     "iniciar")
+CURTAS = ("iniciar", "valeu", "tchau", "negou")
 ESPERA_ROTA_MAX_S = 30.0
 INICIAR_DEPOIS_S = 1.2      # a rota apareceu: um instante para ver antes de começar
 ESPERA_TRANQUILA_MAX_S = 20.0   # preferida "Tranquila": espera ela chegar (uns 7 s) antes de sair navegando
@@ -244,6 +257,10 @@ class Umbra:
         self._voltar_a_avisar = False       # anota no diagnóstico quando volta a escutar o nome
         self._conversa = 0                  # muda a cada conversa: resposta de busca de uma conversa velha é ignorada
         self._avisou_tranquila = False
+        self._ouvindo_desde = 0.0           # quando começou a ouvir o pedido (a paciência conta daqui)
+        self._recomeco = None               # hora de voltar a ouvir (a escuta voltou vazia cedo demais)
+        self._parcial_txt = ""              # o que ele já ouviu no meio da fala, e desde quando está igual
+        self._parcial_t = 0.0
         self.ultimo_pedido = None           # (para os testes e o diagnóstico) a última intenção
 
     # --- o rosto -----------------------------------------------------------------
@@ -309,6 +326,7 @@ class Umbra:
         self._rosto_faz("olhar_para", 0)
         # andando, ele vem médio no canto e sem escurecer o mapa (pedido do dono, 14/10/2026)
         self._rosto_faz("mostrar", "medio" if self._andando() else "grande")
+        self._rosto_faz("acordar")              # ouviu o nome: os olhos acendem num lampejo, a cabeça levanta
         self._rosto_faz("legenda", "", "")
         if resto:
             self._rosto_faz("legenda", resto, "")
@@ -421,13 +439,14 @@ class Umbra:
         if depois == "esperar" and self._buscando:      # ainda procurando o lugar mais perto
             self._depois = "esperar"
             self._desde = agora
+            self._rosto_faz("definir_estado", "pensando")   # já farejou: agora pensa até a resposta chegar
             return
         if depois == "ouvir":
             self._ouvir(agora)
         elif depois == "rota":
             self.estado = ESPERANDO_ROTA
             self._desde = agora
-            self._rosto_faz("definir_estado", "ouvindo")
+            self._rosto_faz("definir_estado", "pensando")   # calculando a rota
         else:
             self.fechar(agora)
 
@@ -444,27 +463,66 @@ class Umbra:
                                  "desligada até a próxima versão.", agora, 5.0)
             return
         self.estado = OUVINDO
-        self._desde = agora
+        self._desde = self._ouvindo_desde = agora
+        self._recomeco = None
+        self._parcial_txt = ""
         self._rosto_faz("definir_estado", "ouvindo")
         self.escuta.ouvir(1.2)
 
     def _ouvindo(self, agora):
+        if self._recomeco is not None:               # a escuta voltou vazia cedo: daqui a pouco ouve de novo
+            if agora >= self._recomeco:
+                self._recomeco = None
+                self._desde = agora
+                self._parcial_txt = ""
+                self.escuta.ouvir(1.2)
+            return
         sit = self.escuta.situacao()
         if sit == "entendeu":
             alternativas = self.escuta.alternativas()
             self._rosto_faz("legenda", alternativas[0] if alternativas else "", "")
             self._processar(alternativas, agora)
+        elif sit == "sem":
+            self._falar("umbra_tchau", "sair", agora)
+            # (depois da fala: _falar põe a frase dita na legenda e apagava o motivo)
+            self._rosto_faz("legenda", None, "O celular não tem reconhecimento de voz.")
         elif sit in ("nada", "parada") and agora - self._desde > 0.3 or agora - self._desde > OUVIR_MAX_S:
             self.escuta.parar()
+            vazia = sit in ("nada", "parada") and self.escuta.erro() in ERROS_DE_SILENCIO
+            if vazia and agora - self._ouvindo_desde < PACIENCIA_S:
+                # ainda dentro da paciência: a pessoa pode estar pensando no que pedir; ele segue
+                # ouvindo, calado (até a 1.0.95 já perguntava "tá aí?" em menos de 2 s)
+                self._recomeco = agora + RECOMECO_S
+                return
             self._silencios += 1
             if self._silencios == 1:
                 self._falar(self._uma("umbra_silencio"), "ouvir", agora, "confuso")
             else:
                 self._falar(self._uma("umbra_tchau"), "sair", agora)
-        elif sit == "sem":
-            self._falar("umbra_tchau", "sair", agora)
-            # (depois da fala: _falar põe a frase dita na legenda e apagava o motivo)
-            self._rosto_faz("legenda", None, "O celular não tem reconhecimento de voz.")
+        else:
+            self._parcial_conversa(agora)
+
+    def _parcial_conversa(self, agora):
+        """Ele age antes do fim da frase: o que o reconhecedor já entendeu no meio da fala, parado há
+        PARCIAL_ESTAVEL_S e com um pedido claro ("me leva pra casa"), vale sem esperar o silêncio e o
+        resultado final (~1 s a menos em cada resposta). Enquanto a pessoa fala, o que ele já ouviu
+        aparece na legenda."""
+        texto = (self.escuta.parcial() or "").strip()
+        if not texto:
+            return
+        if texto != self._parcial_txt:
+            self._parcial_txt, self._parcial_t = texto, agora
+            self._rosto_faz("legenda", texto, None)
+            return
+        intencao = entender(texto)[0]
+        if intencao not in DECIDE_NO_PARCIAL:
+            return                                   # um lugar pelo nome pode ainda estar crescendo: espera o fim
+        if agora - self._parcial_t < (PARCIAL_CURTO_S if intencao in CURTAS else PARCIAL_ESTAVEL_S):
+            return
+        self.escuta.parar()
+        self._parcial_txt = ""
+        print("[umbra] entendeu no meio da fala: %s" % intencao, flush=True)
+        self._processar([texto], agora)
 
     # --- o que fazer com o pedido ------------------------------------------------------
     def _processar(self, alternativas, agora):
@@ -532,10 +590,11 @@ class Umbra:
 
     def _nao_entendeu(self, agora):
         self._sem_entender += 1
+        # cara fechada no "não entendi" (pedido do dono, 15/10/2026): sobrancelha baixa, rosnado leve
         if self._sem_entender <= 2:
-            self._falar(self._uma("umbra_nao_entendi"), "ouvir", agora, "confuso")
+            self._falar(self._uma("umbra_nao_entendi"), "ouvir", agora, "irritado")
         else:
-            self._falar(self._uma("umbra_tchau"), "sair", agora, "confuso")
+            self._falar(self._uma("umbra_tchau"), "sair", agora, "irritado")
 
     def _ir_para(self, lugar):
         app = self.app

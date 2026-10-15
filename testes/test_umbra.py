@@ -93,9 +93,13 @@ class RostoFalso:
         self.modo = None
         self.estados = []
         self.legendas = []
+        self.acordou = 0
 
     def mostrar(self, modo):
         self.modo = modo
+
+    def acordar(self):
+        self.acordou += 1
 
     def esconder(self):
         self.modo = None
@@ -204,10 +208,58 @@ class TesteConversa(unittest.TestCase):
         self.escuta.dizer("")
         self.escuta.dizer("")
         self.u.chamar(agora=self.t)
-        self.andar(8)
+        self.andar(32)                                        # (com a paciência: dois silêncios LONGOS)
         self.assertTrue(any(d.startswith("umbra_silencio") for d in self.voz.ditas))
         self.assertTrue(self.voz.ditas[-1].startswith("umbra_tchau"))
         self.assertIsNone(self.rosto.modo)
+
+    def test_paciencia_nao_acha_que_voce_sumiu_em_2_segundos(self):
+        # relato do dono (15/10/2026): "não passa nem 2 segundos e ele acha que eu tô inativo"
+        for _ in range(6):
+            self.escuta.dizer("")                             # o reconhecedor volta vazio, rápido, várias vezes
+        self.u.chamar(agora=self.t)
+        self.andar(1.5 + umbra.PACIENCIA_S - 1.0)             # cumprimento + quase toda a paciência
+        self.assertFalse(any(d.startswith(("umbra_silencio", "umbra_tchau")) for d in self.voz.ditas),
+                         self.voz.ditas)
+        self.assertEqual(self.u.estado, umbra.OUVINDO)        # segue ouvindo, calado
+        self.escuta.dizer("me leva pra casa")                 # e ainda entende quando você fala
+        self.andar(1)
+        self.assertIn("umbra_casa", self.voz.ditas)
+
+    def test_age_antes_do_fim_da_frase(self):
+        self.u.chamar(agora=self.t)
+        self.andar(1.6)                                       # cumprimentou: ouvindo
+        self.assertEqual(self.u.estado, umbra.OUVINDO)
+        self.escuta.parcial = lambda: "me leva pra casa"      # o reconhecedor ainda não terminou
+        self.andar(0.3)
+        self.assertNotIn("umbra_casa", self.voz.ditas)        # (parado há pouco: pode vir mais)
+        self.assertTrue(any(o == "me leva pra casa" for o, _ in self.rosto.legendas))   # já aparece na tela
+        self.andar(0.5)
+        self.assertIn("umbra_casa", self.voz.ditas)           # parado 0,5 s: já age, sem o resultado final
+
+    def test_lugar_pelo_nome_espera_a_frase_inteira(self):
+        self.u.chamar(agora=self.t)
+        self.andar(1.6)
+        self.escuta.parcial = lambda: "me leva pro shopping"  # um lugar pelo nome: pode estar crescendo
+        self.andar(2)
+        self.assertNotIn(("procurar",), self.app.feito)
+
+    def test_acorda_ao_ser_chamado(self):
+        self.u.chamar(agora=self.t)
+        self.assertEqual(self.rosto.acordou, 1)
+
+    def test_irritado_quando_nao_entende(self):
+        self.escuta.dizer("qual é a capital da frança")
+        self.u.chamar(agora=self.t)
+        self.andar(3)
+        self.assertIn("irritado", self.rosto.estados)
+
+    def test_pensando_enquanto_a_rota_vem(self):
+        self.escuta.dizer("me leva pra casa")
+        self.u.chamar(agora=self.t)
+        self.andar(3)
+        self.assertEqual(self.u.estado, umbra.ESPERANDO_ROTA)
+        self.assertEqual(self.rosto.estados[-1], "pensando")
 
     def test_nao_entendeu_pede_de_novo(self):
         self.escuta.dizer("qual é a capital da frança")
@@ -311,7 +363,7 @@ class TesteConversa(unittest.TestCase):
             self.escuta.dizer("")
             self.andar(4)
             self.assertIn(self.rosto.modo, ("grande",))
-            self.andar(10)                                     # silêncio duas vezes: ele vai embora
+            self.andar(32)                                     # silêncio duas vezes (longos): ele vai embora
             self.assertIsNone(self.rosto.modo)
 
     def test_nome_no_meio_da_fala(self):
@@ -358,7 +410,8 @@ class TesteConversa(unittest.TestCase):
         self.andar(2.5)
         self.assertIn(("procurar",), self.app.feito)
         self.assertIn("umbra_procurando", self.voz.ditas)
-        self.assertEqual(self.rosto.estados[-1], "farejando")
+        self.assertIn("farejando", self.rosto.estados)         # fareja falando...
+        self.assertEqual(self.rosto.estados[-1], "pensando")   # ...e pensa até a resposta chegar
         self.app._resposta([{"nome": "Shopping Flamboyant", "endereco": "Av. Jamel Cecílio", "lat": -16.71,
                              "lon": -49.24}])
         self.assertIn(("destino", "Shopping Flamboyant"), self.app.feito)

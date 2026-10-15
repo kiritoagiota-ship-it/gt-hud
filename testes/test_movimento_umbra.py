@@ -77,5 +77,81 @@ class TesteMovimento(unittest.TestCase):
         self.assertAlmostEqual(bocas[-1], 0.0, delta=0.02)          # e assentou
 
 
+class TesteExpressoes(unittest.TestCase):
+    """Expressões novas (pedido do dono, 15/10/2026)."""
+
+    def _depois(self, estado, segundos=1.5, nivel=0.0, mov=None):
+        mov = mov or Movimento(sorteio=random.Random(2))
+        t, dt = 0.0, 1.0 / 60
+        mov.quadro(t, dt, 0.0)
+        mov.mudar(estado, t)
+        u = None
+        for _ in range(int(segundos / dt)):
+            u = mov.quadro(t, dt, 0.0, nivel)
+            t += dt
+        return u
+
+    def test_estados_novos_existem(self):
+        for estado in ("irritado", "pensando"):
+            self.assertIn(estado, ALVOS)
+
+    def test_irritado_fecha_a_cara(self):
+        parado, irritado = self._depois("parado"), self._depois("irritado")
+        self.assertGreater(irritado["inclina"], parado["inclina"] + 0.4)   # sobrancelha baixa
+        self.assertLess(irritado["olho"], parado["olho"] - 0.15)          # olhos estreitos
+        self.assertGreater(irritado["dentes"], 0.4)                        # rosnado leve
+
+    def test_contente_semicerra_os_olhos(self):
+        self.assertGreaterEqual(self._depois("confirmou")["palpebra"], 0.25)
+
+    def test_ouvindo_reage_a_voz(self):
+        quieto = self._depois("ouvindo", nivel=0.0)
+        falando = self._depois("ouvindo", nivel=1.0)
+        self.assertGreater(falando["olho"], quieto["olho"] + 0.1)        # os olhos abrem com a sua voz
+        self.assertGreater(falando["boca"], quieto["boca"] + 0.05)       # a boca entreabre
+
+    def test_pensando_olha_para_cima(self):
+        self.assertLess(self._depois("pensando")["olhar"][1], -0.3)
+
+    def test_acordar_abre_os_olhos_de_uma_vez(self):
+        mov = Movimento(sorteio=random.Random(2))
+        t, dt = 1.0, 1.0 / 60
+        mov.quadro(t, dt, 0.0)
+        mov.acordar(t)
+        fechado = mov.quadro(t + dt, dt, 0.0)["palpebra"]
+        aberto = mov.quadro(t + 0.3, dt, 0.0)["palpebra"]
+        self.assertGreater(fechado, 0.9)
+        self.assertLess(aberto, 0.2)
+
+    def test_rosto_acompanha_a_fala(self):
+        # nas palavras fortes a sobrancelha desce, os olhos se estreitam e brilham (dono, 15/10/2026)
+        def falando(voz):
+            mov = Movimento(sorteio=random.Random(2))
+            t, dt = 0.0, 1.0 / 60
+            mov.quadro(t, dt, 0.0)
+            mov.mudar("falando", t)
+            u = None
+            for _ in range(int(1.0 / dt)):
+                u = mov.quadro(t, dt, voz)
+                t += dt
+            return u
+        fraca, forte = falando(0.40), falando(0.95)
+        self.assertGreater(forte["inclina"], fraca["inclina"] + 0.2)
+        self.assertLess(forte["olho"], fraca["olho"] - 0.05)
+        self.assertGreater(forte["brilho"], fraca["brilho"] + 0.1)
+
+    def test_alerta_treme_a_cabeca_no_susto(self):
+        mov = Movimento(sorteio=random.Random(2))
+        t, dt = 0.0, 1.0 / 60
+        mov.quadro(t, dt, 0.0)
+        mov.mudar("alerta", t)
+        giros = []
+        for _ in range(int(0.5 / dt)):
+            giros.append(mov.quadro(t, dt, 0.0)["giro"][0])
+            t += dt
+        trocas = sum(1 for a, b, c in zip(giros, giros[1:], giros[2:]) if (b - a) * (c - b) < 0)
+        self.assertGreater(trocas, 6)                                     # tremeu (vai e volta várias vezes)
+
+
 if __name__ == "__main__":
     unittest.main()

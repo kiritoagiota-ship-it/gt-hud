@@ -61,19 +61,40 @@ ALVOS = {
     "parado":    dict(olho=1.0, inclina=0.0, feliz=0.0, torto=0.0, alerta=0.0, escuta=0.0, boca=0.0,
                       giroX=0.0, giroY=0.0, rolar=0.0, palpebra=0.08, dentes=0.0),
     "ouvindo":   dict(olho=1.32, inclina=-0.15, feliz=0.0, torto=0.0, alerta=0.0, escuta=1.0, boca=0.14,
-                      giroX=0.0, giroY=0.18, rolar=0.0, palpebra=0.0, dentes=0.0),
+                      giroX=0.0, giroY=0.18, rolar=0.10, palpebra=0.0, dentes=0.0),
     "falando":   dict(olho=1.0, inclina=0.0, feliz=0.0, torto=0.0, alerta=0.0, escuta=0.0, boca=0.0,
                       giroX=0.0, giroY=0.0, rolar=0.0, palpebra=0.05, dentes=0.0),
+    # contente: sorriso largo e olhos semicerrados, de quem está satisfeito (dono, 15/10/2026)
     "confirmou": dict(olho=1.0, inclina=-0.35, feliz=1.0, torto=0.0, alerta=0.0, escuta=0.0, boca=0.08,
-                      giroX=0.0, giroY=0.05, rolar=0.0, palpebra=0.0, dentes=0.6),
+                      giroX=0.0, giroY=0.05, rolar=0.05, palpebra=0.30, dentes=0.6),
     "confuso":   dict(olho=1.0, inclina=-0.2, feliz=0.0, torto=1.0, alerta=0.0, escuta=0.0, boca=0.16,
                       giroX=0.25, giroY=-0.05, rolar=0.12, palpebra=0.05, dentes=0.0),
-    "alerta":    dict(olho=0.8, inclina=0.9, feliz=0.0, torto=0.0, alerta=1.0, escuta=0.0, boca=0.05,
+    "alerta":    dict(olho=0.8, inclina=0.9, feliz=0.0, torto=0.0, alerta=1.0, escuta=0.0, boca=0.10,
                       giroX=0.0, giroY=-0.10, rolar=0.0, palpebra=0.0, dentes=1.0),
+    # não entendeu: cara fechada, sobrancelha baixa, olhos estreitos e os dentes à mostra (rosnado leve)
+    "irritado":  dict(olho=0.72, inclina=0.75, feliz=0.0, torto=0.0, alerta=0.0, escuta=0.0, boca=0.04,
+                      giroX=0.0, giroY=-0.06, rolar=0.0, palpebra=0.22, dentes=0.55),
+    # procurando o lugar / calculando a rota: olhos para cima varrendo, brilho pulsando, boca de lado
+    "pensando":  dict(olho=0.85, inclina=0.15, feliz=0.0, torto=0.25, alerta=0.0, escuta=0.0, boca=0.03,
+                      giroX=0.0, giroY=-0.15, rolar=0.08, palpebra=0.22, dentes=0.0),
     # procurando o lugar: olhos estreitos, cabeça baixa varrendo de um lado a outro, fungadas
     "farejando": dict(olho=0.62, inclina=0.35, feliz=0.0, torto=0.0, alerta=0.0, escuta=0.0, boca=0.06,
                       giroX=0.0, giroY=-0.12, rolar=0.0, palpebra=0.30, dentes=0.15),
 }
+
+
+# o lampejo na troca de humor (pedido do dono, 15/10/2026): a cor e a força do pulso de luz de cada estado
+LAMPEJOS = {
+    "confirmou": ((0.35, 0.72, 1.0), 0.85),     # contente: azul
+    "irritado":  ((0.42, 0.06, 0.80), 0.90),    # cara fechada: violeta escuro
+    "alerta":    ((1.0, 0.10, 0.08), 1.00),     # vermelho
+    "pensando":  ((0.55, 0.40, 1.0), 0.45),
+    "confuso":   ((0.62, 0.52, 1.0), 0.45),
+    "farejando": ((0.55, 0.35, 1.0), 0.35),
+    "ouvindo":   ((0.40, 0.58, 1.0), 0.35),
+}
+LAMPEJO_SOME = 6.0          # quão rápido o pulso apaga (por segundo)
+RASTRO_S = 0.12             # o rastro dos olhos: onde eles estavam esse tempo atrás
 
 
 def _lim(v, a, b):
@@ -95,6 +116,9 @@ class Movimento:
         self.prox_piscada, self.piscada_ini, self.dupla = 1.6, -10.0, False
         self.olhar_alvo, self.prox_olhar = [0.0, 0.0], 1.2
         self.direcao = 0.0              # -1 esquerda, 1 direita: olha para o lado da próxima curva
+        self.acordou = -10.0            # quando ele "acordou" (chamado): os olhos se abrem de uma vez
+        self.susto = -10.0              # quando entrou em alerta: a cabeça treme um instante
+        self.lampejo = ((0.0, 0.0, 0.0), -10.0, 0.0)   # troca de humor: (cor, quando, força) do pulso de luz
 
     def mola(self, nome, alvo, dt, freq, amort):
         # conta "implícita": estável a qualquer velocidade de tela. A conta direta de antes divergia
@@ -113,18 +137,33 @@ class Movimento:
         if nome not in ALVOS or nome == self.estado:
             return
         self.estado = nome
-        if nome == "alerta":                       # susto
-            self.empurrar("olho", 9); self.empurrar("brilho", 16); self.empurrar("giroY", -5); self.empurrar("giroX", 1.5)
-            self.empurrar("dentes", 5)              # e mostra os dentes
-        elif nome == "confirmou":                  # aceno
+        if nome in LAMPEJOS:                        # um pulso de luz na cor do humor novo
+            cor, forca = LAMPEJOS[nome]
+            self.lampejo = (cor, agora, forca)
+        if nome == "alerta":                       # susto: tranco forte, a cabeça treme, rosna
+            self.empurrar("olho", 11); self.empurrar("brilho", 20); self.empurrar("giroY", -8); self.empurrar("giroX", 2.5)
+            self.empurrar("dentes", 7); self.empurrar("inclina", 4)
+            self.susto = agora
+        elif nome == "confirmou":                  # aceno contente, a cabeça pende de satisfeito
             self.empurrar("giroY", 7); self.empurrar("brilho", 4); self.empurrar("dentes", 3)
+            self.empurrar("rolar", 0.9)
         elif nome == "confuso":                    # cabeça de lado
             self.empurrar("rolar", 1.4); self.empurrar("giroX", 2.5)
+        elif nome == "irritado":                   # balança a cabeça, fecha a cara
+            self.empurrar("giroX", -3.5); self.empurrar("inclina", 3); self.empurrar("dentes", 3)
+        elif nome == "pensando":                   # levanta os olhos, como quem procura a resposta
+            self.empurrar("giroY", -2); self.empurrar("olho", -2)
+            self.prox_olhar = agora
         elif nome == "farejando":                  # baixa a cabeça para farejar
             self.empurrar("giroY", -3); self.empurrar("olho", -3)
         elif nome == "ouvindo":                    # se inclina para ouvir, olha para você
-            self.empurrar("giroY", 2.5); self.empurrar("olho", 4)
+            self.empurrar("giroY", 2.5); self.empurrar("olho", 4); self.empurrar("rolar", 0.8)
             self.prox_olhar = agora
+
+    def acordar(self, agora):
+        """Chamado (botão ou nome): os olhos se abrem de uma vez com um lampejo e a cabeça levanta."""
+        self.acordou = agora
+        self.empurrar("olho", 10); self.empurrar("brilho", 22); self.empurrar("giroY", -4); self.empurrar("dentes", 2)
 
     @staticmethod
     def _curva(f):
@@ -147,6 +186,8 @@ class Movimento:
     def _olhar(self, t):
         if self.estado == "farejando":           # varre de um lado a outro, junto com a cabeça
             return [0.75 * math.sin(t * 1.9), 0.12]
+        if self.estado == "pensando":            # olhos para cima, indo devagar de um lado ao outro
+            return [0.6 * math.sin(t * 0.9), -0.55]
         if self.direcao:                          # aviso de rota: olha para o lado da curva
             return [0.8 * self.direcao, 0.05 + 0.08 * math.sin(t * 0.9)]
         if t > self.prox_olhar:
@@ -166,26 +207,38 @@ class Movimento:
         oy = self.mola("olharY", oa[1], dt, 5.5, 1.0)
         falando = voz_v > 0.02
         farejando = self.estado == "farejando"
+        pensando = self.estado == "pensando"
         fungada = max(0.0, math.sin(t * 9.0)) ** 6 * (1.0 if math.sin(t * 1.3) > 0.2 else 0.0) if farejando else 0.0
+        # ouvindo vivo: os olhos abrem, a boca entreabre e a cabeça acompanha o volume da sua voz
+        voce = nivel_ouvindo if self.estado == "ouvindo" else 0.0
+        # alerta: no susto a cabeça treme um instante (some em ~1 s)
+        tremor = 0.07 * math.sin(t * 41.0) * math.exp(-(t - self.susto) * 5.0) if 0.0 <= t - self.susto < 1.5 else 0.0
         u = {}
         # (14/10/2026: a cabeça agora vira com profundidade, então vira mais: o olhar puxa a cabeça junto)
         u["giro"] = (self.mola("giroX", al["giroX"] + 0.32 * _deriva(t, 0) + 0.42 * ox
-                               + (0.40 * math.sin(t * 1.9) if farejando else 0.0) + 0.50 * self.direcao
-                               + (0.06 * math.sin(t * 2.7) if falando else 0.0), dt, 1.1, 0.55),
-                     self.mola("giroY", al["giroY"] + 0.12 * _deriva(t, 4) + 0.30 * e, dt, 1.6, 0.45))
+                               + (0.40 * math.sin(t * 1.9) if farejando else 0.0)
+                               + (0.25 * math.sin(t * 0.9) if pensando else 0.0) + 0.50 * self.direcao
+                               + (0.06 * math.sin(t * 2.7) if falando else 0.0), dt, 1.1, 0.55) + tremor,
+                     # falando, a cabeça marca as sílabas (desce um tiquinho a cada abertura)
+                     self.mola("giroY", al["giroY"] + 0.12 * _deriva(t, 4) + 0.30 * e + 0.10 * voce + 0.08 * voz_v,
+                               dt, 1.6, 0.45))
         u["olhar"] = (ox, oy)
-        u["rolar"] = self.mola("rolar", al["rolar"] + 0.025 * _deriva(t, 8), dt, 1.2, 0.5)
-        u["olho"] = _lim(self.mola("olho", al["olho"], dt, 3.0, 0.55), 0.05, 1.6)
-        u["inclina"] = self.mola("inclina", al["inclina"] + 0.25 * e + 0.25 * fungada, dt, 2.2, 0.8)
+        u["rolar"] = self.mola("rolar", al["rolar"] + 0.025 * _deriva(t, 8) + (0.03 * math.sin(t * 1.7) if falando else 0.0),
+                               dt, 1.2, 0.5)
+        # nas palavras fortes a sobrancelha desce e os olhos se estreitam (e brilham mais, logo abaixo)
+        u["olho"] = _lim(self.mola("olho", al["olho"] + 0.18 * voce - 0.15 * e, dt, 3.0, 0.55), 0.05, 1.6)
+        u["inclina"] = self.mola("inclina", al["inclina"] + 0.40 * e + 0.25 * fungada, dt, 2.2, 0.8)
         for k in ("feliz", "torto"):
             u[k] = _lim(self.mola(k, al[k], dt, 2.2, 0.9), 0.0, 1.0)
         u["alerta"] = _lim(self.mola("alerta", al["alerta"], dt, 2.5, 1.0), 0.0, 1.0)
-        u["escuta"] = _lim(self.mola("escuta", al["escuta"], dt, 2.0, 1.0), 0.0, 1.0)
-        u["brilho"] = _lim(self.mola("brilho", 1 + 0.05 * math.sin(t * 1.1) + 0.35 * nivel_ouvindo, dt, 2.0, 0.5),
-                           0.5, 2.2)
+        # as ondas de quem ouve pulsam com a sua voz
+        u["escuta"] = _lim(self.mola("escuta", al["escuta"], dt, 2.0, 1.0) * (0.55 + 0.60 * voce), 0.0, 1.2)
+        # o brilho: respira devagar; ouvindo, sobe com a sua voz; pensando, pulsa
+        u["brilho"] = _lim(self.mola("brilho", 1 + 0.05 * math.sin(t * 1.1) + 0.35 * nivel_ouvindo + 0.25 * e
+                                     + (0.22 * math.sin(t * 3.2) if pensando else 0.0), dt, 2.0, 0.5), 0.5, 2.2)
         # a mordida: fechando, a mandíbula volta rápido e passa um tiquinho do ponto (os dentes batem, com
         # um tranco leve na cabeça) e assenta; abrindo, segue a voz
-        alvo_boca = 0.10 + voz_v * 0.75 if falando else al["boca"]
+        alvo_boca = 0.10 + voz_v * 0.75 if falando else al["boca"] + 0.10 * voce
         m = self.molas.get("boca")
         antes = m[0] if m is not None else alvo_boca
         fechando = alvo_boca < antes - 0.03
@@ -196,7 +249,16 @@ class Movimento:
         u["enfase"] = _lim(self.mola("enfase", e, dt, 6.0, 0.9), 0.0, 1.0)
         # dentes ainda maiores quando ele se anima: contente, ameaçando e nas sílabas fortes da fala
         u["dentes"] = _lim(self.mola("dentes", al["dentes"] + 0.55 * e, dt, 4.0, 0.7), 0.0, 1.2)
-        u["palpebra"] = _lim(max(self._piscada(t), al["palpebra"]), 0.0, 1.0)
+        palpebra = max(self._piscada(t), al["palpebra"])
+        if 0.0 <= t - self.acordou < 0.22:      # acordando: os olhos se abrem de uma vez
+            palpebra = max(palpebra, 1.0 - (t - self.acordou) / 0.22)
+        u["palpebra"] = _lim(palpebra, 0.0, 1.0)
+        # o lampejo da troca de humor apagando; e o rastro dos olhos: a velocidade da cabeça virando (a mola
+        # do giro) vira o deslocamento de onde os olhos estavam um instante atrás (no desenho do rosto)
+        cor, t0, forca = self.lampejo
+        u["lampejo"] = (cor[0], cor[1], cor[2], forca * math.exp(-max(0.0, t - t0) * LAMPEJO_SOME))
+        vx, vy = self.molas["giroX"][1], self.molas["giroY"][1]
+        u["rastro"] = (_lim(0.40 * vx * RASTRO_S, -0.12, 0.12), _lim(-0.22 * vy * RASTRO_S, -0.08, 0.08))
         return u
 
 
@@ -296,6 +358,7 @@ class RostoUmbra(Widget):
             self._cor_placa = Color(0.016, 0.012, 0.05, 0.0)
             self._placa = RoundedRectangle(size=(0, 0), radius=[dp(10)])
         self._placa_medio = False
+        self._acordar_depois = False
         self._rc = None
         self._ret_vivo = None
         self.lbl_ouvido = Texto(text="", font_size=sp(15), color=tema.CIANO_FRACO,
@@ -352,6 +415,14 @@ class RostoUmbra(Widget):
     def olhar_para(self, lado):
         """-1 esquerda, 1 direita, 0 livre (nos avisos de rota: o lado da próxima curva)."""
         self.mov.direcao = float(lado)
+
+    def acordar(self):
+        """Ouviu o nome: os olhos se abrem de uma vez com um lampejo e a cabeça levanta. Se ele ainda
+        está subindo das sombras, acontece quando chegar lá em cima (senão ninguém veria)."""
+        if self.presenca < 0.95 and self._entrando:
+            self._acordar_depois = True
+        else:
+            self.mov.acordar(time.monotonic() - self._t0)
 
     def legenda(self, ouvido=None, fala=None):
         """O que a pessoa disse (entre aspas) e o que ele diz. None = deixa como está."""
@@ -564,9 +635,12 @@ class RostoUmbra(Widget):
         nivel = self.escuta.nivel() if (self.escuta is not None and self.mov.estado == "ouvindo") else 0.0
         if v > 0.02 and self.mov.estado in ("parado", "ouvindo"):
             self.mov.mudar("falando", t)
+        if self._acordar_depois and self.presenca >= 0.95:
+            self._acordar_depois = False
+            self.mov.acordar(t)
         u = self.mov.quadro(t, dt, v, nivel)
         if self.simples:
-            estado = self.mov.estado
+            estado = {"irritado": "confuso", "pensando": "ouvindo"}.get(self.mov.estado, self.mov.estado)
             nome = estado if estado in ("alerta", "confirmou", "confuso", "ouvindo") else (
                 "falando" if v > 0.30 else "parado")
             if estado == "ouvindo" and v > 0.30:
@@ -600,4 +674,7 @@ class RostoUmbra(Widget):
         rc["u_palpebra"] = float(max(u["palpebra"], 1.0 - f))   # sobe de olhos fechados; abrem no alto
         rc["u_giro"] = [float(u["giro"][0]), float(u["giro"][1])]
         rc["u_olhar"] = [float(u["olhar"][0]), float(u["olhar"][1])]
+        rc["u_lampejo"] = [float(x) for x in u["lampejo"]]
+        rc["u_rastro"] = [float(u["rastro"][0]), float(u["rastro"][1])]
+        rc["u_saindo"] = 0.0 if self._entrando else 1.0     # sumindo: ele se desfaz (aparecendo: se forma)
         rc.ask_update()
