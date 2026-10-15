@@ -40,6 +40,7 @@ RAIZ = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, RAIZ)
 import caminhos  # noqa: E402,F401  (as pastas do código no caminho de busca)
 
+import falas  # noqa: E402
 from falas import GRAVADAS as FALAS  # noqa: E402  (o texto da voz gravada: fala como "nós")
 
 URL = "https://api.elevenlabs.io/v1/text-to-speech/%s?output_format=mp3_44100_128"
@@ -49,6 +50,8 @@ TAXA = 24000
 MODELO = "eleven_multilingual_v2"
 LIMITE_CARACTERES = 6000                     # trava: nunca gasta mais que isso dos créditos numa gravação
 RMS_ALVO, PICO_MAX = 0.16, 0.97
+# a bronca do Umbra: a mesma voz, com emoção (desesperado). Estabilidade baixa demais muda o timbre
+ESTABILIDADE_NERVOSA, ESTILO_NERVOSO = 0.4, 0.6
 
 
 def vizinhos(chave):
@@ -68,10 +71,14 @@ def vizinhos(chave):
     return "", ""
 
 
-def pedir(chave_api, voz, texto, antes="", depois="", modelo=MODELO, estabilidade=0.7, abrir=None):
-    """Os bytes do MP3 da fala. Levanta RuntimeError com um texto claro se a ElevenLabs recusar."""
+def pedir(chave_api, voz, texto, antes="", depois="", modelo=MODELO, estabilidade=0.7, abrir=None, emocao=False):
+    """Os bytes do MP3 da fala. Levanta RuntimeError com um texto claro se a ElevenLabs recusar.
+    emocao: a bronca (falas.nervosa): a mesma voz, menos estável e com estilo (sai desesperada)."""
+    if emocao:
+        estabilidade = min(estabilidade, ESTABILIDADE_NERVOSA)
     corpo = {"text": texto, "model_id": modelo,
-             "voice_settings": {"stability": estabilidade, "similarity_boost": 0.8, "style": 0.0,
+             "voice_settings": {"stability": estabilidade, "similarity_boost": 0.8,
+                                "style": ESTILO_NERVOSO if emocao else 0.0,
                                 "use_speaker_boost": True, "speed": 1.0}}   # (a velocidade é do efeito_voz.py)
     if antes:
         corpo["previous_text"] = antes
@@ -200,7 +207,8 @@ def main():
             antes, depois = vizinhos(chave)
             for tentativa in range(3):
                 try:
-                    mp3 = pedir(chave_api, voz, texto, antes, depois, modelo, estabilidade)
+                    mp3 = pedir(chave_api, voz, texto, antes, depois, modelo, estabilidade,
+                                emocao=falas.nervosa(chave))
                     break
                 except RuntimeError as e:
                     if "[erro 429]" in str(e) and tentativa < 2:

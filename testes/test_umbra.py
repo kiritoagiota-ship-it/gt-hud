@@ -55,6 +55,14 @@ class TesteEntender(unittest.TestCase):
         self.assertEqual(umbra.chamado(["que horas são"]), (False, ""))
         self.assertFalse(umbra.chamado(["penumbra"])[0])
 
+    def test_chamado_escrito_errado(self):
+        # o reconhecedor escreve o nome de jeitos que ninguém lista (dono, 15/10/2026: "não entende o chamado")
+        for dito in ("unbra", "umbre", "lumbra", "humbra", "umbrá", "umbro"):
+            self.assertTrue(umbra.chamado([dito])[0], dito)
+        self.assertEqual(umbra.chamado(["umbre me leva pra casa"]), (True, "me leva pra casa"))
+        for dito in ("sombra", "uma coisa", "obra", "ombro", "penumbra"):
+            self.assertFalse(umbra.chamado([dito])[0], dito)
+
     def test_alternativas(self):
         (r, d), texto = umbra.entender_alternativas(["me leva pra cara", "me leva pra casa"])
         self.assertEqual((r, texto), ("casa", "me leva pra casa"))
@@ -69,13 +77,15 @@ class TesteEntender(unittest.TestCase):
 class VozFalsa:
     def __init__(self):
         self.ditas = []
+        self.nervosas = []
         self.ate = 0.0
         self.agora = 0.0
         self.ao_tocar = None
         self.caladas = 0
 
-    def falar(self, pedacos, prioridade=1, texto=None):
+    def falar(self, pedacos, prioridade=1, texto=None, nervosa=False):
         self.ditas.append(pedacos[0])
+        self.nervosas.append(nervosa)
         self.ate = self.agora + 1.0             # cada fala dura 1 s
         if self.ao_tocar:
             self.ao_tocar(pedacos)
@@ -343,6 +353,24 @@ class TesteConversa(unittest.TestCase):
         self.u.aviso_bateria()
         self.assertEqual(self.rosto.modo, "pequeno")
 
+    def test_bronca_ao_passar_do_limite(self):
+        self.u.aviso_velocidade()
+        self.assertEqual(self.rosto.modo, "pequeno")
+        self.assertEqual(self.rosto.estados[-1], "alerta")     # olhos vermelhos, tremida, rosnado
+        self.assertTrue(self.voz.ditas[-1].startswith("umbra_rapido_"))
+        self.assertTrue(self.voz.nervosas[-1])                 # a voz sobe o tom e acelera
+        self.andar(2)
+        self.assertIsNone(self.rosto.modo)                     # deu a bronca e sumiu
+        primeira = self.voz.ditas[-1]
+        self.u.aviso_velocidade()
+        self.assertNotEqual(self.voz.ditas[-1], primeira)      # não repete a mesma frase
+
+    def test_bronca_nao_interrompe_a_conversa(self):
+        self.u.chamar(agora=self.t)
+        ditas = len(self.voz.ditas)
+        self.u.aviso_velocidade()
+        self.assertEqual(len(self.voz.ditas), ditas)
+
     def test_escuta_o_nome_so_parado(self):
         self.u.microfone = True
         self.app.vel = 20.0
@@ -379,6 +407,17 @@ class TesteConversa(unittest.TestCase):
         self.escuta.parcial = lambda: "umbra me leva"           # veio mais coisa: espera o resultado final
         self.andar(4.5)
         self.assertIsNone(self.rosto.modo)
+
+    def test_nome_ouvido_no_meio_vale_se_o_final_falhar(self):
+        self.u.microfone = True
+        self.andar(3.2)
+        self.assertEqual(self.u.estado, umbra.VIGIA)
+        self.escuta.parcial = lambda: "unbra me leva pra casa"
+        self.andar(0.3)
+        self.escuta.parcial = lambda: ""
+        self.escuta.dizer("")                                  # o final veio vazio
+        self.andar(0.5)
+        self.assertEqual(self.rosto.modo, "grande")
 
     def test_gps_oscilando_parado_nao_desliga_a_escuta(self):
         self.u.microfone = True
@@ -568,6 +607,39 @@ class TesteConversa(unittest.TestCase):
         self.andar(4)
         self.assertIn(("iniciar",), self.app.feito)
         self.assertEqual(self.voz.caladas, 0)          # ("rota calculada" da navegação segue)
+
+    def test_final_falhou_vale_o_que_ouviu_no_meio(self):
+        # ele ouviu "me leva pro flamboyant" no meio da fala e o resultado final veio vazio: o pedido vale
+        self.u.chamar(agora=self.t)
+        self.andar(2.0)
+        self.assertEqual(self.u.estado, umbra.OUVINDO)
+        self.escuta.parcial = lambda: "me leva pro flamboyant"
+        self.andar(0.3)
+        self.escuta.dizer("")                                 # o final: nada
+        self.andar(0.5)
+        self.assertIn(("procurar",), self.app.feito)
+        self.assertFalse(any(d.startswith("umbra_silencio") for d in self.voz.ditas))
+
+    def test_internet_fraca_tenta_o_reconhecimento_do_celular(self):
+        chamadas = []
+        ouvir = self.escuta.ouvir
+        self.escuta.ouvir = lambda s=1.2, conversa=True, offline=None: (chamadas.append(offline), ouvir(s, conversa, offline))
+        self.u.chamar(agora=self.t)
+        self.andar(2.0)
+        self.escuta.erro = lambda: 2                          # erro de rede
+        self.escuta.dizer("")
+        self.andar(1.0)
+        self.assertIn(True, chamadas)                         # pediu o reconhecimento sem internet
+        self.assertFalse(any(d.startswith("umbra_silencio") for d in self.voz.ditas))
+
+    def test_espera_a_propria_voz_acabar_antes_de_ouvir(self):
+        self.u.chamar(agora=self.t)
+        self.andar(0.2)
+        while self.voz.ocupada():                             # até a saudação acabar
+            self.andar(0.1)
+        self.assertNotEqual(self.u.estado, umbra.OUVINDO)     # ainda não: o fim da voz dele cairia no microfone
+        self.andar(0.5)
+        self.assertEqual(self.u.estado, umbra.OUVINDO)
 
     def test_bateria_fraca_mesmo_limite_do_aviso(self):
         import bateria

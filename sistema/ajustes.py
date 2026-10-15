@@ -36,7 +36,7 @@ PADRAO = {
     "flutuante_tipo": "painel",  # o que aparece minimizado: "painel" (retângulo com a rota e a
                                  # velocidade) ou "bolha" (pequena, só minutos e km)
     "bolha": True,              # ... com a bolha de km/minutos por cima dos apps
-    # qual voz fala: "gravada" (as gravações que vão no app: Brian, da ElevenLabs) ou "celular"
+    # qual voz fala: "gravada" (as gravações que vão no app: a voz do Venom, ElevenLabs + efeito "forte") ou "celular"
     # (o leitor de texto do Android). Até a 1.0.58 o app SEMPRE usava a do celular quando ela
     # existia, e as gravações nunca tocavam (o dono regravou a voz e "não saiu a voz nova").
     "voz_fonte": "gravada",

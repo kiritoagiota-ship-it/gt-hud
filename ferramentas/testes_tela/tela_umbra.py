@@ -42,7 +42,7 @@ DITAS = []
 ERROS = []
 
 
-def falar_falso(self, pedacos, prioridade=1, texto=None):
+def falar_falso(self, pedacos, prioridade=1, texto=None, nervosa=False):
     """Sem som no teste: anota a fala e finge que ela dura 1,2 s (a boca mexe, o Umbra espera)."""
     DITAS.append(pedacos[-1])
     print("[FALA]", pedacos, flush=True)

@@ -108,8 +108,22 @@ UMBRA = {
     "umbra_silencio_2": "Ficou mudo? Nós esperamos.",
     "umbra_valeu_2": "Agradece não. Nós já estamos acostumados a ser incríveis.",
     "umbra_cancelada_2": "Cancelado. Nós vamos fingir que não vimos.",
+    # a bronca quando passa do limite (pedido do dono em 15/10/2026: engraçada, com raiva,
+    # gritando, preocupado). Mesma voz do Venom, só mais rápida e desesperada (voz.falar nervosa=True)
+    "umbra_rapido_1": "Ei! Quer jogar a gente num muro? Tira a mão desse acelerador!",
+    "umbra_rapido_2": "Devagar! Nós não queremos virar adesivo de parede!",
+    "umbra_rapido_3": "Tá querendo voar? Nós não temos asa, parceiro! Freia!",
+    "umbra_rapido_4": "Calma aí! Se você raspar a gente no asfalto, nós te assombramos!",
+    "umbra_rapido_5": "Passou do limite! Nós gostamos de você inteiro, então maneira!",
+    "umbra_rapido_6": "Opa, opa! Isso aqui é moto, não foguete! Diminui!",
 }
 FALAS.update(UMBRA)
+
+
+def nervosa(chave):
+    """A bronca de quando passa do limite: a mesma voz, mais rápida e com emoção (o motor do
+    celular em voz.py; a gravação em ferramentas/gerar_voz_elevenlabs.py e efeito_voz.py)."""
+    return chave.startswith("umbra_rapido")
 
 
 # O que a VOZ GRAVADA do app diz (pedido do dono, 08/10/2026: voz "tipo o Venom", que fala

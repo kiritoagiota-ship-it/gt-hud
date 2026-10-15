@@ -38,7 +38,7 @@ import widgets.mapa as wmapa  # noqa: E402
 FALAS = []
 
 
-def falar_falso(self, pedacos, prioridade=1, texto=None):
+def falar_falso(self, pedacos, prioridade=1, texto=None, nervosa=False):
     import falas
     frase = texto or falas.frase([p for p in pedacos if p in falas.FALAS])
     FALAS.append(frase)

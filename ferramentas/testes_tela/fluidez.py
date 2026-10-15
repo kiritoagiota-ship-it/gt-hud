@@ -101,7 +101,7 @@ def prep_contado(self, chave):
 
 mapa_vetor.FonteVetorial._preparar = prep_contado
 
-voz.Voz.falar = lambda self, p, prioridade=1, texto=None: None
+voz.Voz.falar = lambda self, p, prioridade=1, texto=None, nervosa=False: None
 
 FASE = {"nome": "inicio"}
 DADOS = {}          # fase -> lista de (dt_ms, mov_seta_px)

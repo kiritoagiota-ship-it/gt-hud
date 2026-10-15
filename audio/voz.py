@@ -29,6 +29,9 @@ ENTRADA_S = 0.3          # silêncio antes da fala gravada: a saída de áudio c
 VALIDADE_NA_FILA_S = 7.0
 ESPERA_MOTOR_S = 4.0     # ao abrir o app, espera o motor de voz ficar pronto
 RITMO = 1.0              # ritmo natural do motor (mais lento soava robótico)
+# a fala "nervosa" (a bronca do Umbra quando passa do limite): o MESMO tom, só mais rápida (o dono,
+# 15/10/2026: a voz não muda, fica desesperada). Na voz gravada isso já vem na gravação (efeito_voz.py)
+RITMO_NERVOSO = 1.2
 MEDIDA_MAX_S = 40.0      # medição das vozes (masculina automática): desiste depois disso
 # o motor de voz às vezes não avisa que terminou (ex.: o sistema matou o
 # serviço de voz): passado esse tempo, a fala é cortada e a fila anda
@@ -71,7 +74,7 @@ class Voz:
         self.sons = None             # sons.Sons: o toque que anuncia cada fala (o app liga)
         self.gravada = True          # True: fala com as gravações do app; False: com a voz do celular
         self._pasta = pasta_das_frases(pasta_cache)
-        self._fila = []            # [(prioridade, hora, pedaços, texto)]
+        self._fila = []            # [(prioridade, hora, pedaços, texto, nervosa)]
         self._livre_em = 0.0       # time.monotonic() em que a fala atual termina
         self._som = None           # referência viva do som gravado tocando
         self._ev = None
@@ -154,9 +157,10 @@ class Voz:
         self._config_aplicada = True
 
     # --- fila ----------------------------------------------------------------
-    def falar(self, pedacos, prioridade=1, texto=None):
+    def falar(self, pedacos, prioridade=1, texto=None, nervosa=False):
         """pedacos: chaves de falas.FALAS (usadas pela voz gravada e para
-        montar a frase); texto: frase pronta, só para o motor do celular."""
+        montar a frase); texto: frase pronta, só para o motor do celular;
+        nervosa: o motor do celular fala mais rápido (RITMO_NERVOSO), no mesmo tom."""
         if not self.ligada:
             if self.sons is not None:   # voz desligada: o toque sozinho ainda avisa
                 self.sons.tocar(sons.som_da_fala(pedacos))
@@ -166,7 +170,7 @@ class Voz:
             return
         if any(f[2] == pedacos and f[3] == texto for f in self._fila):
             return
-        self._fila.append((prioridade, time.monotonic(), pedacos, texto))
+        self._fila.append((prioridade, time.monotonic(), pedacos, texto, nervosa))
         self._fila.sort(key=lambda f: (-f[0], f[1]))
         self._tentar()
 
@@ -213,7 +217,7 @@ class Voz:
         self._fila = [f for f in self._fila if agora - f[1] < VALIDADE_NA_FILA_S]
         if not self._fila:
             return
-        _, _, pedacos, texto = self._fila.pop(0)
+        _, _, pedacos, texto, nervosa = self._fila.pop(0)
         if self.sons is not None:       # o toque do tipo de aviso, logo antes da fala
             self.sons.tocar(sons.som_da_fala(pedacos))
         tem_gravacao = [p for p in pedacos if os.path.exists(self._arquivo(p))]
@@ -221,6 +225,10 @@ class Voz:
         # (melhor a outra voz do que ficar mudo)
         if self.motor_pronto() and (not self.gravada or not tem_gravacao):
             self._aplicar_config()
+            if nervosa and self._config is not None:
+                _, tom, efeito = self._config
+                self._fala.ajustar(tom, RITMO * RITMO_NERVOSO, efeito)
+                self._config_aplicada = False     # a próxima fala volta ao tom dos Ajustes
             frase = texto or falas.frase(pedacos)
             if self._fala.falar(frase):
                 self._livre_em = agora + 0.3  # depois, "ocupada" diz quando terminou

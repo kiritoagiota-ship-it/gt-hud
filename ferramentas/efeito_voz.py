@@ -37,6 +37,9 @@ BASE = os.path.join(RAIZ, "ferramentas", "voz_base")
 SAIDA = os.path.join(RAIZ, "audio", "voz")
 SOBRE = os.path.join(SAIDA, "voz.json")
 RMS_ALVO, PICO_MAX = 0.16, 0.97
+# a bronca do Umbra (falas.nervosa: "umbra_rapido_*"): a MESMA voz do Venom (mesmo efeito, mesmo
+# tom; o dono, 15/10/2026: "não é pra ficar diferente"), só mais rápida, como quem está desesperado
+NERVOSA, RITMO_NERVOSO = "umbra_rapido", 1.25
 CLAREZA = 1.6   # quanto do agudo original volta por cima no efeito mais forte (ver aplicar)
 
 # efeito -> (tom da voz principal, volume da voz de baixo, ronco, distorção, grave, eco)
@@ -208,7 +211,7 @@ def main():
     total = 0.0
     for nome in nomes:
         a, sr = ler(os.path.join(BASE, nome))
-        b = aplicar(a, sr, efeito, velocidade)
+        b = aplicar(a, sr, efeito, velocidade * RITMO_NERVOSO if nome.startswith(NERVOSA) else velocidade)
         gravar(os.path.join(SAIDA, nome), b, sr)
         total += len(b) / float(sr)
     for velho in os.listdir(SAIDA):

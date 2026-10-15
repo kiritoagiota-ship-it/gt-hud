@@ -57,6 +57,12 @@ from widgets.comuns import entrar
 # sem parar andando em cima do limite)
 DESARME_KMH = 2.0
 INTERVALO_VIBRA_S = 15.0
+# o Umbra dá bronca ao passar do limite (pedido do dono, 15/10/2026), pelo mesmo limite do
+# velocímetro vermelho (o dos Ajustes e o da via). Rearma como a vibração, no máximo 1 bronca
+# por BRONCA_INTERVALO_S, e só com BRONCA_LEITURAS leituras seguidas acima (um pulo do GPS não vale)
+BRONCA_INTERVALO_S = 60.0
+BRONCA_LEITURAS = 2
+FOLGA_VIA_KMH = 3            # o limite da placa da via conta com essa folga (o mesmo da tela do mapa)
 
 SEM_SINAL_APOS_S = 5  # sem leitura boa por mais que isso = sem sinal
 CORRECAO_MIN_M = 15         # pino mudado menos que isso não é correção (foi só confirmar)
@@ -190,6 +196,9 @@ class GTHudApp(App):
         self._ouvintes = []
         self._alerta_armado = True
         self._ultima_vibracao = -INTERVALO_VIBRA_S
+        self._bronca_armada = True
+        self._ultima_bronca = -BRONCA_INTERVALO_S
+        self._acima_seguidas = 0
 
         self.posicao = None          # (lat, lon) da última leitura boa
         self.rumo = None             # direção do movimento (graus) quando andando
@@ -868,6 +877,32 @@ class GTHudApp(App):
             self._alerta_armado = False
         elif vel <= limite - DESARME_KMH:
             self._alerta_armado = True
+        self._checar_bronca(vel)
+
+    def limite_do_alerta(self):
+        """O limite do velocímetro vermelho: o menor entre o dos Ajustes e o da via em que está
+        navegando (com FOLGA_VIA_KMH)."""
+        limite = self.ajustes["limite_kmh"]
+        via = (self.estado_nav or {}).get("limite_via") if self.nav is not None else None
+        if via:
+            limite = min(limite, via + FOLGA_VIA_KMH)
+        return limite
+
+    def _checar_bronca(self, vel):
+        limite = self.limite_do_alerta()
+        if vel > limite:
+            self._acima_seguidas += 1
+            agora = time.monotonic()
+            if (self._bronca_armada and self._acima_seguidas >= BRONCA_LEITURAS
+                    and agora - self._ultima_bronca >= BRONCA_INTERVALO_S):
+                self._bronca_armada = False
+                self._ultima_bronca = agora
+                # (só fala; o rosto aparece pelo voz.ao_tocar, que já cuida do app minimizado)
+                self.umbra.aviso_velocidade()
+        else:
+            self._acima_seguidas = 0
+            if vel <= limite - DESARME_KMH:
+                self._bronca_armada = True
 
     def _ao_status_gps(self, tipo, status):
         if status == "gps":

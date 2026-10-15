@@ -5,7 +5,8 @@ só dá para conferir com o app de verdade. Rodar por ferramentas/testes_tela/ro
 - a falha atrasada de um pedido de rota VELHO não pinta de erro a prévia do destino novo;
 - Umbra médio (chamado andando): a legenda ganha a placa escura por trás;
 - a placa de vídeo recusa o desenho: ele aparece com as imagens prontas (antes ficava invisível);
-- "Encerrar" (guardar_tudo_ao_fechar) não deixa etapa do Umbra marcada como "em curso"."""
+- "Encerrar" (guardar_tudo_ao_fechar) não deixa etapa do Umbra marcada como "em curso";
+- passou do limite: o Umbra aparece pequeno, de olhos vermelhos, e dá bronca com a voz nervosa."""
 import os
 import runpy
 import sys
@@ -43,10 +44,12 @@ import voz  # noqa: E402
 
 rota_falsa.instalar()
 ERROS = []
+DITAS = []                  # (1ª chave, nervosa) de cada fala
 
 
-def falar_falso(self, pedacos, prioridade=1, texto=None):
+def falar_falso(self, pedacos, prioridade=1, texto=None, nervosa=False):
     """Sem som no teste: a fala "dura" 1,2 s."""
+    DITAS.append((pedacos[0] if pedacos else "", nervosa))
     agora = time.monotonic()
     self._livre_em = agora + 1.2
     self._comecou(pedacos, None, agora, 1.2)
@@ -151,6 +154,30 @@ def encerrar_limpa(dt):
     checar(not os.path.exists(marca), "Encerrar não deixa etapa do Umbra marcada como em curso")
 
 
+def bronca(dt):
+    a = app()
+    a.estado_nav = None
+    a.ajustes["limite_kmh"] = 42
+    a._acima_seguidas, a._bronca_armada, a._ultima_bronca = 0, True, -999.0   # (o simulador já andou)
+    del DITAS[:]
+    a._checar_bronca(50.0)
+    checar(not DITAS, "1 leitura acima não basta (pulo do GPS)")
+    a._checar_bronca(50.0)
+    checar(DITAS and DITAS[-1][0].startswith("umbra_rapido_") and DITAS[-1][1],
+           "2ª leitura acima: bronca com a voz nervosa %s" % DITAS)
+    checar(rosto().modo == "pequeno" and rosto().mov.estado == "alerta",
+           "ele aparece pequeno, em alerta (%s, %s)" % (rosto().modo, rosto().mov.estado))
+    a._checar_bronca(38.0)                    # baixou...
+    a._checar_bronca(50.0)
+    a._checar_bronca(50.0)                    # ... e passou de novo antes de 1 minuto
+    checar(len(DITAS) == 1, "no máximo 1 bronca por minuto")
+
+
+def bronca_foto(dt):
+    foto("v4_bronca")
+    app().ajustes["limite_kmh"] = 32
+
+
 def fim(dt):
     print("[FIM] erros:", ERROS, flush=True)
     app().stop()
@@ -164,5 +191,7 @@ Clock.schedule_once(medio_foto, 13.4)
 Clock.schedule_once(desenho_recusado, 15)
 Clock.schedule_once(desenho_recusado_foto, 16.2)
 Clock.schedule_once(encerrar_limpa, 17.5)
-Clock.schedule_once(fim, 18.5)
+Clock.schedule_once(bronca, 18.5)
+Clock.schedule_once(bronca_foto, 19.3)
+Clock.schedule_once(fim, 20.5)
 runpy.run_path("main.py", run_name="__main__")

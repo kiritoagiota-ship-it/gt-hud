@@ -41,7 +41,7 @@ rota_falsa.instalar()      # (a rota sai na hora: este teste é dos endereços r
 FALAS = []
 
 
-def falar_falso(self, pedacos, prioridade=1, texto=None):
+def falar_falso(self, pedacos, prioridade=1, texto=None, nervosa=False):
     import falas
     frase = texto or falas.frase([p for p in pedacos if p in falas.FALAS])
     FALAS.append(frase)

@@ -66,6 +66,12 @@ class TesteGravacao(unittest.TestCase):
                          ("vire à direita.", "eleven_multilingual_v2", "Senhor,"))
         self.assertNotIn("next_text", corpo)
         self.assertEqual(corpo["voice_settings"]["style"], 0.0)              # tom sério
+        gravar.pedir("CHAVE-SECRETA", "VOZ123", "Devagar!", abrir=abrir, emocao=True)   # a bronca do Umbra
+        ajustes = json.loads(vistos[1].data.decode("utf-8"))["voice_settings"]
+        self.assertGreater(ajustes["style"], 0.0)
+        self.assertLess(ajustes["stability"], 0.7)
+        self.assertTrue(falas.nervosa("umbra_rapido_1"))
+        self.assertFalse(falas.nervosa("umbra_oi_1"))
 
     def test_erros_claros_e_sem_a_chave(self):
         def recusa(codigo):

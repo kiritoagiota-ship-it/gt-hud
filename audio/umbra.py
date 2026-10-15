@@ -138,7 +138,29 @@ def chamado(alternativas):
             i = (" %s " % t).find(" %s " % n)
             if i >= 0:
                 return True, t[i + len(n):].strip()
+    # o reconhecedor escreve o nome de jeitos que ninguém lista ("unbra", "umbre", "lumbra"...): uma
+    # palavra (ou duas coladas, "um bra") a UMA letra de "umbra" também vale (dono, 15/10/2026)
+    for alt in alternativas:
+        p = normalizar(alt).split()
+        for k, w in enumerate(p):
+            for junto, fim in ((w, k + 1), (w + p[k + 1] if k + 1 < len(p) else "", k + 2)):
+                if junto and junto not in NAO_E_NOME and 4 <= len(junto) <= 6 and _distancia(junto, "umbra") <= 1:
+                    return True, " ".join(p[fim:])
     return False, ""
+
+
+NAO_E_NOME = ("uma", "umas", "obra", "sombra", "ombro", "lumbar", "cumbia")   # perto de "umbra", mas são outra coisa
+
+
+def _distancia(a, b):
+    """Quantas letras é preciso trocar, tirar ou pôr para ir de a para b (Levenshtein)."""
+    ant = list(range(len(b) + 1))
+    for i, ca in enumerate(a, 1):
+        atual = [i]
+        for j, cb in enumerate(b, 1):
+            atual.append(min(ant[j] + 1, atual[j - 1] + 1, ant[j - 1] + (ca != cb)))
+        ant = atual
+    return ant[-1]
 
 
 def entender(texto):
@@ -203,6 +225,7 @@ AVISOS_PERIGO = {"radar", "lombada", "semaforo"}
 AVISOS_ROTA = {"recalculando", "rota_trocada", "caminho_melhor", "sem_internet", "gps_perdido", "gps_ok",
                "sem_rota"}
 AVISOS_CHEGADA = {"chegou"}
+BRONCA = "umbra_rapido"         # passou do limite: a bronca (falas.UMBRA umbra_rapido_1, _2...)
 
 PARADO_KMH = 3.0            # abaixo disso (por PARADO_S) a moto está parada: ele escuta o nome
 PARADO_S = 3.0
@@ -223,8 +246,11 @@ DECIDE_NO_PARCIAL = ("casa", "trabalho", "cancelar", "rotas", "bateria", "perto"
 CURTAS = ("iniciar", "valeu", "tchau", "negou")
 ESPERA_ROTA_MAX_S = 30.0
 INICIAR_DEPOIS_S = 1.2      # a rota apareceu: um instante para ver antes de começar
-ESPERA_TRANQUILA_MAX_S = 20.0   # preferida "Tranquila": espera ela chegar (uns 7 s) antes de sair navegando
+ESPERA_TRANQUILA_MAX_S = 14.0   # preferida "Tranquila": espera ela chegar (uns 7 s) antes de sair navegando
 FOLGA_FALA_S = 0.5          # depois de pedir uma fala, o tempo para ela começar
+DEPOIS_DA_FALA_S = 0.35     # a fala dele acabou: espera isso antes de ouvir (senão o microfone pega o fim da voz dele)
+SILENCIO_PEDIDO_S = 1.5     # no pedido, quanto silêncio encerra a escuta (1,2 cortava quem respira no meio da frase)
+ERROS_DE_REDE = (1, 2, 4, 11)   # (escuta.ERROS) internet lenta/sem internet/servidor: tenta o reconhecimento do celular
 VIGIA_PAUSA_S = 0.4         # entre uma escuta do nome e a próxima
 VIGIA_PAUSA_ERRO_S = 2.5    # o reconhecedor falhou (sem internet, ocupado): espera um pouco (vem um novo)
 VIGIA_PAUSA_LIMITE_S = 15.0  # "pedidos demais" (erro 10): o Google pediu calma
@@ -259,6 +285,9 @@ class Umbra:
         self._avisou_tranquila = False
         self._ouvindo_desde = 0.0           # quando começou a ouvir o pedido (a paciência conta daqui)
         self._recomeco = None               # hora de voltar a ouvir (a escuta voltou vazia cedo demais)
+        self._livre_desde = None            # desde quando a voz dele está quieta (para começar a ouvir)
+        self._sem_internet = False          # a escuta do pedido falhou por rede: segue no reconhecimento do celular
+        self._ultimo_parcial_nome = ""      # vigiando o nome: o último parcial (se o final falhar, ele ainda vale)
         self._parcial_txt = ""              # o que ele já ouviu no meio da fala, e desde quando está igual
         self._parcial_t = 0.0
         self.ultimo_pedido = None           # (para os testes e o diagnóstico) a última intenção
@@ -322,6 +351,7 @@ class Umbra:
         self.escuta.parar()
         self._silencios = self._sem_entender = 0
         self._confirmando = False
+        self._sem_internet = False
         self._nova_conversa()
         self._rosto_faz("olhar_para", 0)
         # andando, ele vem médio no canto e sem escurecer o mapa (pedido do dono, 14/10/2026)
@@ -384,8 +414,8 @@ class Umbra:
             return
         chaves = set(pedacos)
         navegando = getattr(self.app, "nav", None) is not None
-        if "umbra_bateria_fraca" in chaves:
-            humor = "alerta"
+        if "umbra_bateria_fraca" in chaves or any(c.startswith(BRONCA) for c in chaves):
+            humor = "alerta"              # olhos vermelhos, a tremida de susto e o rosnado
         elif chaves & AVISOS_PERIGO and navegando:
             humor = "alerta"
         elif chaves & AVISOS_ROTA and navegando:
@@ -407,6 +437,12 @@ class Umbra:
         if not self.conversando:
             self.voz.falar(["umbra_bateria_fraca"], P_UMBRA)
 
+    def aviso_velocidade(self):
+        """Passou do limite (main._checar_bronca): ele aparece pequeno, de olhos vermelhos, e dá
+        uma bronca engraçada, gritando preocupado (a voz do celular sobe o tom e acelera)."""
+        if not self.conversando:
+            self.voz.falar([self._uma(BRONCA)], P_UMBRA, nervosa=True)
+
     # --- o relógio ----------------------------------------------------------------
     def tique(self, dt=None, agora=None):
         agora = time.monotonic() if agora is None else agora
@@ -421,7 +457,14 @@ class Umbra:
     def _tique(self, agora):
         e = self.estado
         if e in (SAUDANDO, RESPONDENDO):
-            if agora - self._desde > FOLGA_FALA_S and not self.voz.ocupada():
+            # (a fala acabou E ficou um instante em silêncio: o alto-falante ainda solta o finalzinho)
+            if self.voz.ocupada():
+                self._livre_desde = None
+            elif self._livre_desde is None:
+                self._livre_desde = agora
+            if (agora - self._desde > FOLGA_FALA_S and self._livre_desde is not None
+                    and agora - self._livre_desde >= (DEPOIS_DA_FALA_S if self._depois == "ouvir" else 0.0)):
+                self._livre_desde = None
                 self._fim_da_fala(agora)
         elif e == OUVINDO:
             self._ouvindo(agora)
@@ -467,7 +510,12 @@ class Umbra:
         self._recomeco = None
         self._parcial_txt = ""
         self._rosto_faz("definir_estado", "ouvindo")
-        self.escuta.ouvir(1.2)
+        self._escutar_pedido()
+
+    def _escutar_pedido(self):
+        # pelo reconhecimento online (entende melhor); se a internet falhou nesta conversa, pelo do celular
+        offline = True if (self._sem_internet and getattr(self.escuta, "offline_ok", True)) else None
+        self.escuta.ouvir(SILENCIO_PEDIDO_S, offline=offline)
 
     def _ouvindo(self, agora):
         if self._recomeco is not None:               # a escuta voltou vazia cedo: daqui a pouco ouve de novo
@@ -475,7 +523,7 @@ class Umbra:
                 self._recomeco = None
                 self._desde = agora
                 self._parcial_txt = ""
-                self.escuta.ouvir(1.2)
+                self._escutar_pedido()
             return
         sit = self.escuta.situacao()
         if sit == "entendeu":
@@ -488,7 +536,21 @@ class Umbra:
             self._rosto_faz("legenda", None, "O celular não tem reconhecimento de voz.")
         elif sit in ("nada", "parada") and agora - self._desde > 0.3 or agora - self._desde > OUVIR_MAX_S:
             self.escuta.parar()
-            vazia = sit in ("nada", "parada") and self.escuta.erro() in ERROS_DE_SILENCIO
+            erro = self.escuta.erro()
+            if self._parcial_txt:
+                # ele já tinha ouvido algo no meio da fala e o resultado final falhou: vale o que ouviu
+                # (até a 1.0.96 jogava fora e dizia que você tinha ficado quieto)
+                print("[umbra] o resultado final falhou (erro %d): usando o que ouviu no meio" % erro, flush=True)
+                texto, self._parcial_txt = self._parcial_txt, ""
+                self._processar([texto], agora)
+                return
+            if erro in ERROS_DE_REDE and not self._sem_internet and agora - self._ouvindo_desde < PACIENCIA_S:
+                # internet fraca: tenta de novo pelo reconhecimento do próprio celular, sem contar silêncio
+                print("[umbra] o reconhecimento online falhou (erro %d): tentando o do celular" % erro, flush=True)
+                self._sem_internet = True
+                self._recomeco = agora + RECOMECO_S
+                return
+            vazia = sit in ("nada", "parada") and (erro in ERROS_DE_SILENCIO or erro in ERROS_DE_REDE)
             if vazia and agora - self._ouvindo_desde < PACIENCIA_S:
                 # ainda dentro da paciência: a pessoa pode estar pensando no que pedir; ele segue
                 # ouvindo, calado (até a 1.0.95 já perguntava "tá aí?" em menos de 2 s)
@@ -528,6 +590,8 @@ class Umbra:
     def _processar(self, alternativas, agora):
         (intencao, dado), texto = entender_alternativas(alternativas)
         self.ultimo_pedido = (intencao, dado)
+        # (no diagnóstico: o que ele ouviu e o que entendeu, para acertar o que ainda falhar)
+        print("[umbra] pedido: %r -> %s" % ((texto or "")[:50], intencao), flush=True)
         app = self.app
         if self._confirmando:                      # perguntou "Vamos?"
             self._confirmando = False
@@ -776,12 +840,22 @@ class Umbra:
                 return
             sit = self.escuta.situacao()
             if sit == "entendeu":
-                sim, resto = chamado(self.escuta.alternativas())
+                alternativas = self.escuta.alternativas()
+                sim, resto = chamado(alternativas)
+                if not sim and self._ultimo_parcial_nome:     # o nome estava no meio da fala e sumiu no final
+                    sim, resto = chamado([self._ultimo_parcial_nome])
                 self.estado = OCULTO
                 if sim:
+                    print("[umbra] ouviu o nome: %r" % (alternativas[0][:40] if alternativas else ""), flush=True)
                     self._ouviu_o_nome(resto, agora)
                 else:
                     self._vigia_volta = agora + VIGIA_PAUSA_S
+            elif sit in ("nada", "parada", "sem") and self._ultimo_parcial_nome:
+                # o reconhecedor falhou no final, mas o nome já tinha aparecido no meio: atende assim mesmo
+                sim, resto = chamado([self._ultimo_parcial_nome])
+                self.estado = OCULTO
+                print("[umbra] o final falhou, mas o nome apareceu no meio da fala", flush=True)
+                self._ouviu_o_nome(resto, agora)
             elif sit in ("nada", "parada", "sem"):
                 self.estado = OCULTO
                 erro = self.escuta.erro()
@@ -795,6 +869,7 @@ class Umbra:
                 # fim da escuta (o silêncio e a resposta final do reconhecedor levam ~1 s a mais)
                 parcial = self.escuta.parcial()
                 sim, resto = chamado([parcial]) if parcial else (False, "")
+                self._ultimo_parcial_nome = parcial if sim else ""
                 if sim and not resto:
                     if parcial != self._parcial_nome:
                         self._parcial_nome, self._parcial_desde = parcial, agora
@@ -815,6 +890,7 @@ class Umbra:
             self.estado = VIGIA
             self._desde = agora
             self._parcial_nome = None
+            self._ultimo_parcial_nome = ""
             if self._voltar_a_avisar:
                 self._voltar_a_avisar = False
                 print("[escuta] voltou a escutar o nome", flush=True)
