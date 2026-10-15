@@ -18,11 +18,24 @@ uniform float u_presenca;      // aparecendo/sumindo (0 a 1)
 uniform float u_t, u_boca, u_olho, u_inclina, u_feliz, u_torto, u_alerta, u_escuta;
 uniform vec2 u_giro, u_olhar;                          // cabeça virando (x) e acenando (y); para onde ele olha
 uniform float u_rolar, u_palpebra, u_enfase, u_brilho; // cabeça de lado; pálpebra descendo; sílaba forte; força do brilho
-uniform float u_lingua;                                // a língua saindo da boca (0 dentro, 1 toda para fora)
+uniform float u_dentes;                                // dentes ainda maiores: animado, contente, ameaçando (0 a 1)
 const vec3 AZUL = vec3(0.353, 0.627, 1.0);
 const vec3 ROXO = vec3(0.608, 0.361, 1.0);
 const vec3 LARANJA = vec3(1.0, 0.59, 0.2);
 const vec3 VERDE = vec3(0.36, 1.0, 0.78);
+// o Umbra v2 (dono, 15/10/2026): refeito a partir da imagem de referência dele, com as cores, a silhueta e as
+// medidas tiradas da própria imagem (olhos e boca abaixo). Os controles são os mesmos de antes.
+#define OLHO_X 0.385
+#define OLHO_Y -0.165
+#define OLHO_ANG 34.0
+#define OLHO_MEIA 0.31
+#define OLHO_BAIXO 0.150
+#define OLHO_CIMA 0.060
+#define BOCA_CANTO 0.160
+#define BOCA_AMP 0.195
+#define BOCA_MEIA 0.44
+const float BOCA_PARADA = 0.200;
+const float GENGIVA_VISTA = 0.006;      // quanto da gengiva aparece com a boca parada
 vec3 col;
 float alfa;
 
@@ -40,46 +53,48 @@ float vn(vec2 p) {
 float fbm(vec2 p) { float s = 0.0, a = 0.5; for (int i = 0; i < 5; i++) { s += a * vn(p); p = p * 2.03 + vec2(17.1, 9.2); a *= 0.5; } return s / 0.96875; }
 float fbm3(vec2 p) { float s = 0.0, a = 0.5; for (int i = 0; i < 3; i++) { s += a * vn(p); p = p * 2.03 + vec2(17.1, 9.2); a *= 0.5; } return s / 0.875; }
 
-// --- o relevo do rosto: uma superfície com altura. Cada "massa" é um calombo (ou uma cova, se
-// negativa) e já soma, junto com a altura, a inclinação: é dela que a luz precisa. ---
-vec3 relevo;      // x = altura; yz = quanto a altura cresce indo para a direita e para baixo
 float pele;       // quanto deste ponto é cabeça (0 fora, 1 dentro): os olhos usam para não sujar o fundo
-void massa(vec2 p, vec2 c, vec2 eixo, vec2 raio, float a) {
-  vec2 q = p - c;
-  vec2 l = vec2(dot(q, eixo), dot(q, vec2(-eixo.y, eixo.x))) / raio;
-  float e = a * exp(-dot(l, l));
-  vec2 g = -2.0 * e * l / raio;
-  relevo += vec3(e, g.x * eixo.x - g.y * eixo.y, g.x * eixo.y + g.y * eixo.x);
-}
-// um rolete que acompanha uma curva y = yc(x) (os lábios): "incl" é quanto yc muda por unidade de x
-void rolete(vec2 p, float yc, float incl, float w, float a) {
-  float t = (p.y - yc) / w;
-  float e = a * exp(-t * t);
-  float gy = -2.0 * e * t / w;
-  relevo += vec3(e, -gy * incl, gy);
-}
 
-// a linha da boca para um x: y de cima do vão, y de baixo, quanto falta para o canto (1 no meio, 0 no canto)
-// e quanto a linha de cima inclina. A mesma conta desenha a boca e levanta os lábios no relevo.
-vec4 linhaDaBoca(float x) {
-  float meia = 0.50 + 0.03 * u_feliz;
-  float canto = 0.20 - 0.05 * u_feliz + 0.05 * u_torto;
+// ---- a boca em duas peças: a GENGIVA com os dentes (presa ao crânio em cima e à mandíbula embaixo: os
+// dentes andam só com o osso, como peças rígidas) e os LÁBIOS por cima (abrem com a mandíbula, repuxam nas
+// sílabas fortes e no alerta, esticam os cantos com a boca bem aberta), cobrindo e revelando os dentes.
+float meiaDentes() { return BOCA_MEIA + 0.03 * u_feliz; }                 // o arco dos dentes (não estica)
+float abreMand() { return 0.30 * u_boca; }                          // quanto a mandíbula desceu
+float vaoParado() { return BOCA_PARADA + 0.07 * u_dentes; }          // a abertura parada (maior com os dentes maiores)
+// o lábio de cima repuxa nas sílabas fortes e no alerta, mais em cima das presas (o rosnado)
+float repuxa(float x) {
+  float onde = 0.35 * clamp(1.0 - sq(x / meiaDentes()), 0.0, 1.0) + exp(-sq((abs(x) - 0.20) / 0.13));
+  return (0.040 * u_enfase + 0.050 * u_alerta) * onde;
+}
+// a mandíbula desce como uma peça só: os dentes da frente descem um pouco mais que os do canto (a
+// dobradiça fica lá atrás), mas ninguém gira; nos cantos o lábio cobre os dentes que desceram
+float quedaMand(float x) { return abreMand() * (0.55 + 0.45 * clamp(1.0 - sq(x / meiaDentes()), 0.0, 1.0)); }
+// a gengiva (a linha "de repouso", sem repuxar nem abrir): y de cima, y de baixo (parada), quanto falta
+// para o canto e a inclinação da linha de cima. É nela que nascem os dentes.
+vec4 linhaRepouso(float x) {
+  float meia = meiaDentes();
+  float canto = BOCA_CANTO - 0.05 * u_feliz + 0.05 * u_torto;
   float f = clamp(1.0 - sq(x / meia), 0.0, 1.0);
-  float amp = 0.215 + 0.05 * u_feliz - 0.13 * u_torto;
-  float cima = canto + amp * pow(f, 0.85) + u_torto * 0.035 * sin(x * 19.0 + u_t * 3.0) - 0.032 * u_enfase * pow(f, 0.6);
-  float vao = (0.035 + 0.30 * u_boca) * pow(f, 0.6);
+  float amp = BOCA_AMP + 0.05 * u_feliz - 0.13 * u_torto;
+  float cima = canto + amp * pow(f, 0.85) + u_torto * 0.035 * sin(x * 19.0 + u_t * 3.0);
+  float incl = amp * 0.85 * pow(max(f, 0.04), -0.15) * (-2.0 * x / (meia * meia));
+  return vec4(cima, cima + vaoParado() * pow(f, 0.6), f, incl);
+}
+// os LÁBIOS: a abertura de verdade neste x (y de cima, y de baixo, quanto falta para o canto, inclinação de
+// cima). Abrem com a mandíbula (mais no meio; os cantos ficam presos), o de cima repuxa e os cantos esticam.
+vec4 linhaDaBoca(float x) {
+  float meia = meiaDentes() + 0.025 * u_boca;
+  float canto = BOCA_CANTO - 0.05 * u_feliz + 0.05 * u_torto;
+  float f = clamp(1.0 - sq(x / meia), 0.0, 1.0);
+  float amp = BOCA_AMP + 0.05 * u_feliz - 0.13 * u_torto;
+  float cima = canto + amp * pow(f, 0.85) + u_torto * 0.035 * sin(x * 19.0 + u_t * 3.0) - repuxa(x)
+             - GENGIVA_VISTA * pow(f, 0.5) * (0.80 + 0.40 * vn(vec2(x * 11.0, 3.0)));   // lábio repuxado: a gengiva aparece
+  float vao = (vaoParado() + abreMand()) * pow(f, 0.6) + repuxa(x)
+            + GENGIVA_VISTA * pow(f, 0.5) * (1.60 + 0.40 * vn(vec2(x * 11.0, 3.0)) + 0.40 * vn(vec2(x * 13.0, 9.0)));
   float incl = amp * 0.85 * pow(max(f, 0.04), -0.15) * (-2.0 * x / (meia * meia));
   return vec4(cima, cima + vao, f, incl);
 }
 
-// a luz de um olho caindo na pele: o olho é uma faixa acesa um pouco acima da superfície
-float luzDoOlho(vec2 P, vec3 N, float lado, vec2 eu, vec2 ev) {
-  vec2 c = vec2(lado * (0.33 + 0.035 * ev.x), -0.19 + 0.03 * u_inclina + 0.035 * ev.y);
-  vec2 e = vec2(lado * eu.x, eu.y);
-  vec3 L = vec3(c + clamp(dot(P - c, e), -0.20, 0.27) * e - P, 0.085);
-  float d2 = dot(L, L);
-  return max(dot(N, L) * inversesqrt(d2), 0.0) * exp(-d2 / 0.022);
-}
 
 vec3 virar(vec3 n) {
   vec2 a = u_giro * vec2(0.50, 0.40);
@@ -88,153 +103,223 @@ vec3 virar(vec3 n) {
   return vec3(n.x, n.y * cp + n.z * sp, -n.y * sp + n.z * cp);
 }
 
-// fios em relevo sob a pele: aparecem onde o ruído passa pela metade
-float veio(vec2 q) { float n = fbm3(q); return pow(1.0 - abs(2.0 * n - 1.0), 10.0); }
 
-// a cabeça: crânio largo que afina até o queixo; no alto se desfaz em labaredas que sobem.
-// Por dentro é um relevo (testa, sobrancelhas, órbitas, maçãs, vincos, lábios, queixo) de pele negra e molhada,
-// iluminado por uma luz fria de cima e da esquerda, um recorte violeta por trás à direita, um violeta por baixo
-// e o azul dos olhos; nas beiradas a pele reflete o ambiente, como vidro escuro.
-void cabeca(vec2 P0, vec2 Pf, vec2 torce, vec3 fogo) {
-  vec2 P = P0 - u_giro * 0.04;      // a silhueta mal se mexe quando ele vira; o rosto (Pf) anda mais
-  float y = P.y + 0.06;
-  float alto = clamp(-y - 0.05, 0.0, 1.0);
-  float lab = fbm(vec2(P.x * 2.6, P.y * 1.1 + u_t * 0.33) + 3.7);
-  float forca = 0.06 + 0.95 * pow(alto, 1.25);
-  float xx = P.x + 0.05 * torce.x;
+// a meia largura da cabeça numa altura y (0 no meio do rosto, positivo para baixo): a mesma conta da silhueta
+// em cabeca(); e quanto a parte de baixo do rosto fica à frente do eixo do pescoço (o queixo é o que mais
+// anda para o lado quando ele vira)
+float meiaLargura(float y) {
   float largo = y < 0.0 ? 0.66 : 0.66 - 0.34 * pow(clamp(y, 0.0, 1.0), 1.25);
-  float altura = y < 0.0 ? 0.78 : 0.84 + 0.09 * u_boca;       // o queixo desce com a boca
-  vec2 qe = vec2(xx / largo, y / altura);
-  float rr = length(qe);
-  float d = rr - 1.0 + forca * (lab - 0.5);
-  float fora = max(d, 0.0);
-  // para onde a beirada aponta: o recorte só acende do lado da luz de trás e por baixo do queixo
-  vec2 sai = normalize(vec2(qe.x / largo, qe.y / altura) + vec2(0.0, 0.0001));
-  float recorte = deg(-0.30, 0.85, dot(sai, vec2(0.93, 0.37)));
-  float porBaixo = deg(0.25, 0.95, dot(sai, vec2(-0.29, 0.957)));
-  float borda = 0.07 + 0.93 * max(recorte, 0.6 * porBaixo);
-  float chave = deg(0.15, 0.95, dot(sai, vec2(-0.75, -0.66)));   // a beirada do lado da luz principal: fria e fraca
-  luz(ROXO, exp(-fora / 0.11) * 0.30 * step(-0.02, d) * (0.22 + 0.78 * borda));
-  float perto = exp(-fora / 0.34) * step(0.0, d);
-  float fiapo = fbm3(vec2(P.x * 3.0, P.y * 2.2 + u_t * 0.6) + 21.0);
-  float solto = deg(0.50, 0.78, fiapo) * perto * (0.2 + 0.8 * clamp(-P.y + 0.4, 0.0, 1.0));
-  por(vec3(0.078, 0.047, 0.227), solto * 0.85);
-  luz(ROXO, solto * 0.16);
-  float macio = 0.03 + 0.16 * alto;
-  float dentro = deg(macio, -macio, d);
-  float veias = fbm3(Pf * 3.6 + 41.0);
-  if (dentro > 0.002) {
-    // 1) a cúpula do crânio: alta no meio, despencando perto da beirada
-    float rp = clamp(d + 1.0, 0.0, 1.0);
-    float tt = max(1.0 - pow(rp, 2.4), 0.0);
-    float queda = -0.72 * pow(rp, 1.4) * pow(max(tt, 0.03), -0.4);
-    relevo = vec3(0.5 * pow(tt, 0.6), queda * vec2(qe.x / largo, qe.y / altura) / max(rr, 0.001));
-    // 2) as massas em par (um lado é o espelho do outro): contas feitas com o rosto "dobrado" ao meio
-    vec2 pw = Pf + 0.025 * torce;
-    float sx = sqrt(pw.x * pw.x + 0.0009);
-    vec2 pf = vec2(sx, pw.y);
-    float ang = radians(31.0 + 13.0 * u_inclina);
-    vec2 eu = vec2(cos(ang), -sin(ang));          // ao longo do olho: para fora e para cima
-    vec2 ev = vec2(-eu.y, eu.x);                  // atravessado: para fora e para baixo
-    vec2 co = vec2(0.33, -0.19 + 0.03 * u_inclina);
-    vec3 meio = relevo;
-    relevo = vec3(0.0);
-    massa(pf, co - 0.118 * ev + 0.02 * eu, eu, vec2(0.34, 0.046), 0.100);                      // sobrancelha: uma marquise sobre o olho
-    massa(pf, co + 0.02 * ev, eu, vec2(0.34, 0.110), -0.110);                                  // a órbita, cavada fundo
-    massa(pf, vec2(0.47, 0.04), vec2(0.94, -0.342), vec2(0.16, 0.052), 0.085);                 // maçã do rosto
-    massa(pf, vec2(0.58, 0.01), vec2(0.985, -0.17), vec2(0.10, 0.032), 0.030);                 // o arco da maçã indo para trás
-    massa(pf, vec2(0.45, 0.17), vec2(0.94, -0.342), vec2(0.14, 0.055), -0.040);                // a cova embaixo da maçã
-    massa(pf, vec2(0.29, 0.12), vec2(0.921, 0.390), vec2(0.16, 0.022), -0.022);                // vinco de rosnado, do meio até o canto da boca
-    massa(pf, vec2(0.17, -0.52), vec2(1.0, 0.0), vec2(0.17, 0.15), 0.030);                     // bossa da testa
-    massa(pf, vec2(0.45, -0.54), vec2(-0.53, -0.848), vec2(0.20, 0.030), 0.034);               // a quina do crânio: separa a testa da lateral
-    massa(pf, vec2(0.53, -0.47), vec2(1.0, 0.0), vec2(0.09, 0.15), -0.040);                    // têmpora
-    massa(pf, vec2(0.30, 0.55 + 0.05 * u_boca), vec2(-0.646, 0.763), vec2(0.26, 0.05), 0.045); // borda da mandíbula
-    relevo = meio + vec3(relevo.x, relevo.y * pw.x / sx, relevo.z);
-    // 3) as massas do meio do rosto
-    massa(pw, vec2(0.0, -0.11), vec2(1.0, 0.0), vec2(0.09, 0.08), 0.045);                      // entre as sobrancelhas
-    massa(pw, vec2(0.012, -0.50), vec2(0.998, 0.07), vec2(0.08, 0.30), 0.016);                 // crista no meio da testa
-    massa(pw, vec2(0.0, 0.23), vec2(1.0, 0.0), vec2(0.34, 0.15), 0.035);                       // focinho
-    massa(pw, vec2(0.0, 0.66 + 0.07 * u_boca), vec2(1.0, 0.0), vec2(0.15, 0.09), 0.060);       // queixo
-    // 4) os lábios: um rolete logo acima do vão e outro logo abaixo, acompanhando o sorriso
-    vec4 lb = linhaDaBoca(pw.x);
-    float cantos = deg(0.0, 0.30, lb.z);
-    rolete(pw, lb.x - 0.042, lb.w, 0.030, 0.032 * cantos);
-    rolete(pw, lb.y + 0.050, lb.w, 0.036, 0.034 * cantos);
-    // 5) veios sob a pele, só nas laterais do crânio e da mandíbula (a frente do rosto fica lisa)
-    float zona = deg(0.22, 0.42, abs(pw.x)) * (deg(-0.22, -0.38, pw.y) + deg(0.32, 0.46, pw.y)) * (1.0 - deg(0.35, 0.65, alto));
-#ifndef LEVE
-    if (zona > 0.01) {
-      vec2 q = pw * vec2(4.2, 2.6) + vec2(3.1, 7.7);
-      float v0 = veio(q), vx = veio(q + vec2(0.0168, 0.0)), vy = veio(q + vec2(0.0, 0.0104));
-      float av = 0.006 * zona;
-      relevo += vec3(av * v0, av * (vx - v0) / 0.004, av * (vy - v0) / 0.004);
-    }
-#endif
-    vec3 N = virar(normalize(vec3(-relevo.yz + 0.10 * torce, 1.0)));
-    vec3 Nl = virar(normalize(vec3(-relevo.yz, 1.0)));             // sem os caroços miúdos: para o reflexo comprido
-    float saliencia = relevo.x - meio.x;                    // quanto este ponto está acima (ou abaixo) da cúpula lisa
-    float sombra = clamp(1.0 + 8.0 * min(saliencia, 0.0), 0.20, 1.0) * (1.0 + 2.5 * max(saliencia, 0.0));   // covas recebem menos luz, saliências mais
-    float some = 1.0 - 0.65 * deg(0.30, 0.80, alto);        // no alto a cabeça vira fumaça: a luz some junto
-    float molhado = 0.15 + 0.85 * deg(0.44, 0.60, veias);   // onde a pele está mais lisa e úmida
-    vec3 corpo = vec3(0.008, 0.007, 0.022);
-    corpo += vec3(0.012, 0.013, 0.034) * (0.4 + 0.6 * clamp(0.5 - 0.7 * N.y, 0.0, 1.0)) * sombra;
-    // luz principal: fria, de cima e da esquerda, concentrada na testa
-    float foco = exp(-(sq(P.x + 0.18) + sq(P.y + 0.50)) / 0.50);
-    float dk = clamp(dot(N, vec3(-0.4002, -0.7805, 0.4803)), 0.0, 1.0);
-    float hk = clamp(dot(N, vec3(-0.2326, -0.4535, 0.8605)), 0.0, 1.0);
-    corpo += vec3(0.050, 0.056, 0.125) * dk * dk * foco * sombra * some;
-    corpo += vec3(0.140, 0.165, 0.370) * pow(hk, 14.0) * foco * sombra * some * (0.6 + 0.4 * molhado);
-    // o reflexo molhado: uma tira de luz comprida e fina, que se dobra ao passar pelos relevos
-    vec2 dn = Nl.xy - vec2(-0.2326, -0.4535);
-    float aoLongo = dot(dn, vec2(0.89, -0.456)), atraves = dot(dn, vec2(0.456, 0.89));
-    float tira = 0.50 * exp(-(sq(aoLongo / 0.22) + sq(atraves / 0.085))) + 0.70 * exp(-(sq(aoLongo / 0.16) + sq(atraves / 0.022)));
-    corpo += vec3(0.80, 0.86, 1.00) * tira * (0.35 + 0.65 * molhado) * sombra * some * deg(0.06, -0.14, Pf.y);   // só da linha dos olhos para cima
-    // pontinhos de brilho onde a pele é mais lisa: o reflexo estreito de vidro escuro, no rosto inteiro
-    corpo += vec3(0.75, 0.82, 1.0) * pow(hk, 160.0) * molhado * sombra * (0.35 + 0.65 * foco) * 0.55;
-    // vidro escuro: de frente quase não reflete; nas beiradas reflete o ambiente (janela fria em cima, faixa violeta à direita)
-    float fres = 0.03 + 0.97 * pow(1.0 - clamp(N.z, 0.0, 1.0), 4.0);
-    vec3 R = vec3(2.0 * N.z * N.xy, 2.0 * N.z * N.z - 1.0);
-    float janela = deg(0.50, 0.86, dot(R, vec3(-0.45, -0.80, 0.40)));
-    float faixa = deg(0.62, 0.90, dot(R, vec3(0.92, -0.10, 0.38)));
-    vec3 ambiente = vec3(0.020, 0.018, 0.050) * (0.5 - 0.5 * R.y) + vec3(0.42, 0.48, 0.80) * janela + ROXO * 0.60 * faixa;
-    corpo += ambiente * fres * (0.45 + 0.55 * molhado) * (0.4 + 0.6 * sombra) * some;
-    // luz de recorte violeta: vem de trás, pela direita
-    float kr = deg(0.80, 1.0, dot(N, vec3(0.9068, 0.2699, 0.3239)));
-    corpo += ROXO * kr * kr * 0.50 * (0.35 + 0.65 * sombra) * some * (0.55 + 0.45 * molhado);
-    // luz violeta de baixo: pega o queixo e a mandíbula
-    float kb = deg(0.80, 1.0, dot(N, vec3(-0.160, 0.906, 0.392))) * deg(0.05, 0.55, Pf.y);
-    corpo += ROXO * kb * kb * 0.45 * some;
-    // a luz dos olhos na pele (some junto quando ele pisca): forte nas paredes da órbita, na marquise e no alto da maçã
-    float lo = (luzDoOlho(Pf, N, -1.0, eu, ev) + luzDoOlho(Pf, N, 1.0, eu, ev) * (1.0 - 0.38 * u_torto)) * u_olho
-             * (1.0 - 0.85 * clamp(u_palpebra, 0.0, 1.0)) * u_brilho;
-    corpo += fogo * lo * 1.30;
-    // a boca aberta solta luz violeta nos lábios, no queixo e nas bochechas
-    vec3 Lm = vec3(clamp(Pf.x, -0.30, 0.30) - Pf.x, 0.43 + 0.15 * u_boca - Pf.y, 0.09);
-    float m2 = dot(Lm, Lm);
-    corpo += ROXO * max(dot(N, Lm) * inversesqrt(m2), 0.0) / (1.0 + m2 / 0.03) * 0.65 * deg(0.08, 0.85, u_boca) * some;
-    por(corpo, dentro);
+  float altura = y < 0.0 ? 0.78 : 0.84 + 0.09 * u_boca;
+  return largo * sqrt(max(1.0 - sq(y / altura), 0.0));
+}
+float avanco(float y) { return 0.24 * deg(0.0, 0.80, y); }
+
+// ================================================================== a cabeça v2 (a partir da referência do dono)
+// Construída como na referência: um bulbo liso no meio da testa que afina até virar crista entre os olhos;
+// faixas largas de matéria que nascem entre os olhos e sobem em leque, uma por cima da outra, até os lobos
+// das têmporas (que fazem a silhueta); faixas descendo pelas maçãs; uma mandíbula estreita em V até o queixo.
+// Cada faixa é uma tira arredondada ao longo de uma curva (Bézier), pintada de trás para a frente com sombra
+// de contato na de baixo, e iluminada como matéria negra molhada. Cores medidas na imagem.
+const vec3 PELE_ESCURA = vec3(0.004, 0.004, 0.043);
+const vec3 PELE_MEIA = vec3(0.027, 0.031, 0.094);
+const vec3 REFLEXO = vec3(0.835, 0.851, 0.988);
+const vec3 BRILHO_VIOLETA = vec3(0.322, 0.125, 0.592);
+float dot2(vec2 v) { return dot(v, v); }
+// a superfície molhada não é lisa: ondulações miúdas que espalham pontinhos de reflexo (duas oitavas)
+vec2 micro;
+vec2 ondulacao(vec2 p) {
+  vec2 q = p * 15.0 + vec2(u_t * 0.15, 0.0);
+  float n0 = vn(q), nx = vn(q + vec2(0.05, 0.0)), ny = vn(q + vec2(0.0, 0.05));
+  vec2 q2 = p * 41.0 + 7.0;
+  float m0 = vn(q2), mx = vn(q2 + vec2(0.05, 0.0)), my = vn(q2 + vec2(0.0, 0.05));
+  return vec2(nx - n0, ny - n0) * 5.0 + vec2(mx - m0, my - m0) * 2.5;
+}
+
+// distância com sinal até uma Bézier quadrática A->B->C (x) e a posição ao longo dela, de 0 a 1 (y)
+// (a conta exata de Inigo Quilez, devolvendo também o t e o lado)
+vec2 bezier(vec2 pos, vec2 A, vec2 B, vec2 C) {
+  vec2 a = B - A;
+  vec2 b = A - 2.0 * B + C;
+  vec2 c = a * 2.0;
+  vec2 d = A - pos;
+  float kk = 1.0 / max(dot(b, b), 1e-6);
+  float kx = kk * dot(a, b);
+  float ky = kk * (2.0 * dot(a, a) + dot(d, b)) / 3.0;
+  float kz = kk * dot(d, a);
+  float p = ky - kx * kx;
+  float q = kx * (2.0 * kx * kx - 3.0 * ky) + kz;
+  float h = q * q + 4.0 * p * p * p;
+  float t;
+  if (h >= 0.0) {
+    h = sqrt(h);
+    vec2 x = (vec2(h, -h) - q) / 2.0;
+    vec2 uv = sign(x) * pow(abs(x), vec2(1.0 / 3.0));
+    t = clamp(uv.x + uv.y - kx, 0.0, 1.0);
+  } else {
+    float z = sqrt(-p);
+    float v = acos(clamp(q / (p * z * 2.0), -1.0, 1.0)) / 3.0;
+    float m = cos(v);
+    float n = sin(v) * 1.732050808;
+    vec2 tt = clamp(vec2(m + m, -n - m) * z - kx, 0.0, 1.0);
+    t = dot2(d + (c + b * tt.x) * tt.x) < dot2(d + (c + b * tt.y) * tt.y) ? tt.x : tt.y;
   }
-  float quebra = (0.35 + 0.65 * deg(0.3, 0.7, veias)) * (1.0 - 0.85 * deg(0.0, 0.55, alto));
-  luz(ROXO, exp(-sq(d / 0.030)) * 0.40 * dentro * quebra * borda);
-  luz(vec3(0.45, 0.58, 1.0), exp(-sq(d / 0.026)) * 0.15 * dentro * quebra * chave);
-  pele = dentro;
+  vec2 r = pos - (A + (c + b * t) * t);
+  vec2 tg = c + 2.0 * b * t;
+  return vec2(length(r) * (tg.x * r.y - tg.y * r.x < 0.0 ? -1.0 : 1.0), t);
+}
+
+// a matéria negra molhada: azul-marinho quase preto, reflexo estreito branco-azulado, reflexo largo azul,
+// a beirada pega o azul do ambiente; recorte violeta de baixo/direita e azul da esquerda
+vec3 materia(vec3 N, float ao) {
+  N = normalize(N + vec3(micro * 0.35, 0.0));
+  vec3 L = vec3(-0.4002, -0.7805, 0.4803);
+  vec3 Hh = vec3(-0.2326, -0.4535, 0.8605);                            // a luz principal (de cima, à esquerda)
+  vec3 Ht = normalize(vec3(0.10, -0.75, 1.0));                          // uma janela larga lá em cima
+  float nh = max(dot(N, Hh), 0.0), nt = max(dot(N, Ht), 0.0);
+  float nl = max(dot(N, L), 0.0);
+  vec3 c = PELE_ESCURA * 0.6 + (PELE_MEIA - PELE_ESCURA) * nl * 0.35;   // preto quase absoluto
+  c += REFLEXO * pow(nh, 140.0) * 1.7;                                 // reflexos estreitos e fortes
+  c += REFLEXO * pow(nt, 55.0) * 0.55;                                 // o reflexo largo da janela, no alto das formas
+  c += vec3(0.25, 0.30, 0.85) * pow(nh, 26.0) * 0.08;
+  float fr = pow(1.0 - clamp(N.z, 0.0, 1.0), 2.5);
+  float lat = pow(max(dot(N, vec3(0.62, 0.62, 0.48)), 0.0), 6.0);
+  float laz = pow(max(dot(N, vec3(-0.88, -0.10, 0.46)), 0.0), 6.0);
+  c += (BRILHO_VIOLETA * lat * 0.9 + vec3(0.15, 0.32, 1.0) * laz * 0.7) * fr;   // recortes só onde a forma vira
+  return c * ao;
+}
+
+float silh;
+// pinta uma faixa de matéria ao longo da curva A->B->C (larguras na base, no meio e na ponta)
+void faixa(vec2 p, vec2 A, vec2 B, vec2 C, float w0, float w1, float w2) {
+  // longe da faixa (fora da caixa dela, com folga para a sombra) não há nada a pintar: poupa a conta da curva
+  float folga = max(max(w0, w1), w2) + 0.09;
+  if (any(lessThan(p, min(min(A, B), C) - folga)) || any(greaterThan(p, max(max(A, B), C) + folga))) return;
+  vec2 bt = bezier(p, A, B, C);
+  float t = bt.y;
+  float w = mix(mix(w0, w1, deg(0.0, 0.5, t)), w2, deg(0.5, 1.0, t));
+  float d = abs(bt.x);
+  // a sombra de contato que a faixa joga em volta (no que já está pintado embaixo dela)
+  float sombra = exp(-max(d - w, 0.0) / 0.016) * step(w, d) * 0.85;
+  col *= 1.0 - sombra * alfa;
+  float a = deg(w + 0.004, w - 0.003, d);
+  if (a <= 0.0) return;
+  float u = clamp(bt.x / w, -1.0, 1.0);
+  vec2 tg = normalize(B - A + (A - 2.0 * B + C) * t * 2.0 + vec2(1e-5, 0.0));
+  vec2 nperp = vec2(-tg.y, tg.x);
+  vec3 N = normalize(vec3(nperp * u * 1.1 + normalize(p - vec2(0.0, -0.06)) * 0.25, sqrt(1.0 - u * u) * 0.8 + 0.10));
+  N = virar(N);
+  float ao = 0.35 + 0.65 * pow(1.0 - u * u, 0.5);
+  por(materia(N, ao), a);
+  silh = max(silh, a);
+}
+
+// o contorno da cabeça (medido na referência): o raio em cada direção a partir de (0, -0.06)
+float contorno(float a) {
+  float r = 0.7136 - 0.1226 * cos(a) + 0.0112 * sin(a) + 0.1041 * cos(2.0 * a) - 0.0043 * sin(2.0 * a)
+          + 0.0433 * cos(3.0 * a) + 0.0019 * sin(3.0 * a) + 0.0147 * cos(4.0 * a) + 0.0033 * sin(4.0 * a)
+          + 0.0197 * cos(5.0 * a) - 0.0009 * sin(5.0 * a) + 0.0113 * cos(6.0 * a) + 0.0078 * cos(7.0 * a);
+  r += 0.06 * exp(-a * a / 0.02);                                  // o queixo pontudo
+  r += 0.09 * u_boca * exp(-a * a / 0.35);                         // a boca abre: o queixo desce
+  return r;
+}
+
+void cabeca(vec2 P0, vec2 Pf, vec2 torce, vec3 fogo) {
+  silh = 0.0;
+  vec2 p = Pf + 0.010 * torce;
+  float tb = u_t;
+#ifdef LEVE
+  micro = vec2(0.0);                                               // leve: sem os pontinhos de reflexo
+#else
+  micro = ondulacao(p);
+#endif
+  // ---- a massa de base: a silhueta inteira, abaulada
+  vec2 q = p - vec2(0.0, -0.06);
+  float ang = atan(q.x, q.y);
+  float R = contorno(ang);
+  float rq = length(q);
+  float dB = R - rq;                                               // + dentro
+  float base = deg(-0.004, 0.004, dB);
+  silh = max(silh, base);
+  // a aura: fumaça violeta (cores do fundo da referência) e o brilho que vaza da beirada
+  float fora = max(-dB, 0.0);
+#ifdef LEVE
+  float fum = fbm3(vec2(p.x * 2.2, p.y * 1.6 + tb * 0.25) + 5.0);
+#else
+  float fum = fbm(vec2(p.x * 2.2, p.y * 1.6 + tb * 0.25) + 5.0);
+#endif
+  float aura = exp(-fora / 0.20) * deg(0.35, 0.80, fum);
+  luz(vec3(0.15, 0.08, 0.42), aura * 0.55);
+  vec2 sai = q / max(rq, 0.001);
+  float lado_d = deg(-0.2, 0.9, sai.x), lado_e = deg(-0.2, 0.9, -sai.x);
+  luz(vec3(0.20, 0.35, 1.00), exp(-fora / 0.025) * 0.55 * (0.4 + 0.6 * lado_e) * step(0.0, -dB + 0.001));
+  luz(BRILHO_VIOLETA, exp(-fora / 0.030) * 0.55 * (0.3 + 0.7 * max(lado_d, deg(0.3, 0.9, sai.y))) * step(0.0, -dB + 0.001));
+  if (base > 0.001) {
+    float hb = sqrt(max(1.0 - sq(rq / R), 0.0));
+    vec3 N0 = virar(normalize(vec3(sai * (1.0 - hb) * 1.4, hb + 0.15)));
+    vec3 cb0 = materia(N0, 0.55 + 0.45 * hb);
+    float beira = exp(-dB / 0.035);
+    cb0 += vec3(0.15, 0.30, 1.0) * beira * (0.25 + 0.75 * lado_e) * 0.9 + BRILHO_VIOLETA * beira * lado_d * 0.9;
+    por(cb0, base);
+  }
+  // ---- os lobos das têmporas (atrás), depois as faixas em leque, de fora para dentro
+  float re = 0.006 * sin(tb * 1.3);                                // respira: as faixas incham um pouco
+  float al = 1.0 - 0.07 * u_alerta;                                // em alerta, a matéria se contrai
+  faixa(p, vec2(-0.56, -0.28), vec2(-0.60, -0.60), vec2(-0.36, -0.80), 0.06, 0.11 * al + re, 0.03);   // os lobos das têmporas, por dentro do contorno
+  faixa(p, vec2(0.57, -0.28), vec2(0.61, -0.60), vec2(0.37, -0.81), 0.06, 0.11 * al + re, 0.03);
+  faixa(p, vec2(-0.102, -0.059), vec2(-0.307, -0.199), vec2(-0.435, -0.506), 0.025, 0.075 * al + re, 0.07);
+  faixa(p, vec2(0.102, -0.059), vec2(0.307, -0.199), vec2(0.435, -0.506), 0.025, 0.075 * al + re, 0.07);
+  faixa(p, vec2(-0.038, -0.033), vec2(-0.230, -0.327), vec2(-0.320, -0.698), 0.02, 0.07 * al + re, 0.09);
+  faixa(p, vec2(0.038, -0.033), vec2(0.230, -0.327), vec2(0.320, -0.711), 0.02, 0.07 * al + re, 0.09);
+  // ---- o bulbo do meio da testa: largo em cima, afinando até a crista entre os olhos
+  float yb = p.y;
+  float hw = 0.34 * pow(clamp((0.02 - yb) / 0.82, 0.0, 1.2), 0.85) * (1.0 - 0.35 * deg(-0.70, -0.98, yb));
+  float topo = deg(-0.99, -0.86, yb);
+  float ub = p.x / max(hw, 0.002);
+  float ab = deg(1.0 + 0.006 / max(hw, 0.01), 1.0 - 0.006 / max(hw, 0.01), abs(ub)) * step(yb, 0.02) * topo;
+  col *= 1.0 - exp(-max(abs(ub) - 1.0, 0.0) * hw / 0.025) * step(1.0, abs(ub)) * 0.6 * alfa * step(yb, 0.0) * topo;
+  if (ab > 0.0) {
+    float uu = clamp(ub, -1.0, 1.0);
+    vec3 N = virar(normalize(vec3(uu * 0.9, -0.25 * deg(-0.4, 0.0, yb), sqrt(1.0 - uu * uu) + 0.15)));
+    vec3 cb = materia(N, 0.6 + 0.4 * (1.0 - uu * uu));
+    float mancha = deg(0.42, 0.62, fbm3(p * 7.0 + 3.0));                       // o reflexo molhado é irregular
+    cb += REFLEXO * exp(-sq((uu + 0.10) / 0.16) - sq((yb + 0.55) / 0.20)) * (0.35 + 0.75 * mancha);  // o reflexo no alto da testa
+    cb += REFLEXO * exp(-sq((uu - 0.35) / 0.05) - sq((yb + 0.30) / 0.10)) * 0.25;
+    por(cb, ab);
+  }
+  // ---- embaixo dos olhos: faixas descendo pelas maçãs; o focinho em V até o lábio
+  float bx = 0.80 * abreMand();
+  faixa(p, vec2(-0.13, 0.05), vec2(-0.36, 0.06), vec2(-0.52, 0.02), 0.03, 0.05, 0.035);
+  faixa(p, vec2(0.13, 0.05), vec2(0.36, 0.06), vec2(0.52, 0.02), 0.03, 0.05, 0.035);
+  faixa(p, vec2(-0.02, 0.0), vec2(-0.07, 0.16), vec2(-0.15, 0.30), 0.02, 0.045, 0.03);
+  faixa(p, vec2(0.02, 0.0), vec2(0.07, 0.16), vec2(0.15, 0.30), 0.02, 0.045, 0.03);
+  // ---- a mandíbula: faixas dos cantos da boca até o queixo, e o bulbo do queixo
+  faixa(p, vec2(-0.44, 0.22), vec2(-0.30, 0.56 + bx), vec2(-0.05, 0.74 + bx), 0.04, 0.05, 0.03);
+  faixa(p, vec2(0.44, 0.22), vec2(0.30, 0.56 + bx), vec2(0.05, 0.74 + bx), 0.04, 0.05, 0.03);
+  faixa(p, vec2(0.0, 0.56 + bx), vec2(0.004, 0.66 + bx), vec2(0.008, 0.80 + bx), 0.05, 0.045, 0.012);
+  // ---- arcos elétricos perto dos olhos e na beirada (piscam)
+  float arco = abs(fbm3(p * vec2(9.0, 7.0) + vec2(tb * 0.6, -tb * 0.4)) - 0.5);
+  float onde = exp(-sq((abs(p.x) - 0.66) / 0.14) - sq((p.y + 0.28) / 0.26)) * 1.4 + exp(-fora / 0.08) * 0.7 * (1.0 - base);
+  vec3 eletrico = mix(vec3(0.45, 0.68, 1.0), LARANJA, u_alerta);
+  luz(eletrico, exp(-sq(arco / 0.014)) * onde * (0.6 + 0.4 * sin(tb * 13.0 + p.y * 9.0)));
+  luz(eletrico * 0.6, exp(-sq((abs(p.x) - 0.70) / 0.12) - sq((p.y + 0.25) / 0.20)) * 0.35 * u_olho * u_brilho);   // o brilho dos olhos vaza pelos lados
+  pele = max(base, silh);
 }
 
 // um olho: lâmina rasgada, barriguda embaixo, com a beirada de cima em chama.
 // Fica dentro de uma órbita: a beirada da órbita é escura, o branco mora no fundo da barriga
 // e a parte de cima fica na sombra da sobrancelha; o brilho escapa mais para baixo do que para cima.
 void olho(vec2 P, float lado, float abertura, float tam, vec3 cor, vec2 torce) {
-  vec2 c = vec2(lado * 0.33, -0.19 + 0.03 * u_inclina);
-  float ang = radians(31.0 + 13.0 * u_inclina);
+  vec2 c = vec2(lado * OLHO_X, OLHO_Y + 0.03 * u_inclina);
+  float ang = radians(OLHO_ANG + 13.0 * u_inclina);
   vec2 r = vec2((P.x - c.x) * lado, P.y - c.y) + 0.02 * torce;
   float u = r.x * cos(ang) - r.y * sin(ang);
   float v = r.x * sin(ang) + r.y * cos(ang);
-  float meia = 0.34 * tam;
+  float meia = OLHO_MEIA * tam;
   float perfil = pow(clamp(1.0 - sq(u / meia), 0.0, 1.0), 0.75);
   float barriga = (0.5 + 0.5 * clamp(u / meia, -1.0, 1.0)) * 0.35 + 0.65;
-  float baixo = 0.165 * abertura * tam * perfil * barriga * (1.0 - 0.62 * u_feliz);
+  float baixo = OLHO_BAIXO * abertura * tam * perfil * barriga * (1.0 - 0.62 * u_feliz);
   float chama = (fbm3(vec2(u * 7.0, v * 4.0 + u_t * 1.7) + lado * 13.0) - 0.35) * 0.09 * clamp(u / meia + 0.4, 0.0, 1.4);
-  float cima = 0.062 * abertura * tam * perfil * (1.0 + 1.1 * u_feliz) + chama * abertura * (1.0 - 0.45 * u_feliz);
+  float cima = OLHO_CIMA * abertura * tam * perfil * (1.0 + 1.1 * u_feliz) + chama * abertura * (1.0 - 0.45 * u_feliz);
   float d = v > 0.0 ? v - baixo : -v - cima;
   if (abs(u) >= meia) d = length(vec2(abs(u) - meia, v));
   // a pálpebra: desce de cima e cobre o olho (na piscada); a beirada dela pega a luz do olho
@@ -248,7 +333,7 @@ void olho(vec2 P, float lado, float abertura, float tam, vec3 cor, vec2 torce) {
   por(vec3(0.003, 0.002, 0.010), deg(0.045, 0.010, d) * 0.80 * pele * deg(0.02, 0.25, abertura));
   // o brilho que escapa: curto e forte na beirada; o largo é fraco e cai mais para baixo (a sobrancelha segura o de cima)
   float paraBaixo = 0.35 + 0.65 * deg(-0.05, 0.07, v);
-  luz(cor, exp(-fora / 0.12) * 0.11 * abertura * paraBaixo * (1.0 - palp) * u_brilho);
+  luz(cor, exp(-fora / 0.15) * 0.22 * abertura * paraBaixo * (1.0 - palp) * u_brilho);
   luz(cor, exp(-fora / 0.022) * 0.80 * aceso * (0.45 + 0.55 * paraBaixo) * (0.85 + 0.25 * deg(0.0, meia, u)));
   luz(cor, exp(-sq((v - beira) / 0.007)) * deg(0.004, -0.010, semPalpebra) * palp * (1.0 - palp) * 2.4);
   // por dentro: energia correndo devagar ao longo do olho; a faixa de cima, sob a pálpebra, fica azul;
@@ -269,205 +354,212 @@ void olho(vec2 P, float lado, float abertura, float tam, vec3 cor, vec2 torce) {
   luz(cor, rastro * 0.8 * abertura * (1.0 - palp) * u_brilho);
 }
 
-// ---------------------------------------------------------------- a boca
-// as medidas de um dente da fileira: onde nasce (x), largura, comprimento e quanto está no meio da boca;
-// em pontos fixos nascem presas; de vez em quando um dente sai bem mais comprido
-vec4 medidaDente(float k, float n, float meia, float semente, float presaA, float presaB, float escala) {
-  float passo = 2.0 * meia / n;
-  float centro = (k + 0.5) * passo - meia + (rnd(k + semente + 3.0) - 0.5) * 0.25 * passo;
-  float fk = max(0.0, 1.0 - sq(centro / meia));
-  float presa = max(max(step(abs(k - presaA), 0.5), step(abs(k - (n - 1.0 - presaA)), 0.5)),
-                    max(step(abs(k - presaB), 0.5), step(abs(k - (n - 1.0 - presaB)), 0.5)));
-  float longo = step(0.90, rnd(k + semente + 17.0));
-  float largura = passo * 0.5 * (0.62 + 0.28 * rnd(k + semente + 7.0) + 0.45 * presa);
-  float comprido = ((0.050 + 0.120 * pow(fk, 0.7)) * (0.50 + 0.50 * rnd(k + semente)) + 0.02 * u_boca)
-                 * (1.0 + 0.55 * presa + 0.30 * longo) * escala;
-  return vec4(centro, largura, comprido, fk);
-}
-float curvaDente(float k, float semente, float centro) {
-  return (rnd(k + semente + 51.0) - 0.5) * 0.014 - (centro < 0.0 ? -1.0 : 1.0) * 0.008;   // foice: as pontas pendem para o meio
-}
-// onde nasce e para onde aponta um dente: perpendicular à linha da boca (os dentes abrem em leque),
-// para dentro do vão; "recuo" empurra a raiz para o fundo (a fileira de trás)
-vec4 raizDente(float cx, float sinal, float recuo) {
-  vec4 lb = linhaDaBoca(cx);
-  float meia = 0.50 + 0.03 * u_feliz;
-  float inclVao = (0.035 + 0.30 * u_boca) * 0.6 * pow(max(lb.z, 0.04), -0.4) * (-2.0 * cx / (meia * meia));
-  float incl = clamp(sinal > 0.0 ? lb.w : lb.w + inclVao, -1.1, 1.1);
-  vec2 dir = normalize(vec2(-incl, 1.0)) * sinal;
-  return vec4(vec2(cx, sinal > 0.0 ? lb.x : lb.y) + dir * recuo, dir);
+// ================================================================== a boca v2 (a partir da referência do dono)
+// Como na referência: um sorriso largo de canto a canto com duas fileiras de presas cônicas e grossas (cor de
+// osso, raiz escura, ponta afiada que pende para o meio), as de baixo encaixando entre as de cima; a gengiva
+// violeta e molhada abraçando cada presa; o fundo escuro aceso por uma LUZ PONTUAL violeta lá dentro (a
+// garganta), que acende a gengiva, atravessa a beirada fina das presas e reflete nos lábios; os lábios são a
+// mesma matéria negra molhada da cabeça. As presas ficam num ARCO (a arcada): as do meio de frente, as dos
+// cantos virando de lado, mais juntas e mais para o fundo, como numa boca de verdade.
+const vec3 OSSO_CLARO = vec3(0.92, 0.80, 0.62);              // (medidas nas presas da referência)
+const vec3 OSSO_RAIZ = vec3(0.30, 0.19, 0.14);
+const vec3 CARNE = vec3(0.38, 0.16, 0.60);                   // a gengiva
+const vec3 CARNE_FUNDA = vec3(0.060, 0.018, 0.100);
+const vec3 FUNDO_BOCA = vec3(0.050, 0.014, 0.085);
+const vec3 LUZ_GARGANTA = vec3(0.66, 0.24, 1.00);
+const float ARCO_MAX = 1.40;                                  // até onde a arcada vira nos cantos (radianos)
+const float AA_BOCA = 0.0032;
+vec3 luzBoca;                                                 // a luz pontual lá dentro (z negativo = para o fundo)
+float forcaLuzBoca;
+
+// quanto da luz pontual da garganta chega num ponto (x, y, z) com a normal N: difusa, caindo com a distância
+float luzPontual(vec3 pos, vec3 N) {
+  vec3 d = luzBoca - pos;
+  return forcaLuzBoca * max(dot(N, normalize(d)), 0.0) / (1.0 + dot(d, d) / 0.012);
 }
 
-// um dente: agulha de base curta e larga e ponta comprida, fina e curva como foice; raiz escura, ponta
-// translúcida e molhada, reflexo frio de um lado, contraluz violeta da garganta nas beiradas e a própria sombra
-void dente(vec2 p, vec2 raiz, vec2 dir, vec4 md, float curva, float escuro, float contra, float vis) {
-  float largura = md.y, comprido = md.z, fk = md.w;
+// uma presa: um cone grosso de osso. raiz (escondida na gengiva), dir (para a ponta), comprimento, meia
+// largura na base, curva (quanto a ponta pende para o lado), giro (o ângulo dela na arcada: as dos cantos
+// estão viradas de lado), escuro (as do fundo pegam menos luz)
+void presa(vec2 p, vec2 raiz, vec2 dir, float L, float wb, float curva, float giro, float escuro, float vis, float semente) {
   vec2 lado = vec2(dir.y, -dir.x);
-  vec2 qs = p - raiz - vec2(0.007, 0.012);
-  float aoS = dot(qs, dir) / comprido;
-  float atS = dot(qs, lado) - curva * aoS * aoS;
-  float sombraD = deg(0.014, -0.006, abs(atS) - largura * pow(clamp(1.0 - aoS, 0.0, 1.0), 1.7)) * step(-0.05, aoS) * step(aoS, 1.08);
-  por(vec3(0.0, 0.0, 0.008), sombraD * 0.55 * vis);
+#ifndef LEVE
+  // a sombra que ela joga no que está atrás (a luz vem de cima, da esquerda)
+  vec2 qs = p - raiz - vec2(0.006, 0.009);
+  float ts = dot(qs, dir) / L;
+  float as1 = dot(qs, lado) - curva * ts * ts;
+  float sombra = deg(0.010, -0.002, abs(as1) - wb * pow(max(1.0 - ts, 0.0), 1.1) * (1.0 + 0.9 * ts * (1.0 - ts))) * step(0.0, ts) * step(ts, 1.0);
+  col *= 1.0 - sombra * 0.55 * vis;
+#endif
   vec2 q = p - raiz;
-  float ao = dot(q, dir) / comprido;                             // 0 na raiz, 1 na ponta
-  float at = dot(q, lado) - curva * ao * ao;                     // atravessado, já descontando a curva
-  float lar = largura * pow(clamp(1.0 - ao, 0.0, 1.0), 1.7);
-  float corpo = deg(0.0028, -0.0028, abs(at) - lar) * step(-0.06, ao) * step(ao, 1.0) * vis;
-  if (!(corpo <= 0.0)) {
-  float u = clamp(at / max(lar, 0.0008), -1.0, 1.0);
-  float redondo = sqrt(max(1.0 - u * u, 0.0));
-  float pontaV = clamp(ao, 0.0, 1.0);
-  vec3 esmalte = vec3(0.97, 0.95, 0.96) * (0.66 + 0.34 * redondo);
-  esmalte *= 0.45 + 0.55 * deg(0.0, 0.30, ao);                   // a raiz afunda no escuro da gengiva
-  vec3 translucido = mix(vec3(0.55, 0.42, 0.90), vec3(0.78, 0.45, 1.0), u_boca);
-  esmalte = mix(esmalte, translucido * (0.6 + 0.4 * redondo), pontaV * pontaV * (0.30 + 0.25 * u_boca));
-  esmalte += vec3(0.75, 0.85, 1.0) * exp(-sq((u + 0.35) / 0.16)) * (0.30 + 0.70 * clamp(ao * 1.5, 0.0, 1.0)) * 0.38;
-  esmalte += vec3(0.85, 0.90, 1.0) * exp(-sq((ao - 0.90) / 0.06)) * exp(-sq((u + 0.2) / 0.5)) * 0.30;   // ponta molhada
-  esmalte += vec3(0.60, 0.25, 0.95) * pow(abs(u), 5.0) * contra;                                       // contraluz violeta
-  por(min(esmalte, vec3(1.0)) * escuro * (0.60 + 0.40 * fk), corpo);
-  }
+  float t = dot(q, dir) / L;                                    // 0 na raiz, 1 na ponta
+  if (t < -0.05 || t > 1.0) return;
+  float a = dot(q, lado) - curva * t * t;                       // atravessado, já descontando a curva
+  float w = wb * pow(1.0 - t, 1.1) * (1.0 + 0.9 * t * (1.0 - t));        // base cheia, ponta fina de espinho
+  float corpo = deg(AA_BOCA, -AA_BOCA, abs(a) - w) * vis;
+  if (corpo <= 0.0) return;
+  // a normal do cone: redonda de um lado ao outro, olhando um pouco para a ponta (ele afina)
+  float u = clamp(a / max(w, 0.0005), -1.0, 1.0);
+  float nz = sqrt(max(1.0 - u * u, 0.0));
+  vec3 Nl = normalize(vec3(u, 0.85 * wb / L * nz, nz));
+  float cg = cos(giro), sg = sin(giro);
+  Nl = vec3(Nl.x * cg + Nl.z * sg, Nl.y, -Nl.x * sg + Nl.z * cg);   // virada de lado na arcada
+  vec3 N = normalize(vec3(lado * Nl.x + dir * Nl.y, Nl.z));
+  vec3 Lk = normalize(vec3(-0.45, -0.55, 0.70));                // a luz principal: de cima, da esquerda
+  float dif = clamp((dot(N, Lk) + 0.25) / 1.25, 0.0, 1.0);      // osso é um pouco translúcido: sombra macia
+  // a cor: raiz escura, corpo de osso, ponta fina clareando; cada presa um tiquinho diferente, com estrias
+  vec3 alb = mix(OSSO_RAIZ, OSSO_CLARO, deg(0.0, 0.45, t)) * (0.90 + 0.10 * rnd(semente));
+  alb = mix(alb, vec3(0.95, 0.90, 0.82), deg(0.70, 1.0, t) * 0.30);
+  alb *= 0.93 + 0.07 * sin(u * 14.0 + semente * 9.0) * vn(vec2(semente * 5.0, t * 6.0));
+  vec3 c = alb * (0.025 + 1.10 * dif * dif) + vec3(0.020, 0.010, 0.030);
+  // o brilho molhado: um ponto forte e uma faixa larga e fraca, do lado da luz
+  vec3 H = normalize(Lk + vec3(0.0, 0.0, 1.0));
+  float nh = max(dot(N, H), 0.0);
+  c += vec3(0.95, 0.94, 1.0) * (pow(nh, 70.0) * 0.85 + pow(nh, 12.0) * 0.07);
+  // a luz da garganta por trás atravessa a beirada e a ponta, onde ela é fina
+  c += LUZ_GARGANTA * forcaLuzBoca * (pow(1.0 - Nl.z, 2.0) + deg(0.6, 1.0, t) * 0.4) * 0.12;
+  c *= 0.30 + 0.70 * deg(-0.05, 0.30, t);                        // a raiz some na gengiva
+  por(min(c * escuro, vec3(1.0)), corpo);
 }
 
-// uma fileira de dentes: acha a faixa do dente que passaria por este ponto (já contando a inclinação do leque)
-// e olha esse e os dois vizinhos; os maiores são desenhados por último, com a sombra caindo nos menores
-void fileira(vec2 p, float n, float sinal, float semente, float escuro, float presaA, float presaB,
-             float recuo, float escala, float contra, float vis) {
-  float meia = 0.50 + 0.03 * u_feliz;
-  vec4 lb = linhaDaBoca(p.x);
-  float xr = p.x + lb.w * (p.y - (sinal > 0.0 ? lb.x : lb.y));
-  float k = floor((xr + meia) / (2.0 * meia) * n);
-  float ka = k - 1.0, kb = k, kc = k + 1.0;
-  vec4 ma = medidaDente(ka, n, meia, semente, presaA, presaB, escala);
-  vec4 mb = medidaDente(kb, n, meia, semente, presaA, presaB, escala);
-  vec4 mc = medidaDente(kc, n, meia, semente, presaA, presaB, escala);
-  vec4 tv; float tk;
-  if (ma.z > mb.z) { tv = ma; ma = mb; mb = tv; tk = ka; ka = kb; kb = tk; }
-  if (mb.z > mc.z) { tv = mb; mb = mc; mc = tv; tk = kb; kb = kc; kc = tk; }
-  if (ma.z > mb.z) { tv = ma; ma = mb; mb = tv; tk = ka; ka = kb; kb = tk; }
-  vec4 rd;
-#ifndef LEVE
-  if (ka >= 0.0 && ka < n) { rd = raizDente(ma.x, sinal, recuo); dente(p, rd.xy, rd.zw, ma, curvaDente(ka, semente, ma.x), escuro, contra, vis); }
+// uma fileira na arcada: n presas de canto a canto. sinal 1 = de cima (pendem), -1 = de baixo (sobem);
+// desloc: meia presa na de baixo, para encaixar entre as de cima; tamL: o comprimento (fração do vão)
+void fileiraV2(vec2 p, float n, float larg, float sinal, float desloc, float semente, float tamL, float escala,
+               float escuro, float recuo, float presaK, float vis) {
+  float M = meiaDentes() * larg;
+  float passo = 2.0 * ARCO_MAX / n;
+  float fi = asin(clamp(p.x / M, -0.999, 0.999));
+  float k0 = floor((fi + ARCO_MAX) / passo - desloc);
+  float s = p.x < 0.0 ? -1.0 : 1.0;
+#ifdef LEVE
+  for (int i = 1; i < 2; i++) {                                 // leve: só a presa deste ponto
+#else
+  for (int i = 0; i < 3; i++) {
 #endif
-  if (kb >= 0.0 && kb < n) { rd = raizDente(mb.x, sinal, recuo); dente(p, rd.xy, rd.zw, mb, curvaDente(kb, semente, mb.x), escuro, contra, vis); }
-#ifndef LEVE
-  if (kc >= 0.0 && kc < n) { rd = raizDente(mc.x, sinal, recuo); dente(p, rd.xy, rd.zw, mc, curvaDente(kc, semente, mc.x), escuro, contra, vis); }
-#endif
-}
-
-// a língua: um tubo comprido que afina, vem do fundo da boca e, quando "ext" sobe, sai por cima dos dentes
-// de baixo e pende sobre o queixo, balançando. Molhada, com um sulco no meio.
-void lingua(vec2 p, float cima, float baixo, float ext, float interior) {
-  float vao = baixo - cima;
-  float balanca = 0.05 * sin(u_t * 2.3) + 0.03 * sin(u_t * 5.1);
-  vec2 base = vec2(0.0, cima + vao * 0.60);
-  vec2 ctrl = vec2(balanca * 0.6 + 0.04 * sin(u_t * 1.7), baixo + 0.02 + ext * 0.10);
-  vec2 ponta = vec2(balanca * (0.5 + 1.2 * ext) + 0.06 * ext * sin(u_t * 1.3), baixo - 0.02 + ext * 0.38);
-  float melhor = 9.0, tMelhor = 0.0, ladoS = 1.0;
-  vec2 a = base;
-  for (int i = 1; i <= 8; i++) {
-    float t = float(i) / 8.0;
-    vec2 b = mix(mix(base, ctrl, t), mix(ctrl, ponta, t), t);
-    vec2 ab = b - a;
-    float h = clamp(dot(p - a, ab) / dot(ab, ab), 0.0, 1.0);
-    vec2 w = p - a - ab * h;
-    float dd = length(w);
-    if (dd < melhor) { melhor = dd; tMelhor = (float(i) - 1.0 + h) / 8.0; ladoS = ab.x * w.y - ab.y * w.x < 0.0 ? -1.0 : 1.0; }
-    a = b;
-  }
-  float largura = 0.095 * (1.0 - pow(tMelhor, 2.2)) * (0.75 + 0.25 * u_boca);   // larga e chata, afinando até a ponta
-  float fora = step(baixo - 0.006, p.y) * step(0.30, ext);       // a parte que já saiu da boca
-  float corpo = deg(0.004, -0.004, melhor - largura) * max(interior, fora) * deg(0.0, 0.25, ext + u_boca);
-  if (!(corpo <= 0.0)) {
-  float us = ladoS * melhor / max(largura, 0.001);               // -1 a 1, de um lado ao outro
-  float tubo = pow(max(1.0 - us * us, 0.0), 0.25);
-  vec3 c = vec3(0.36, 0.07, 0.38) * (0.45 + 0.55 * tubo);
-  c *= 1.0 - 0.40 * exp(-sq(us / 0.12));                         // o sulco no meio
-  c += vec3(0.85, 0.75, 1.0) * exp(-sq((us + 0.45) / 0.14)) * 0.42;   // molhada
-  c += vec3(0.55, 0.20, 0.80) * (1.0 - tMelhor) * u_boca * 0.25;      // perto do fundo, a luz da garganta
-  por(c, corpo);
+    float k = k0 + s * (1.0 - float(i));                         // de fora para dentro: a da frente por último
+    if (k < 0.0 || k > n - 1.0) continue;
+    float fk = -ARCO_MAX + (k + 0.5 + desloc) * passo + (rnd(k + semente) - 0.5) * 0.18 * passo;
+    if (abs(fk) > ARCO_MAX) continue;
+    float xk = M * sin(fk);
+    float frente = cos(fk);                                      // 1 no meio; nos cantos ela está virada de lado
+    float perto = mix(0.62, 1.0, frente);                        // e mais para o fundo: parece menor
+    vec4 lr = linhaRepouso(xk);
+    vec4 lr2 = linhaRepouso(xk + 0.004);
+    float yg = sinal > 0.0 ? lr.x : lr.y + quedaMand(xk);
+    float yg2 = sinal > 0.0 ? lr2.x : lr2.y + quedaMand(xk + 0.004);
+    vec2 dir = normalize(vec2(-(yg2 - yg) / 0.004 * 0.55, 1.0)) * sinal;   // em leque, seguindo a curva da boca
+    float vao = max(lr.y - lr.x, 0.0);
+    float presaF = step(abs(abs(k + 0.5 + desloc - n * 0.5) - presaK), 0.5);   // as presas maiores
+    float L = max(vao * tamL * (0.80 + 0.40 * rnd(k + semente + 3.0)) * (1.0 + 0.28 * presaF), 0.016)
+            * perto * escala * (1.0 + 0.30 * u_dentes);
+    float wb = M * passo * 0.46 * mix(0.75, 1.0, frente) * (0.90 + 0.20 * rnd(k + semente + 7.0))
+             * (1.0 + 0.12 * presaF) * escala * (1.0 + 0.10 * u_dentes);
+    // a ponta pende para o meio da boca (mais nas de fora), e cada uma um pouco diferente
+    float curva = (-sign(xk) * sinal * (0.60 + 0.70 * rnd(k + semente + 11.0)) * deg(0.0, 0.10, abs(xk))
+                   + (rnd(k + semente + 13.0) - 0.5) * 0.40) * wb * (sinal > 0.0 ? 1.0 : 0.45);   // as de baixo quase retas
+    presa(p, vec2(xk, yg) + dir * (recuo - 0.004), dir, L, wb, curva, fk, escuro * mix(0.55, 1.0, frente), vis, k + semente);
   }
 }
 
-// um fio de saliva entre as mandíbulas: grosso no meio, fino onde gruda, com uma gota escorrendo
-float fioSaliva(vec2 p, float xs, float cima, float vao, float fase) {
-  float fundo = clamp((p.y - cima) / max(vao, 0.001), 0.0, 1.0);
-  float arco = sin(3.14159 * fundo);
-  float x = xs + 0.010 * sin(p.y * 30.0 + u_t * 2.5 + fase) + 0.016 * arco * sin(fase * 2.3);
-  float w = (0.0030 + 0.0060 * pow(arco, 0.6)) * (1.30 - 0.60 * u_boca);
-  float yg = cima + vao * (0.15 + 0.70 * fract(u_t * 0.22 + fase * 0.17));
-  w += 0.0065 * exp(-sq((p.y - yg) / 0.012));
-  return exp(-sq((p.x - x) / w));
+// a gengiva: carne violeta e molhada rente às raízes, abraçando cada presa (desce entre elas); a beirada,
+// que olha para dentro da boca, pega a luz da garganta. "exposta": quanto dela o lábio deixa ver
+void gengivaV2(vec2 p, float linha, float sinal, float n, float larg, float desloc, float vis, float exposta) {
+  float M = meiaDentes() * larg;
+  float passo = 2.0 * ARCO_MAX / n;
+  float fi = asin(clamp(p.x / M, -0.999, 0.999));
+  float fr = fract((fi + ARCO_MAX) / passo - desloc);
+  float arco = 1.0 - sq(2.0 * fr - 1.0);                         // 1 no meio de cada presa, 0 entre elas
+  float prof = (0.010 + 0.018 * (1.0 - arco)) * mix(0.6, 1.0, cos(fi));
+  float dentro = (p.y - linha) * sinal;                          // 0 na linha, crescendo para a ponta das presas
+  float topo = -exposta - 0.005;
+  float g = deg(prof + 0.003, prof - 0.003, dentro) * deg(topo - 0.003, topo + 0.003, dentro) * vis;
+  if (g <= 0.0) return;
+  float s = clamp((dentro - topo) / max(prof - topo, 0.002), 0.0, 1.0);   // 0 junto do lábio, 1 na beirada
+  vec3 N = virar(normalize(vec3(0.0, sinal * (s * 2.0 - 1.0) * 0.9, 0.55)));   // roliça
+  float lp = luzPontual(vec3(p, -0.015), N);
+  float manchas = 0.82 + 0.18 * vn(vec2(p.x * 60.0, dentro * 90.0 + sinal * 5.0));
+  vec3 c = CARNE_FUNDA + CARNE * (0.30 + 2.2 * lp) * manchas;
+  // molhada: brilha em pontinhos, onde ela vira para a luz de cima
+  float gotas = deg(0.62, 0.85, vn(vec2(p.x * 30.0, sinal * 11.0)));
+  c += vec3(0.85, 0.75, 1.0) * gotas * pow(max(dot(N, normalize(vec3(-0.3, -0.6, 0.75))), 0.0), 6.0) * 0.30;
+  c *= 0.25 + 0.75 * deg(0.0, 0.55, s);                          // escurece junto do lábio: acesa só na beirada
+  c *= 0.85 + 0.15 * sin(p.x * 95.0 + vn(vec2(p.x * 12.0, 3.0)) * 4.0) * deg(0.6, 0.2, s);   // dobras na carne exposta
+  c += vec3(0.50, 0.24, 0.80) * exp(-sq((prof - dentro) / 0.0035)) * (0.25 + 0.50 * forcaLuzBoca);   // o fio aceso na raiz
+  por(c, g);
 }
 
-// a boca: um rasgo de bochecha a bochecha, com lábio vincado e úmido. Aberta, é uma cavidade funda: céu da
-// boca com dobras, paredes escurecendo nos cantos, a garganta acesa lá no fundo, duas fileiras de dentes
-// (a de trás menor e no escuro), saliva grossa e a língua, que às vezes sai.
-void boca(vec2 P, vec2 torce) {
-  float x = P.x + 0.012 * torce.x, y = P.y + 0.012 * torce.y;
+// a boca: o rasgo de canto a canto (as mesmas linhas que já abrem com a fala, repuxam no alerta etc.)
+void bocaV2(vec2 P, vec2 torce) {
+  float x = P.x + 0.010 * torce.x, y = P.y + 0.010 * torce.y;
   vec2 p = vec2(x, y);
   vec4 lb = linhaDaBoca(x);
-  float meia = 0.50 + 0.03 * u_feliz;
-  float canto = 0.20 - 0.05 * u_feliz + 0.05 * u_torto;
+  vec4 lb2 = linhaDaBoca(x + 0.004);
+  vec4 lr = linhaRepouso(x);
+  float meia = meiaDentes() + 0.025 * u_boca;
+  float canto = BOCA_CANTO - 0.05 * u_feliz + 0.05 * u_torto;
   float cima = lb.x, baixo = lb.y, vao = baixo - cima;
-  float dentroX = step(abs(x), meia);
-  float d = dentroX > 0.5 ? abs(y - (cima + baixo) * 0.5) - vao * 0.5 : length(vec2(abs(x) - meia, y - canto));
-  if (!(d > 0.45)) {
-  float aberta = deg(0.05, 0.60, u_boca);
-  float ext = clamp(u_lingua, 0.0, 1.0);
-  // a luz violeta que vaza pelo vão
-  luz(ROXO, exp(-max(d, 0.0) / 0.040) * (0.04 + 0.11 * aberta));
-  // o vinco do lábio: escuro, colado ao vão; logo fora, um fio de reflexo molhado no lábio de cima
-  por(vec3(0.0, 0.0, 0.006), deg(0.032, 0.002, d) * 0.80);
+  float sU = (lb2.x - lb.x) / 0.004, sL = (lb2.y - lb.y) / 0.004;
+  float dU = (cima - y) / sqrt(1.0 + sU * sU);                   // + acima do lábio de cima
+  float dL = (y - baixo) / sqrt(1.0 + sL * sL);                  // + abaixo do lábio de baixo
+  float d = abs(x) < meia ? max(dU, dL) : length(vec2(abs(x) - meia, y - canto));
+  if (d > 0.30) return;
+  // a luz pontual: lá dentro, no meio da boca e para o fundo; pulsa devagar e acende mais quando ele fala
+  vec4 lc = linhaDaBoca(0.0);
+  luzBoca = vec3(0.0, lc.x + (lc.y - lc.x) * 0.58, -0.10);
+  forcaLuzBoca = (0.55 + 0.75 * u_boca + 0.25 * u_enfase + 0.20 * u_alerta) * (0.88 + 0.12 * vn(vec2(u_t * 1.3, 4.0)));
+  float dentro = deg(AA_BOCA, -AA_BOCA, d);
+  luz(LUZ_GARGANTA * 0.5, exp(-max(d, 0.0) / 0.035) * 0.05 * forcaLuzBoca * (1.0 - dentro));   // vaza pelo vão
+  if (dentro > 0.0) {
+    // o fundo: uma tigela escura (céu da boca em cima, chão embaixo), funda no meio, acesa pela garganta
+    float fy = clamp((y - cima) / max(vao, 0.001), 0.0, 1.0);
+    float fx = clamp(x / max(meia, 0.01), -1.0, 1.0);
+    float z = -0.10 * sin(3.14159 * fy) * sqrt(max(1.0 - fx * fx, 0.0));
+    vec3 N = normalize(vec3(-fx * 0.7, -(fy - 0.5) * 1.4, 1.0));
+    float lp = luzPontual(vec3(x, y, z), N);
+    float rugas = 0.5 + 0.5 * sin((fy * 7.0 + fx * fx * 2.5) * 6.2832 + vn(p * 30.0) * 2.0);
+    vec3 c = FUNDO_BOCA * (0.7 + 0.3 * vn(p * 25.0));
+    c += (LUZ_GARGANTA * 0.55 + CARNE * 0.45) * lp * (0.80 + 0.20 * rugas);
+    c += vec3(0.85, 0.75, 1.0) * deg(0.62, 0.85, vn(p * 70.0)) * lp * 0.25;   // molhado: pontinhos de brilho
+    float aberta = deg(0.25, 0.85, u_boca);
+    c *= 1.0 - 0.75 * exp(-sq(x / 0.13) - sq((fy - 0.62) / 0.22)) * aberta;   // a garganta: um buraco escuro no fundo
+    float ceu = (1.0 - deg(0.05, 0.40, fy)) * aberta;                      // o céu da boca: dobras em arco
+    c += CARNE * lp * 0.35 * ceu * pow(max(sin((fy * 9.0 + fx * fx * 3.0) * 3.14159), 0.0), 3.0);
+    c *= 0.35 + 0.65 * deg(0.0, 0.06, -d);                                 // escurece rente aos lábios
+    por(c, dentro);
+    float vis = deg(0.004, -0.004, d) * deg(0.010, 0.05, vao);
+    float quedaX = lr.y + quedaMand(x);
+    fileiraV2(p, 15.0, 0.90, -1.0, 0.5, 71.0, 0.57, 1.0, 0.92, 0.0, 2.0, vis);   // as de baixo (arcada mais estreita)
+    gengivaV2(p, quedaX, -1.0, 15.0, 0.90, 0.5, vis, max(baixo - quedaX, 0.0));
+    fileiraV2(p, 16.0, 0.96, 1.0, 0.0, 5.0, 0.52, 1.0, 1.0, 0.0, 3.0, vis);      // as de cima, na frente
+    gengivaV2(p, lr.x, 1.0, 16.0, 0.96, 0.0, vis, max(lr.x - cima, 0.0));
+    por(vec3(0.0, 0.0, 0.010), dentro * exp(-sq(max(-dU, 0.0) / 0.025)) * 0.40);   // a sombra do lábio de cima
+  }
+  // os lábios: a matéria negra da cabeça rolando para dentro da boca; a luz da garganta reflete na beirada
   float acima = step(y, (cima + baixo) * 0.5);
+  float fora = acima > 0.5 ? dU : dL;
+  float wl = mix(0.030, 0.042, 1.0 - acima) * (0.4 + 0.6 * deg(0.0, 0.25, lb.z));
+  if (abs(x) < meia && fora > -AA_BOCA && fora < wl) {
+    float s = clamp(fora / wl, 0.0, 1.0);
+    float th = (1.0 - s) * mix(0.95, 1.35, acima);               // na beirada a superfície vira para dentro
+    vec2 n2 = normalize(vec2(-(acima > 0.5 ? sU : sL), 1.0)) * (acima > 0.5 ? 1.0 : -1.0);
+    vec3 N = virar(normalize(vec3(n2 * sin(th), cos(th))));
+    vec3 c = materia(N, 0.55 + 0.45 * s);
+    c += LUZ_GARGANTA * luzPontual(vec3(p, 0.02), N) * 0.9;
+    c += REFLEXO * exp(-sq((fora - 0.003) / 0.0025)) * (0.06 + 0.10 * acima) * deg(0.35, 0.70, fbm3(vec2(x * 14.0, acima * 5.0)));
+    por(c, deg(wl, wl * 0.55, fora) * deg(-AA_BOCA, AA_BOCA, fora) * 0.92);
+  }
+  // os cantos: um vinco fundo subindo para as bochechas
   float ladoB = x < 0.0 ? -1.0 : 1.0;
-  vec2 dirV = vec2(ladoB * 0.55, -0.835);
+  vec2 dirV = normalize(vec2(ladoB * 0.75, -0.66));
   vec2 qv = vec2(x - ladoB * meia, y - canto);
-  float alV = clamp(dot(qv, dirV), 0.0, 0.075);
+  float alV = clamp(dot(qv, dirV), 0.0, 0.06);
   float dV = length(qv - dirV * alV);
-  float vaiV = (1.0 - alV / 0.075) * step(-0.01, dot(qv, dirV));
-  por(vec3(0.0, 0.0, 0.006), exp(-sq(dV / 0.007)) * vaiV * 0.80);
-  luz(vec3(0.55, 0.62, 0.95), exp(-sq((dV - 0.012) / 0.004)) * vaiV * 0.16 * step(qv.y, dirV.y * alV));
-  luz(vec3(0.62, 0.72, 1.0), exp(-sq((d - 0.024) / 0.0065)) * 0.20 * acima * deg(0.0, 0.35, lb.z) * (0.4 + 0.6 * deg(0.35, 0.65, fbm3(vec2(x * 9.0, 3.0)))));
-  float interior = deg(0.008, -0.008, d);
-  float fundo = clamp((y - cima) / max(vao, 0.001), 0.0, 1.0);
-  // a cavidade: preta perto das beiradas e dos cantos; dobras em arco no céu da boca; a garganta acesa no fundo
-  float garganta = exp(-(sq(x / (0.18 + 0.10 * aberta)) + sq((fundo - 0.60) / 0.30))) * u_boca;
-  vec3 cav = vec3(0.008, 0.004, 0.018) + vec3(0.40, 0.12, 0.60) * garganta * 0.90;
-  cav *= 0.45 + 0.55 * deg(0.0, 0.30, min(fundo, 1.0 - fundo) * 2.0);
-  float rugas = 0.5 + 0.5 * sin((fundo * 9.0 + x * x * 14.0) * 3.14159);
-  cav *= 1.0 - 0.35 * rugas * (1.0 - deg(0.10, 0.45, fundo)) * aberta;
-  cav *= 0.55 + 0.45 * deg(meia * 0.98, meia * 0.45, abs(x));
-  por(cav, interior);
-  // as gengivas: uma faixa escura e úmida rente aos dentes, com um fio de luz na beirada
-  float gengiva = exp(-sq((y - cima) / 0.016)) + exp(-sq((y - baixo) / 0.016));
-  por(vec3(0.09, 0.018, 0.10), interior * gengiva * 0.80 * aberta);
-  luz(vec3(0.55, 0.30, 0.75), interior * (exp(-sq((y - cima - 0.013) / 0.0045)) + exp(-sq((y - baixo + 0.013) / 0.0045))) * 0.30 * aberta);
-#ifndef LEVE
-  // a fileira de trás: menor, no escuro, só aparece com a boca aberta
-  float atras = interior * aberta;
-  if (atras > 0.0) {
-    fileira(p, 15.0, -1.0, 37.0, 0.26, -9.0, -9.0, 0.040, 0.55, 0.55 * aberta, atras);
-    fileira(p, 16.0, 1.0, 113.0, 0.30, -9.0, -9.0, 0.040, 0.60, 0.55 * aberta, atras);
-  }
-  // saliva grossa entre as presas
-  float temFio = interior * deg(0.38, 0.6, u_boca);
-  if (temFio > 0.0) {
-    float fio = max(max(fioSaliva(p, -0.33, cima, vao, 0.0), fioSaliva(p, -0.16, cima, vao, 1.7)),
-                    max(fioSaliva(p, 0.19, cima, vao, 3.1), fioSaliva(p, 0.35, cima, vao, 4.4)));
-    por(vec3(0.50, 0.40, 0.78), fio * temFio * 0.70);
-    luz(vec3(0.80, 0.85, 1.0), fio * temFio * 0.20);
-  }
-  if (ext < 0.35) lingua(p, cima, baixo, ext, interior);         // dentro: atrás dos dentes de baixo
-#endif
-  fileira(p, 19.0, -1.0, 5.0, 0.86, 4.0, -9.0, 0.0, 1.0, 0.45 * aberta, 1.0);
-  // a sombra do lábio de cima caindo para dentro da boca (escurece as pontas dos dentes de baixo)
-  por(vec3(0.0, 0.0, 0.010), interior * exp(-sq((y - cima) / 0.035)) * 0.50 * aberta);
-#ifndef LEVE
-  if (ext >= 0.35) lingua(p, cima, baixo, ext, interior);
-#endif        // saindo: na frente dos dentes de baixo
-  fileira(p, 20.0, 1.0, 71.0, 1.0, 3.0, 8.0, 0.0, 1.0, 0.45 * aberta, 1.0);
-  }
+  float vaiV = 1.0 - alV / 0.06;
+  por(vec3(0.0, 0.0, 0.006), exp(-sq(dV / 0.006)) * vaiV * 0.75);
+  luz(BRILHO_VIOLETA, exp(-sq((dV - 0.009) / 0.004)) * vaiV * 0.25);
 }
+
+
 
 void main() {
 #ifdef NO_APP
@@ -486,12 +578,23 @@ void main() {
   float pulo = sin(3.14159 * clamp((pr - 0.60) / 0.40, 0.0, 1.0));
   P.y -= 1.75 * (1.0 - sobe) - 0.05 * pulo;
 #endif
+  // o enquadramento da referência do dono: a cabeça inteira, do alto da testa ao queixo
+  P = P * 1.20 + vec2(0.0, -0.02);
   // a cabeça de lado: gira no plano da tela, em volta do pescoço
   float cr = cos(u_rolar), sr = sin(u_rolar);
   P = vec2(cr * P.x + sr * (P.y - 0.25), -sr * P.x + cr * (P.y - 0.25) + 0.25);
-  // virando e acenando: o meio do rosto, que está mais à frente, anda mais que a beirada
-  vec2 qd = vec2(P.x / 0.66, (P.y + 0.06) / 0.80);
-  vec2 Pf = P - u_giro * 0.16 * sqrt(max(1.0 - dot(qd, qd), 0.0));
+  // virando de verdade (pedido do dono, 14/10/2026): cada fatia da cabeça é um círculo visto de cima e virar
+  // gira a fatia, então as feições andam por cima da curva: o olho do lado de longe encolhe, o de perto cresce
+  // e a lateral do crânio aparece; a parte de baixo do rosto (à frente do eixo do pescoço) também anda para o
+  // lado. Pf = onde este ponto da tela fica no rosto visto de frente. Acenando, o meio do rosto anda mais.
+  float th = u_giro.x * 0.50;                                    // (o mesmo ângulo que gira a luz em virar())
+  float yr = P.y + 0.06;
+  float W = max(meiaLargura(yr), 0.06);
+  float s = (P.x - sin(th) * avanco(yr)) / W;
+  float sc = clamp(s, -1.0, 1.0);
+  float af = clamp(asin(sc) - th, -1.5708, 1.5708);
+  vec2 qd = vec2(P.x / 0.66, yr / 0.80);
+  vec2 Pf = vec2(W * (sin(af) + s - sc), P.y - u_giro.y * 0.16 * sqrt(max(1.0 - dot(qd, qd), 0.0)));
   col = vec3(0.0);
   alfa = 0.0;
   pele = 0.0;
@@ -507,7 +610,7 @@ void main() {
   vec3 fogo = mix(AZUL, LARANJA, u_alerta);
   cabeca(P, Pf, torce, fogo);
 #ifndef SEM_BOCA
-  boca(Pf, torce);
+  bocaV2(Pf, torce);
 #endif
 #ifndef SEM_OLHOS
   olho(Pf, -1.0, u_olho, 1.0, fogo, torce);

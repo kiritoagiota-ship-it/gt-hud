@@ -239,8 +239,11 @@ class Voz:
             som = SoundLoader.load(caminho)
         except Exception as e:
             print("[voz]", e)
-            return
+            som = None
         if som is None:
+            # esta fala não tocou: a fila segue (até a 1.0.94 ela parava aqui, as falas seguintes
+            # esperavam outra chegar e o Umbra ficava "falando" sem fim)
+            self._agendar(0.05)
             return
         self._som = som
         som.play()

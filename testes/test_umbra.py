@@ -431,6 +431,95 @@ class TesteConversa(unittest.TestCase):
         self.assertIsNone(self.rosto.modo)
         self.assertEqual(self.u.estado, umbra.OCULTO)
 
+    # --- consertos da varredura (15/10/2026) ---------------------------------------------
+    def test_lugar_achado_fica_na_legenda(self):
+        # ele pergunta "É esse aí? Vamos?": o nome e o endereço têm de FICAR na tela (até a 1.0.94
+        # a frase apagava na hora)
+        self.escuta.dizer("me leva pro shopping flamboyant")
+        self.u.chamar(agora=self.t)
+        self.andar(2.5)
+        self.app._resposta([{"nome": "Shopping Flamboyant", "endereco": "Av. Jamel Cecílio", "lat": -16.71,
+                             "lon": -49.24}])
+        self.assertEqual(self.rosto.legendas[-1][1], "Shopping Flamboyant\nAv. Jamel Cecílio")
+
+    def test_farmacia_achada_fica_na_legenda(self):
+        self.escuta.dizer("farmácia mais perto")
+        self.u.chamar(agora=self.t)
+        self.andar(2.5)
+        self.app._resposta([{"nome": "Drogasil", "endereco": "Rua 9", "lat": -16.69, "lon": -49.26}])
+        self.assertEqual(self.rosto.legendas[-1][1], "Drogasil\nRua 9")
+
+    def test_busca_de_conversa_velha_nao_troca_o_destino(self):
+        self.escuta.dizer("farmácia mais perto")
+        self.u.chamar(agora=self.t)
+        self.andar(2.5)
+        velha = self.app._resposta
+        self.u.fechar(agora=self.t)                    # o dono dispensou ele no meio da procura
+        self.andar(1)
+        self.escuta.dizer("me leva pra casa")
+        self.u.chamar(agora=self.t)
+        self.andar(2.5)
+        velha([{"nome": "Drogasil", "lat": -16.69, "lon": -49.26}])
+        self.assertEqual(self.app.destino["nome"], "Casa")
+        self.assertNotIn(("destino", "Drogasil"), self.app.feito)
+
+    def test_minimizado_aviso_nao_mexe_no_rosto(self):
+        self.app.nav = object()
+        self.u.pausar()                                # app minimizado
+        self.voz.falar(["radar"])
+        self.assertIsNone(self.rosto.modo)
+        self.assertEqual(self.u.estado, umbra.OCULTO)
+        self.u.retomar()
+        self.voz.falar(["lombada"])
+        self.assertEqual(self.rosto.modo, "pequeno")
+
+    def test_preferida_tranquila_espera_ela_chegar(self):
+        class Rota:
+            def __init__(self, nome):
+                self.nome_perfil = nome
+        self.app.ajustes["rota_preferida"] = "tranquila"
+        self.app.calculando_alternativas = True
+        self.escuta.dizer("me leva pra casa")
+        self.u.chamar(agora=self.t)
+        self.andar(3)
+        self.app.rota_previa = Rota("Mais rápida")      # a rápida chega primeiro
+        self.andar(4)
+        self.assertNotIn(("iniciar",), self.app.feito)  # espera a tranquila
+        self.app.rota_previa = Rota("Mais tranquila")   # chegou: sai por ela
+        self.app.calculando_alternativas = False
+        self.andar(2)
+        self.assertIn(("iniciar",), self.app.feito)
+
+    def test_preferida_tranquila_nao_espera_para_sempre(self):
+        class Rota:
+            nome_perfil = "Mais rápida"
+        self.app.ajustes["rota_preferida"] = "tranquila"
+        self.app.calculando_alternativas = True
+        self.escuta.dizer("me leva pra casa")
+        self.u.chamar(agora=self.t)
+        self.andar(3)
+        self.app.rota_previa = Rota()
+        self.andar(umbra.ESPERA_TRANQUILA_MAX_S + 1)
+        self.assertIn(("iniciar",), self.app.feito)
+
+    def test_dispensar_cala_a_frase(self):
+        self.u.chamar(agora=self.t)                    # cumprimentando
+        self.u.fechar(calar=True)
+        self.assertEqual(self.voz.caladas, 1)
+
+    def test_fim_normal_nao_corta_a_fala_da_rota(self):
+        self.escuta.dizer("me leva pra casa")
+        self.u.chamar(agora=self.t)
+        self.andar(3)
+        self.app.rota_previa = object()
+        self.andar(4)
+        self.assertIn(("iniciar",), self.app.feito)
+        self.assertEqual(self.voz.caladas, 0)          # ("rota calculada" da navegação segue)
+
+    def test_bateria_fraca_mesmo_limite_do_aviso(self):
+        import bateria
+        self.assertEqual(umbra.AVISO_BATERIA_M, bateria.AVISO_BAIXA_M)
+
 
 if __name__ == "__main__":
     unittest.main()

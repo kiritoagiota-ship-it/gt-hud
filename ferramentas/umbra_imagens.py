@@ -37,13 +37,13 @@ from PIL import Image  # noqa: E402
 
 from widgets.umbra_pintor import FONTE  # noqa: E402
 
-#            estado       boca  olho  inclina feliz torto alerta escuta palpebra
-ESTADOS = [("parado",     0.00, 1.00,  0.00, 0.0, 0.0, 0.0, 0.0, 0.08),
-           ("falando",    0.55, 1.00,  0.00, 0.0, 0.0, 0.0, 0.0, 0.05),
-           ("ouvindo",    0.14, 1.32, -0.15, 0.0, 0.0, 0.0, 0.0, 0.00),
-           ("confirmou",  0.08, 1.00, -0.35, 1.0, 0.0, 0.0, 0.0, 0.00),
-           ("confuso",    0.16, 1.00, -0.20, 0.0, 1.0, 0.0, 0.0, 0.05),
-           ("alerta",     0.05, 0.80,  0.90, 0.0, 0.0, 1.0, 0.0, 0.00)]
+#            estado       boca  olho  inclina feliz torto alerta escuta palpebra dentes
+ESTADOS = [("parado",     0.00, 1.00,  0.00, 0.0, 0.0, 0.0, 0.0, 0.08, 0.0),
+           ("falando",    0.55, 1.00,  0.00, 0.0, 0.0, 0.0, 0.0, 0.05, 0.3),
+           ("ouvindo",    0.14, 1.32, -0.15, 0.0, 0.0, 0.0, 0.0, 0.00, 0.0),
+           ("confirmou",  0.08, 1.00, -0.35, 1.0, 0.0, 0.0, 0.0, 0.00, 0.6),
+           ("confuso",    0.16, 1.00, -0.20, 0.0, 1.0, 0.0, 0.0, 0.05, 0.0),
+           ("alerta",     0.05, 0.80,  0.90, 0.0, 0.0, 1.0, 0.0, 0.00, 1.0)]
 
 
 class Tela(Widget):
@@ -94,12 +94,12 @@ class Gerador(App):
         if i >= len(ESTADOS):
             self.stop()
             return False
-        nome, boca, olho, inclina, feliz, torto, alerta, escuta, palpebra = ESTADOS[i]
+        nome, boca, olho, inclina, feliz, torto, alerta, escuta, palpebra, dentes = ESTADOS[i]
         c["u_res"] = [float(LADO), float(LADO)]
         c["u_t"] = 2.0
         for k, v in (("boca", boca), ("olho", olho), ("inclina", inclina), ("feliz", feliz), ("torto", torto),
                      ("alerta", alerta), ("escuta", escuta), ("palpebra", palpebra), ("brilho", 1.0),
-                     ("rolar", 0.0), ("enfase", 0.0), ("lingua", 0.0)):
+                     ("rolar", 0.0), ("enfase", 0.0), ("dentes", dentes)):
             c["u_" + k] = float(v)
         c["u_giro"] = [0.0, 0.0]
         c["u_olhar"] = [0.0, 0.0]

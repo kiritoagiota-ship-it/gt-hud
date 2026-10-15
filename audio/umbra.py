@@ -210,6 +210,7 @@ ANDANDO_KMH = 8.0           # já escutando, só para acima disso (o GPS parado 
 OUVIR_MAX_S = 12.0          # uma escuta que não termina sozinha
 ESPERA_ROTA_MAX_S = 30.0
 INICIAR_DEPOIS_S = 1.2      # a rota apareceu: um instante para ver antes de começar
+ESPERA_TRANQUILA_MAX_S = 20.0   # preferida "Tranquila": espera ela chegar (uns 7 s) antes de sair navegando
 FOLGA_FALA_S = 0.5          # depois de pedir uma fala, o tempo para ela começar
 VIGIA_PAUSA_S = 0.4         # entre uma escuta do nome e a próxima
 VIGIA_PAUSA_ERRO_S = 2.5    # o reconhecedor falhou (sem internet, ocupado): espera um pouco (vem um novo)
@@ -241,6 +242,8 @@ class Umbra:
         self._parcial_nome = None           # o nome apareceu no resultado parcial (e desde quando)
         self._parcial_desde = 0.0
         self._voltar_a_avisar = False       # anota no diagnóstico quando volta a escutar o nome
+        self._conversa = 0                  # muda a cada conversa: resposta de busca de uma conversa velha é ignorada
+        self._avisou_tranquila = False
         self.ultimo_pedido = None           # (para os testes e o diagnóstico) a última intenção
 
     # --- o rosto -----------------------------------------------------------------
@@ -258,6 +261,15 @@ class Umbra:
                 getattr(r, metodo)(*args)
             except Exception as e:
                 print("[umbra] rosto:", e)
+
+    def _na_tela(self, funcao):
+        """Resposta da internet: com o app minimizado ela chega na thread de segundo plano, que
+        não pode mexer na tela; fica para quando o app voltar (app.na_tela)."""
+        na_tela = getattr(self.app, "na_tela", None)
+        if na_tela is None:
+            funcao()
+        else:
+            na_tela(funcao)
 
     # --- falar -------------------------------------------------------------------
     def _falar(self, chave, depois, agora, estado_rosto="falando"):
@@ -293,6 +305,7 @@ class Umbra:
         self.escuta.parar()
         self._silencios = self._sem_entender = 0
         self._confirmando = False
+        self._nova_conversa()
         self._rosto_faz("olhar_para", 0)
         # andando, ele vem médio no canto e sem escurecer o mapa (pedido do dono, 14/10/2026)
         self._rosto_faz("mostrar", "medio" if self._andando() else "grande")
@@ -321,12 +334,22 @@ class Umbra:
             return 0
         return -1 if "esquerda" in acao else (1 if "direita" in acao else 0)
 
-    def fechar(self, agora=None):
-        """Some (tocou fora dele, ou terminou)."""
+    def _nova_conversa(self):
+        """Uma busca que ainda não respondeu fica para trás: a resposta dela não vale mais."""
+        self._conversa += 1
+        self._buscando = False
+        self._avisou_tranquila = False
+
+    def fechar(self, agora=None, calar=False):
+        """Some (terminou, ou o dono tocou nele / apertou Voltar). calar: o dono o dispensou,
+        então a frase que ele estava dizendo para no meio (antes ele sumia e seguia falando)."""
+        if calar and self.estado in (SAUDANDO, RESPONDENDO):
+            self.voz.calar()
         self.escuta.parar()
         self.estado = OCULTO
         self._depois = None
         self._confirmando = False
+        self._nova_conversa()
         self._rosto_faz("esconder")
 
     # --- os avisos da navegação: o Umbra pequeno -------------------------------------
@@ -334,6 +357,12 @@ class Umbra:
         """A voz começou uma fala (voz.ao_tocar). Se for um dos avisos escolhidos, o Umbra
         pequeno aparece enquanto ela dura."""
         if self.conversando or not pedacos:
+            return
+        if self.pausado:
+            # app minimizado: quem chama aqui é a thread de segundo plano (a fala da navegação), e
+            # tela não se mexe fora da thread do Kivy. Até a 1.0.94 o rosto "aparecia" escondido
+            # e a etapa do desenho ficava marcada: fechado assim, o app achava na abertura seguinte
+            # que o desenho do Umbra tinha derrubado o app e rebaixava o rosto à toa.
             return
         chaves = set(pedacos)
         navegando = getattr(self.app, "nav", None) is not None
@@ -433,8 +462,9 @@ class Umbra:
             else:
                 self._falar(self._uma("umbra_tchau"), "sair", agora)
         elif sit == "sem":
-            self._rosto_faz("legenda", None, "O celular não tem reconhecimento de voz.")
             self._falar("umbra_tchau", "sair", agora)
+            # (depois da fala: _falar põe a frase dita na legenda e apagava o motivo)
+            self._rosto_faz("legenda", None, "O celular não tem reconhecimento de voz.")
 
     # --- o que fazer com o pedido ------------------------------------------------------
     def _processar(self, alternativas, agora):
@@ -544,33 +574,39 @@ class Umbra:
         self._buscando = True
         termos = next((t for nome, t in _categorias() if nome == categoria), ())
         origem = app.posicao
+        minha = self._conversa
 
         def procurar():
             import busca
             return busca.perto_por_categoria(termos, origem, 1)
 
         def achou(lista):
+            if minha != self._conversa or not self.conversando:
+                return                 # a conversa dessa busca já acabou: não troca o destino de agora
             self._buscando = False
-            if not self.conversando:
-                return
             if not lista:
                 self._falar("umbra_nada_perto", "sair", self._t, "confuso")
                 return
             lugar = lista[0]
-            self._rosto_faz("legenda", None, lugar.get("nome", ""))
             self._ir_para(dict(lugar))
             self._confirmando = True
             self._falar("umbra_achou", "ouvir", self._t, "confirmou")
+            self._rosto_faz("legenda", None, _texto_do_lugar(lugar))   # (depois da fala: senão ela apaga)
 
         def falhou(erro):
+            if minha != self._conversa or not self.conversando:
+                return
             self._buscando = False
-            if self.conversando:
-                self._falar("umbra_nada_perto", "sair", self._t, "confuso")
-        rodar = getattr(app, "em_segundo_plano", None)
+            self._falar("umbra_nada_perto", "sair", self._t, "confuso")
+        self._rodar(procurar, achou, falhou)
+
+    def _rodar(self, procurar, achou, falhou):
+        """procurar() numa thread; achou/falhou de volta na tela."""
+        rodar = getattr(self.app, "em_segundo_plano", None)
         if rodar is None:
             import rede
             rodar = rede.em_segundo_plano
-        rodar(procurar, achou, falhou)
+        rodar(procurar, lambda r: self._na_tela(lambda: achou(r)), lambda e: self._na_tela(lambda: falhou(e)))
 
     def _lugar(self, nome, agora, tentativa=False):
         """"Me leva pro Flamboyant": busca o lugar (a mesma busca da tela), mostra a rota e
@@ -586,6 +622,7 @@ class Umbra:
             chave = (app.ajustes["tomtom"] or "").strip() or None
         except Exception:
             chave = None
+        minha = self._conversa
 
         def procurar():
             import busca
@@ -598,40 +635,54 @@ class Umbra:
                 self._falar(_ou("umbra_nao_achou", "umbra_nada_perto"), "sair", self._t, "confuso")
 
         def achou(lista):
+            if minha != self._conversa or not self.conversando:
+                return                 # a conversa dessa busca já acabou: não troca o destino de agora
             self._buscando = False
-            if not self.conversando:
-                return
             lista = [l for l in (lista or []) if l.get("lat") is not None]
             if not lista:
                 nada()
                 return
             lugar = _o_de_goiania(lista)
-            texto = lugar.get("nome", "")
-            if lugar.get("endereco"):
-                texto += "\n" + lugar["endereco"]
-            self._rosto_faz("legenda", None, texto)
             self._ir_para(dict(lugar))
             self._confirmando = True
             self._falar(_ou("umbra_lugar_achado", "umbra_achou"), "ouvir", self._t, "confirmou")
+            # o nome e o endereço DEPOIS da fala: ele pergunta "É esse aí?" e a pessoa precisa ver
+            # qual (até a 1.0.94 a frase apagava a legenda na hora)
+            self._rosto_faz("legenda", None, _texto_do_lugar(lugar))
 
         def falhou(erro):
+            if minha != self._conversa or not self.conversando:
+                return
             self._buscando = False
-            if self.conversando:
-                nada()
-        rodar = getattr(app, "em_segundo_plano", None)
-        if rodar is None:
-            import rede
-            rodar = rede.em_segundo_plano
-        rodar(procurar, achou, falhou)
+            nada()
+        self._rodar(procurar, achou, falhou)
+
+    def _quer_tranquila(self):
+        """A preferida nos Ajustes é a Tranquila e ela ainda está sendo calculada (a mais rápida
+        chega primeiro, a tranquila uns 7 s depois)."""
+        app = self.app
+        try:
+            if app.ajustes["rota_preferida"] != "tranquila" or not getattr(app, "calculando_alternativas", False):
+                return False
+        except (KeyError, TypeError):
+            return False
+        return "tranquila" not in (getattr(app.rota_previa, "nome_perfil", "") or "")
 
     def _esperando_rota(self, agora):
         app = self.app
         if app.nav is not None:
             self.fechar(agora)
         elif getattr(app, "rota_previa", None) is not None:
-            if agora - self._desde > INICIAR_DEPOIS_S:
-                app.iniciar_navegacao()
-                self.fechar(agora)
+            if agora - self._desde <= INICIAR_DEPOIS_S:
+                return
+            if self._quer_tranquila() and agora - self._desde < ESPERA_TRANQUILA_MAX_S:
+                # pedido pela voz respeita a preferida: até a 1.0.94 ele saía pela mais rápida
+                if not self._avisou_tranquila:
+                    self._avisou_tranquila = True
+                    self._rosto_faz("legenda", None, "Buscando a rota mais tranquila...")
+                return
+            app.iniciar_navegacao()
+            self.fechar(agora)
         elif getattr(app, "destino", None) is None or agora - self._desde > ESPERA_ROTA_MAX_S:
             self.fechar(agora)                         # cancelou, ou a rota não veio (a prévia avisa o porquê)
 
@@ -717,7 +768,17 @@ class Umbra:
         self.chamar(resto, agora)
 
 
-AVISO_BATERIA_M = 6000      # com menos que isso pela frente, "bateria fraca"
+# com menos que isso pela frente, "bateria fraca": o MESMO limite do aviso automático (bateria.py);
+# até a 1.0.94 aqui era 6 km e lá 5 km
+from bateria import AVISO_BAIXA_M as AVISO_BATERIA_M  # noqa: E402
+
+
+def _texto_do_lugar(lugar):
+    """O que vai na legenda quando ele acha um lugar: o nome e, embaixo, o endereço."""
+    texto = lugar.get("nome", "")
+    if lugar.get("endereco"):
+        texto += "\n" + lugar["endereco"]
+    return texto
 
 
 def _familia(base):

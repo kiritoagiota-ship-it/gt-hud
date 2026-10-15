@@ -439,7 +439,7 @@ class TelaMapa(Screen):
         self.add_widget(self.raiz)
         from widgets.rosto_umbra import RostoUmbra
         self.rosto_umbra = RostoUmbra(voz=app.voz, escuta=app.escuta)
-        self.rosto_umbra.ao_tocar_fora = lambda: app.umbra.fechar()
+        self.rosto_umbra.ao_tocar_fora = lambda: app.umbra.fechar(calar=True)
         self.rosto_umbra.lugar_pequeno = self._lugar_umbra
         # o desenho ao vivo derrubou o app nesta versão: desenho leve ou imagens prontas
         self.rosto_umbra.nivel = app.nivel_rosto_umbra()

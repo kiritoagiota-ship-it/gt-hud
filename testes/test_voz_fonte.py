@@ -74,5 +74,20 @@ class TesteFonteDaVoz(unittest.TestCase):
         self.assertEqual(self.gravadas, [["senhor", "em_200", "vire_direita"]])
 
 
+class TesteFilaNaoTrava(unittest.TestCase):
+    def test_fala_que_nao_toca_deixa_a_fila_andar(self):
+        # até a 1.0.94: um áudio que não abria parava a fila (nada agendava a próxima fala) e o
+        # Umbra ficava "falando" esperando ela acabar
+        from unittest import mock
+        pasta = tempfile.TemporaryDirectory()
+        self.addCleanup(pasta.cleanup)
+        v = voz.Voz(pasta.name)
+        agendadas = []
+        v._agendar = agendadas.append
+        with mock.patch.object(voz.SoundLoader, "load", return_value=None):
+            v._tocar_gravada(["senhor"], 0.0)
+        self.assertTrue(agendadas)
+
+
 if __name__ == "__main__":
     unittest.main()

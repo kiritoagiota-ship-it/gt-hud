@@ -441,6 +441,16 @@ class GTHudApp(App):
     def guardar_tudo_ao_fechar(self):
         """O que não pode se perder quando o app é encerrado por fora (recentes, botão
         "Encerrar" da notificação): pode rodar na thread de segundo plano."""
+        # o app vai ser encerrado de propósito: nenhuma etapa arriscada do Umbra pode ficar marcada
+        # como "em curso" (até a 1.0.94, "Encerrar" no meio da escuta do nome fazia a próxima
+        # abertura achar que o reconhecimento de voz tinha derrubado o app e desligar a escuta;
+        # no meio do desenho, rebaixava o rosto)
+        try:
+            self.escuta.desligar()
+            for etapa in ("umbra_escuta", "umbra_rosto"):
+                diagnostico.etapa_ok(etapa)
+        except Exception as e:
+            print("[umbra] ao fechar:", e)
         self.bateria.guardar()
         self._guardar_posicao()
         try:   # a viagem que estava sendo gravada (a 1.0.71 perdia: fechava sem salvar)
@@ -459,6 +469,7 @@ class GTHudApp(App):
         self.parar_corrida()
         self.fundo.terminou()
         self.escuta.desligar()
+        diagnostico.etapa_ok("umbra_rosto")   # (fechou de propósito: não foi queda do desenho)
         self.salvar_viagem_atual()  # não perde a viagem se o app fechar
         self.gps.parar()
 
@@ -896,10 +907,11 @@ class GTHudApp(App):
         self._pedido += 1
         pedido = self._pedido
         origem, rumo, alvo = self.posicao, self.rumo_recente(), (lugar["lat"], lugar["lon"])
-        # 1º a mais rápida (aparece logo); as outras opções chegam depois
+        # 1º a mais rápida (aparece logo); as outras opções chegam depois. As respostas mexem na
+        # tela: com o app minimizado elas esperam ele voltar (na_tela)
         rede.em_segundo_plano(lambda: rotas.pedir_rota(origem, alvo, rumo, lugar["nome"]),
-                              lambda r: self._rota_pronta(r, pedido, origem, rumo, alvo),
-                              self._rota_falhou)
+                              lambda r: self.na_tela(lambda: self._rota_pronta(r, pedido, origem, rumo, alvo)),
+                              lambda e: self.na_tela(lambda: self._rota_falhou(e, pedido)))
 
     def _rota_pronta(self, rota, pedido, origem, rumo, alvo):
         if self.destino is None or pedido != self._pedido:
@@ -915,13 +927,13 @@ class GTHudApp(App):
         nome = self.destino["nome"]
         def parcial(lista):
             # a primeira rota tranquila aparece em uns 7 s; o refino segue por trás
-            rede._entregar(lambda l: self._alternativas_prontas(l, pedido, final=False), lista)
+            rede._entregar(lambda l: self.na_tela(lambda: self._alternativas_prontas(l, pedido, final=False)), lista)
         chave_tomtom = transito.chave_em_uso(self.ajustes) or None
         self.noite_na_previa = noite = tema.e_noite(origem[0], origem[1])
         rede.em_segundo_plano(lambda: rotas.pedir_alternativas(origem, alvo, rumo, nome, [rota], parcial,
                                                                chave_tomtom=chave_tomtom, noite=noite),
-                              lambda rs: self._alternativas_prontas(rs, pedido),
-                              lambda e: self._alternativas_prontas([rota], pedido))
+                              lambda rs: self.na_tela(lambda: self._alternativas_prontas(rs, pedido)),
+                              lambda e: self.na_tela(lambda: self._alternativas_prontas([rota], pedido)))
 
     def _alternativas_prontas(self, lista, pedido, final=True):
         if pedido != self._pedido or self.destino is None or self.nav is not None:
@@ -982,7 +994,7 @@ class GTHudApp(App):
                 self.chuva_prevista = previsao
             if self.rota_previa is not None:
                 self.sm.get_screen("mapa").mostrar_previa(self.rota_previa, self.rotas_previa, enquadrar=False)
-        rede.em_segundo_plano(olhar, pronto, lambda e: None)
+        rede.em_segundo_plano(olhar, lambda p: self.na_tela(lambda: pronto(p)), lambda e: None)
 
     def atualizar_transito_do_mapa(self, dt=None):
         """O trânsito de Goiânia desenhado no mapa, mesmo sem rota (acidentes,
@@ -1176,8 +1188,10 @@ class GTHudApp(App):
         self.rota_previa = rota
         self.sm.get_screen("mapa").mostrar_previa(rota, self.rotas_previa, enquadrar=False)
 
-    def _rota_falhou(self, erro):
-        if self.destino is None:
+    def _rota_falhou(self, erro, pedido=None):
+        # a falha de um pedido VELHO (trocou de destino enquanto calculava) não pinta de erro a
+        # prévia do destino novo nem desliga o Iniciar dela (até a 1.0.94 pintava)
+        if self.destino is None or (pedido is not None and pedido != self._pedido):
             return
         tela = self.sm.get_screen("mapa")
         if isinstance(erro, rotas.SemRota):
@@ -1339,7 +1353,8 @@ class GTHudApp(App):
                 tela.fechar_escolha_nav()
                 tela.mensagem("Sem internet agora: sigo na rota atual. Tente de novo mais à frente.",
                               tema.LARANJA, 5)
-        rede.em_segundo_plano(todas, prontas, falhou)
+        rede.em_segundo_plano(todas, lambda l: self.na_tela(lambda: prontas(l)),
+                              lambda e: self.na_tela(lambda: falhou(e)))
 
     def trocar_rota_navegando(self, rota):
         if self.nav is None:
@@ -1661,6 +1676,10 @@ class GTHudApp(App):
             return True
         if atual in ("viagens", "config", "hud", "busca"):
             self.voltar()
+            return True
+        if self.umbra.conversando:
+            # o Umbra aberto: Voltar fecha ELE (até a 1.0.94, sem rota nem gravação, fechava o app)
+            self.umbra.fechar(calar=True)
             return True
         if atual == "mapa":
             if self.sm.get_screen("mapa").estado == "previa":

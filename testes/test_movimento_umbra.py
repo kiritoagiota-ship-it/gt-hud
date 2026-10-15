@@ -44,6 +44,38 @@ class TesteMovimento(unittest.TestCase):
         self.assertLess(max(giros), 1.0)            # a cabeça só vira um pouco
         self.assertLess(max(olhares), 1.2)          # e o olhar fica dentro do olho (antes ia a 1e38)
 
+    def test_dentes_crescem_quando_ele_se_anima(self):
+        def dentes(estado, voz=0.0, segundos=2.0):
+            mov = Movimento(sorteio=random.Random(2))
+            t, dt = 0.0, 1.0 / 60
+            mov.quadro(t, dt, 0.0)
+            mov.mudar(estado, t)
+            u = None
+            for _ in range(int(segundos / dt)):
+                u = mov.quadro(t, dt, voz)
+                t += dt
+            return u["dentes"]
+        self.assertLess(dentes("parado"), 0.05)
+        self.assertGreater(dentes("alerta"), 0.85)               # ameaçando: dentes no máximo
+        self.assertGreater(dentes("confirmou"), 0.45)            # contente: sorrisão
+        self.assertGreater(dentes("falando", voz=0.95), 0.40)    # falando forte: crescem com a ênfase
+
+    def test_mordida_no_fim_da_silaba(self):
+        mov = Movimento(sorteio=random.Random(4))
+        t, dt = 0.0, 1.0 / 60
+        mov.quadro(t, dt, 0.0)
+        mov.mudar("falando", t)
+        bocas = []
+        for i in range(int(1.2 / dt)):
+            voz = 0.9 if i < int(0.4 / dt) else 0.0               # uma sílaba forte e depois silêncio
+            bocas.append(mov.quadro(t, dt, voz)["boca"])
+            t += dt
+        fim_da_silaba = int(0.4 / dt)
+        self.assertGreater(max(bocas), 0.6)                         # abriu
+        self.assertLess(min(bocas[fim_da_silaba:]), -0.02)          # fechou passando um tiquinho: os dentes batem
+        self.assertGreaterEqual(min(bocas), -0.10)                  # sem exagero
+        self.assertAlmostEqual(bocas[-1], 0.0, delta=0.02)          # e assentou
+
 
 if __name__ == "__main__":
     unittest.main()

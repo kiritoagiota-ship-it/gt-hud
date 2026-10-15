@@ -30,7 +30,7 @@ import wave
 
 from kivy.animation import Animation
 from kivy.clock import Clock
-from kivy.graphics import Color, InstructionGroup, Rectangle, RenderContext
+from kivy.graphics import Color, InstructionGroup, Rectangle, RenderContext, RoundedRectangle
 from kivy.graphics import opengl as gl
 from kivy.metrics import dp, sp
 from kivy.properties import NumericProperty
@@ -56,22 +56,23 @@ PASTA_IMAGENS = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__f
 
 FALA_ATE = {"falando": 99.0}
 ALVOS = {
-    # olho, inclina, feliz, torto, alerta, escuta, boca (sem voz), giroX, giroY, rolar, pálpebra
+    # olho, inclina, feliz, torto, alerta, escuta, boca (sem voz), giroX, giroY, rolar, pálpebra,
+    # dentes (ainda maiores: contente e ameaçando; falando, crescem nas sílabas fortes)
     "parado":    dict(olho=1.0, inclina=0.0, feliz=0.0, torto=0.0, alerta=0.0, escuta=0.0, boca=0.0,
-                      giroX=0.0, giroY=0.0, rolar=0.0, palpebra=0.08),
+                      giroX=0.0, giroY=0.0, rolar=0.0, palpebra=0.08, dentes=0.0),
     "ouvindo":   dict(olho=1.32, inclina=-0.15, feliz=0.0, torto=0.0, alerta=0.0, escuta=1.0, boca=0.14,
-                      giroX=0.0, giroY=0.18, rolar=0.0, palpebra=0.0),
+                      giroX=0.0, giroY=0.18, rolar=0.0, palpebra=0.0, dentes=0.0),
     "falando":   dict(olho=1.0, inclina=0.0, feliz=0.0, torto=0.0, alerta=0.0, escuta=0.0, boca=0.0,
-                      giroX=0.0, giroY=0.0, rolar=0.0, palpebra=0.05),
+                      giroX=0.0, giroY=0.0, rolar=0.0, palpebra=0.05, dentes=0.0),
     "confirmou": dict(olho=1.0, inclina=-0.35, feliz=1.0, torto=0.0, alerta=0.0, escuta=0.0, boca=0.08,
-                      giroX=0.0, giroY=0.05, rolar=0.0, palpebra=0.0),
+                      giroX=0.0, giroY=0.05, rolar=0.0, palpebra=0.0, dentes=0.6),
     "confuso":   dict(olho=1.0, inclina=-0.2, feliz=0.0, torto=1.0, alerta=0.0, escuta=0.0, boca=0.16,
-                      giroX=0.25, giroY=-0.05, rolar=0.12, palpebra=0.05),
+                      giroX=0.25, giroY=-0.05, rolar=0.12, palpebra=0.05, dentes=0.0),
     "alerta":    dict(olho=0.8, inclina=0.9, feliz=0.0, torto=0.0, alerta=1.0, escuta=0.0, boca=0.05,
-                      giroX=0.0, giroY=-0.10, rolar=0.0, palpebra=0.0),
+                      giroX=0.0, giroY=-0.10, rolar=0.0, palpebra=0.0, dentes=1.0),
     # procurando o lugar: olhos estreitos, cabeça baixa varrendo de um lado a outro, fungadas
     "farejando": dict(olho=0.62, inclina=0.35, feliz=0.0, torto=0.0, alerta=0.0, escuta=0.0, boca=0.06,
-                      giroX=0.0, giroY=-0.12, rolar=0.0, palpebra=0.30),
+                      giroX=0.0, giroY=-0.12, rolar=0.0, palpebra=0.30, dentes=0.15),
 }
 
 
@@ -114,8 +115,9 @@ class Movimento:
         self.estado = nome
         if nome == "alerta":                       # susto
             self.empurrar("olho", 9); self.empurrar("brilho", 16); self.empurrar("giroY", -5); self.empurrar("giroX", 1.5)
+            self.empurrar("dentes", 5)              # e mostra os dentes
         elif nome == "confirmou":                  # aceno
-            self.empurrar("giroY", 7); self.empurrar("brilho", 4)
+            self.empurrar("giroY", 7); self.empurrar("brilho", 4); self.empurrar("dentes", 3)
         elif nome == "confuso":                    # cabeça de lado
             self.empurrar("rolar", 1.4); self.empurrar("giroX", 2.5)
         elif nome == "farejando":                  # baixa a cabeça para farejar
@@ -166,8 +168,9 @@ class Movimento:
         farejando = self.estado == "farejando"
         fungada = max(0.0, math.sin(t * 9.0)) ** 6 * (1.0 if math.sin(t * 1.3) > 0.2 else 0.0) if farejando else 0.0
         u = {}
-        u["giro"] = (self.mola("giroX", al["giroX"] + 0.22 * _deriva(t, 0) + 0.28 * ox
-                               + (0.30 * math.sin(t * 1.9) if farejando else 0.0) + 0.30 * self.direcao
+        # (14/10/2026: a cabeça agora vira com profundidade, então vira mais: o olhar puxa a cabeça junto)
+        u["giro"] = (self.mola("giroX", al["giroX"] + 0.32 * _deriva(t, 0) + 0.42 * ox
+                               + (0.40 * math.sin(t * 1.9) if farejando else 0.0) + 0.50 * self.direcao
                                + (0.06 * math.sin(t * 2.7) if falando else 0.0), dt, 1.1, 0.55),
                      self.mola("giroY", al["giroY"] + 0.12 * _deriva(t, 4) + 0.30 * e, dt, 1.6, 0.45))
         u["olhar"] = (ox, oy)
@@ -180,10 +183,20 @@ class Movimento:
         u["escuta"] = _lim(self.mola("escuta", al["escuta"], dt, 2.0, 1.0), 0.0, 1.0)
         u["brilho"] = _lim(self.mola("brilho", 1 + 0.05 * math.sin(t * 1.1) + 0.35 * nivel_ouvindo, dt, 2.0, 0.5),
                            0.5, 2.2)
-        u["boca"] = _lim(self.mola("boca", 0.10 + voz_v * 0.75 if falando else al["boca"], dt, 7.0, 0.85), 0.0, 1.0)
+        # a mordida: fechando, a mandíbula volta rápido e passa um tiquinho do ponto (os dentes batem, com
+        # um tranco leve na cabeça) e assenta; abrindo, segue a voz
+        alvo_boca = 0.10 + voz_v * 0.75 if falando else al["boca"]
+        m = self.molas.get("boca")
+        antes = m[0] if m is not None else alvo_boca
+        fechando = alvo_boca < antes - 0.03
+        boca = self.mola("boca", alvo_boca, dt, 11.0 if fechando else 7.0, 0.60 if fechando else 0.85)
+        if fechando and antes > alvo_boca + 0.04 and boca <= alvo_boca + 0.005:
+            self.empurrar("giroY", 1.2)
+        u["boca"] = _lim(boca, -0.10, 1.0)
         u["enfase"] = _lim(self.mola("enfase", e, dt, 6.0, 0.9), 0.0, 1.0)
+        # dentes ainda maiores quando ele se anima: contente, ameaçando e nas sílabas fortes da fala
+        u["dentes"] = _lim(self.mola("dentes", al["dentes"] + 0.55 * e, dt, 4.0, 0.7), 0.0, 1.2)
         u["palpebra"] = _lim(max(self._piscada(t), al["palpebra"]), 0.0, 1.0)
-        u["lingua"] = 0.0             # a língua fica de lado por enquanto (pedido do dono, 14/10/2026)
         return u
 
 
@@ -256,7 +269,7 @@ class RostoUmbra(Widget):
         self.lugar_pequeno = None       # função (largura, altura, lado) -> (x, y) do canto dele
         self.quebrado = False           # o desenho não compilou neste aparelho: não aparece
         self.simples = False            # usa as imagens prontas (o desenho ao vivo derrubou o app aqui)
-        self.nivel = 0                  # 0 desenho completo, 1 leve (sem língua, saliva, fileira de trás...)
+        self.nivel = 0                  # 0 desenho completo, 1 leve (sem saliva, fileira de trás...)
         self._texturas = {}
         self._bob = 0.0
         self._quadros_ok = -1
@@ -278,6 +291,11 @@ class RostoUmbra(Widget):
             # o modo simples: uma imagem pronta comum
             self._cor_img = Color(1, 1, 1, 0)
             self._ret_img = Rectangle(size=(0, 0))
+            # médio (chamado andando) o mapa não escurece: a legenda ganha uma placa escura por
+            # trás, para ler de relance no sol (até a 1.0.94 ficava solta em cima das ruas)
+            self._cor_placa = Color(0.016, 0.012, 0.05, 0.0)
+            self._placa = RoundedRectangle(size=(0, 0), radius=[dp(10)])
+        self._placa_medio = False
         self._rc = None
         self._ret_vivo = None
         self.lbl_ouvido = Texto(text="", font_size=sp(15), color=tema.CIANO_FRACO,
@@ -286,6 +304,8 @@ class RostoUmbra(Widget):
                               halign="center", size_hint=(None, None), opacity=0)
         self.add_widget(self.lbl_ouvido)
         self.add_widget(self.lbl_fala)
+        for lbl in (self.lbl_ouvido, self.lbl_fala):
+            lbl.bind(texture_size=self._redesenhar, opacity=self._redesenhar)
         self.bind(size=self._geometria, pos=self._geometria, presenca=self._redesenhar,
                   rx=self._redesenhar, ry=self._redesenhar, rlado=self._redesenhar)
 
@@ -295,6 +315,7 @@ class RostoUmbra(Widget):
             return
         primeira = self.presenca < 0.05
         self.modo = modo
+        self._placa_medio = modo == "medio"
         x, y, lado = self._alvo()
         Animation.cancel_all(self)
         if primeira:
@@ -383,6 +404,7 @@ class RostoUmbra(Widget):
         base = self.ry - dp(8)
         self.lbl_fala.pos = (self.x + dp(16), base - self.lbl_fala.height)
         self.lbl_ouvido.pos = (self.x + dp(16), self.lbl_fala.y - self.lbl_ouvido.height)
+        self._por_placa()
         self._veu.pos, self._veu.size = self.pos, self.size
         self._cor_veu.a = VEU * p if self.modo == "grande" or (self.modo is None and self._cor_veu.a > 0.0) else 0.0
         escala = (0.86 + 0.14 * p) if self.simples else 1.0   # ao vivo, quem anima é a subida
@@ -399,6 +421,26 @@ class RostoUmbra(Widget):
             self._ret_vivo.pos = pos
             self._ret_vivo.size = (lado, lado) if (visivel and self._compilado) else (0, 0)
             self._ret_img.size = (0, 0)
+
+    def _por_placa(self):
+        """A placa escura atrás do texto da legenda (só no médio): cobre o texto das duas linhas
+        (o Label desenha o texto centrado na própria caixa) com uma folga."""
+        caixas = []
+        for lbl in (self.lbl_fala, self.lbl_ouvido):
+            tw, th = lbl.texture_size
+            if lbl.text and tw > 0 and th > 0:
+                caixas.append((lbl.center_x - tw / 2.0, lbl.center_y - th / 2.0, tw, th))
+        if not (self._placa_medio and caixas):
+            self._cor_placa.a = 0.0
+            self._placa.size = (0, 0)
+            return
+        folga = dp(10)
+        x0 = min(c[0] for c in caixas) - folga
+        y0 = min(c[1] for c in caixas) - folga * 0.6
+        x1 = max(c[0] + c[2] for c in caixas) + folga
+        y1 = max(c[1] + c[3] for c in caixas) + folga * 0.6
+        self._placa.pos, self._placa.size = (x0, y0), (x1 - x0, y1 - y0)
+        self._cor_placa.a = 0.78 * self.lbl_fala.opacity
 
     # --- o modo simples: imagens prontas (dados/umbra), sem desenho ao vivo ---------------------
     def _textura(self, nome):
@@ -426,8 +468,14 @@ class RostoUmbra(Widget):
             print("[umbra] o desenho do rosto não ligou: %s" % e)
             ok = False
         if not ok:
-            print("[umbra] o desenho do rosto não compilou neste aparelho")
-            self.quebrado = True
+            if self.em_teste:
+                print("[umbra] o desenho do rosto não compilou neste aparelho")
+                self.quebrado = True      # (o Teste do Umbra quer ver a peça falhar)
+            else:
+                # a placa de vídeo recusou o desenho: ele aparece com as imagens prontas (até a
+                # 1.0.94 ficava invisível, só a voz, até fechar o app)
+                print("[umbra] o desenho do rosto não compilou neste aparelho: usando as imagens prontas")
+                self.simples = True
             return False
         with rc:
             Color(1, 1, 1, 1)
@@ -463,9 +511,7 @@ class RostoUmbra(Widget):
         self.quebrado = False
 
     def _ligar(self):
-        if self.simples:
-            self._ret_img.texture = self._textura("parado")
-        else:
+        if not self.simples:
             # etapa arriscada: se o app cair aqui (placa de vídeo), na próxima vez ele desce um degrau
             if not self.em_teste:
                 diagnostico.etapa(ETAPA_ROSTO)
@@ -483,10 +529,14 @@ class RostoUmbra(Widget):
             if not self._compilar():
                 if not self.em_teste:
                     diagnostico.etapa_ok(ETAPA_ROSTO)
-                self.presenca = 0.0
-                return
-            print("[umbra] rosto: desenho compilado", flush=True)
-            self._quadros_ok = 0 if not self.em_teste else -1
+                if not self.simples:          # (só o Teste do Umbra fica sem nada)
+                    self.presenca = 0.0
+                    return
+            else:
+                print("[umbra] rosto: desenho compilado", flush=True)
+                self._quadros_ok = 0 if not self.em_teste else -1
+        if self.simples:
+            self._ret_img.texture = self._textura("parado")
         if self._ev is None:
             self._ultimo = None
             self._quadro(0)                   # os números já certos antes do primeiro quadro na tela
@@ -544,7 +594,7 @@ class RostoUmbra(Widget):
         f = _lim((self.presenca - OLHOS_DE) / (1.0 - OLHOS_DE), 0.0, 1.0)
         f = f * f * (3 - 2 * f)
         lampejo = 0.9 * math.sin(math.pi * f) if self._entrando and self.presenca < 0.999 else 0.0
-        for k in ("boca", "olho", "inclina", "feliz", "torto", "alerta", "escuta", "rolar", "enfase", "lingua"):
+        for k in ("boca", "olho", "inclina", "feliz", "torto", "alerta", "escuta", "rolar", "enfase", "dentes"):
             rc["u_" + k] = float(u[k])
         rc["u_brilho"] = float(u["brilho"] * (0.04 + 0.96 * f) + lampejo)
         rc["u_palpebra"] = float(max(u["palpebra"], 1.0 - f))   # sobe de olhos fechados; abrem no alto

@@ -130,7 +130,8 @@ def sumiu(dt):
 
 def por_nome(dt):
     foto("u4_depois_do_nome")
-    checar("umbra_valeu" in DITAS, "chamado pelo nome, respondeu o 'valeu': %s" % DITAS[-4:])
+    # (qualquer variação gravada do "valeu": umbra_valeu, umbra_valeu_2...)
+    checar(any(d.startswith("umbra_valeu") for d in DITAS), "chamado pelo nome, respondeu o 'valeu': %s" % DITAS[-4:])
 
 
 def medio(dt):
